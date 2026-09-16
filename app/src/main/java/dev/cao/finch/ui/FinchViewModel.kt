@@ -7,7 +7,6 @@ import dev.cao.finch.FinchApp
 import dev.cao.finch.data.Game
 import dev.cao.finch.data.Platform
 import dev.cao.finch.data.SessionWithGame
-import dev.cao.finch.data.SettingsStore
 import dev.cao.finch.data.SyncEngine
 import dev.cao.finch.timer.TimerServiceBridge
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -22,7 +21,7 @@ class FinchViewModel(app: Application) : AndroidViewModel(app) {
     private val gameDao = db.gameDao()
     private val sessionDao = db.sessionDao()
     private val snapshotDao = db.snapshotDao()
-    private val settings = SettingsStore(app)
+    private val settings = (app as FinchApp).settings
 
     val games: StateFlow<List<Game>> = gameDao.observeAllByRecentPlay()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())

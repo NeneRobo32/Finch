@@ -8,7 +8,7 @@ import java.net.URLEncoder
 /**
  * TheGamesDB (thegamesdb.net)：主机游戏（Switch/PS）资料+封面强，免费 Key 注册即得。
  * 平台 ID → 名称 用官方 /v1/Platforms 动态拉取并缓存（SharedPreferences，30天）。
- * 走共用 okhttp+DoH 客户端。
+ * 走共用 okhttp 直连客户端（BangumiClient.client）。
  */
 object TheGamesDbClient {
 
@@ -18,7 +18,7 @@ object TheGamesDbClient {
     private val client by lazy { BangumiClient.client }
 
     private fun get(url: String): String {
-        val req = Request.Builder().url(url).header("User-Agent", "finch/0.5").build()
+        val req = Request.Builder().url(url).header("User-Agent", "finch-app/0.10.8").build()
         client.newCall(req).execute().use { resp ->
             if (!resp.isSuccessful) throw IOException("TGDB HTTP ${resp.code}")
             return resp.body?.string() ?: throw IOException("空响应")

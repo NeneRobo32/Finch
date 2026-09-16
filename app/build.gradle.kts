@@ -18,7 +18,8 @@ android {
 
     buildTypes {
         getByName("release") {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }
@@ -50,6 +51,8 @@ dependencies {
     ksp("androidx.room:room-compiler:2.8.4")
     implementation("io.coil-kt.coil3:coil-compose:3.2.0")
     implementation("io.coil-kt.coil3:coil-network-okhttp:3.2.0")
+    // okhttp 被所有数据客户端直接使用，显式声明，不依赖 Coil 传递引入
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
     // Liquid Glass（backdrop 2.0.0：新版液态玻璃，API 与 1.0.6 二进制兼容；2.0.1 需 Kotlin 2.4.10 无 KSP 配套不可用）
     implementation("io.github.kyant0:backdrop:2.0.0")
     implementation("io.github.kyant0:shapes:1.2.0")

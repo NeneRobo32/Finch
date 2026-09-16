@@ -26,7 +26,7 @@ class MainActivity : ComponentActivity() {
                 android.graphics.Color.TRANSPARENT,
             ),
         )
-        val store = SettingsStore(this)
+        val store = (application as FinchApp).settings
         setContent {
             AppRoot(store)
         }

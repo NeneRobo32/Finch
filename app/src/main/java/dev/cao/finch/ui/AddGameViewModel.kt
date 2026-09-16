@@ -64,7 +64,7 @@ class AddGameViewModel(app: Application) : AndroidViewModel(app) {
                 runCatching {
                     GameSearchClient.searchOnline(
                         query,
-                        tgdbKey = dev.cao.finch.data.SettingsStore(getApplication()).tgdbApiKey.ifBlank { null },
+                        tgdbKey = (getApplication() as FinchApp).settings.tgdbApiKey.ifBlank { null },
                         tgdbCache = getApplication<Application>().getSharedPreferences("finch_tgdb", android.content.Context.MODE_PRIVATE),
                     )
                 }.getOrDefault(GameSearchClient.OnlineResult(emptyList(), listOf("搜索异常")))

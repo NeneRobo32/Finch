@@ -7,7 +7,7 @@ import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
-/** Steam 商店接口（okhttp + DoH 解析）：搜索 + 即将推出列表 */
+/** Steam 商店接口（okhttp 直连）：搜索 + 即将推出列表 */
 object SteamStoreClient {
 
     data class Result(val appid: Long, val name: String, val coverUrl: String?)
@@ -20,7 +20,7 @@ object SteamStoreClient {
         val releaseDate: LocalDate?,
     )
 
-    private val client by lazy { BangumiClient.client } // 复用同一条带 DoH 的客户端
+    private val client by lazy { BangumiClient.client } // 复用共享直连客户端
 
     private fun get(url: String, vararg fallbackUrls: String): String {
         val urls = listOf(url) + fallbackUrls

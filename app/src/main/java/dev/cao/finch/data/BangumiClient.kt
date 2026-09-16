@@ -8,7 +8,7 @@ import org.json.JSONObject
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 
-/** Bangumi (bgm.tv) 客户端 —— okhttp + DoH 解析（绕过运营商 DNS 污染） */
+/** Bangumi (bgm.tv) 客户端 —— okhttp 直连；client 同时供 Eshop / Gamersky / SteamStore / TGDB 复用 */
 object BangumiClient {
 
     data class Result(val name: String, val nameCn: String?, val coverUrl: String?, val platforms: List<String>)
@@ -22,7 +22,7 @@ object BangumiClient {
         val bangumiId: Long,
     )
 
-    private const val UA = "finch-app/0.5 (Android; game time tracker)"
+    private const val UA = "finch-app/0.10.8 (Android; game time tracker)"
 
     /** 直连（不用 DoH——手机上 DoH 的 IP 反而连不通） */
     internal val client: OkHttpClient by lazy {
@@ -34,7 +34,7 @@ object BangumiClient {
 
     private fun get(url: String, method: String = "GET", body: String? = null): String {
         var lastErr: Exception? = null
-        repeat(1) { attempt ->
+        repeat(2) { attempt ->
             try {
                 val b = okhttp3.Request.Builder().url(url).header("User-Agent", UA)
                 if (body != null) {
@@ -46,7 +46,7 @@ object BangumiClient {
                 }
             } catch (e: Exception) {
                 lastErr = e
-                if (attempt < 0) Thread.sleep(800L * (attempt + 1))
+                if (attempt < 1) Thread.sleep(800L * (attempt + 1))
             }
         }
         throw lastErr ?: IOException("未知网络错误")

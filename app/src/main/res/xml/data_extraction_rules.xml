@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 12+ 备份/迁移规则（android:dataExtractionRules） -->
+<data-extraction-rules>
+    <cloud-backup>
+        <!-- Steam API Key / Switch session token / TGDB key 等敏感凭据，禁止进云备份 -->
+        <exclude domain="sharedpref" path="finch_settings.xml" />
+    </cloud-backup>
+    <device-transfer>
+        <!-- 换机迁移同样不带密钥 -->
+        <exclude domain="sharedpref" path="finch_settings.xml" />
+    </device-transfer>
+</data-extraction-rules>

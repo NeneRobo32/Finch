@@ -26,7 +26,7 @@ class ImportViewModel(app: Application) : AndroidViewModel(app) {
     private val gameDao = db.gameDao()
     private val sessionDao = db.sessionDao()
     private val snapshotDao = db.snapshotDao()
-    private val settings = SettingsStore(app)
+    private val settings = (app as FinchApp).settings
 
     // ---- Steam 配置 ----
     val steamKey = MutableStateFlow(settings.steamApiKey)
