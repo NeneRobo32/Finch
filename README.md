@@ -62,6 +62,8 @@ git config user.email "you@example.com"
 ## 路线图
 
 - PSN 数据导入（PSNAWP / psn-api；PS5 有官方时长，PS4 轮询估算）
-- 手动补录（历史会话）
-- 桌面小组件
-- Release 签名与私有分发
+- 桌面小组件（正在玩的游戏 + 今日时长）
+- 私有分发渠道（GitHub Releases 或自建静态页 + 应用内版本检查）
+- 国际化（UI 字符串资源化，仅当准备公开分发时）
+
+已实现：Steam 导入、Switch 导入、手动补录（导入页「手动补录」卡片）、Release 签名（v0.10.9）、备份与恢复（v0.10.9）。明确不做：启动自动同步。
