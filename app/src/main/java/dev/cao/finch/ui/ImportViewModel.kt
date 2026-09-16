@@ -2,8 +2,10 @@ package dev.cao.finch.ui
 
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
+import android.net.Uri
 import androidx.lifecycle.viewModelScope
 import dev.cao.finch.FinchApp
+import dev.cao.finch.data.BackupManager
 import dev.cao.finch.data.Game
 import dev.cao.finch.data.PlaySession
 import dev.cao.finch.data.PlaytimeSnapshot
@@ -23,9 +25,7 @@ import java.time.format.DateTimeFormatter
 
 class ImportViewModel(app: Application) : AndroidViewModel(app) {
     private val db = (app as FinchApp).database
-    private val gameDao = db.gameDao()
     private val sessionDao = db.sessionDao()
-    private val snapshotDao = db.snapshotDao()
     private val settings = (app as FinchApp).settings
 
     // ---- Steam 配置 ----
@@ -86,7 +86,7 @@ class ImportViewModel(app: Application) : AndroidViewModel(app) {
         _steamState.value = SyncState.Running
         viewModelScope.launch {
             try {
-                val r = dev.cao.finch.data.SyncEngine.runSteam(gameDao, sessionDao, snapshotDao, key, sid, base)
+                val r = dev.cao.finch.data.SyncEngine.runSteam(db, key, sid, base)
                 _steamState.value = SyncState.Done(
                     "同步完成：新增 ${r.created} 款，匹配更新 ${r.matched} 款，跳过 ${r.skipped} 款，写入 ${r.sessionsAdded} 条游玩记录"
                 )
@@ -166,7 +166,7 @@ class ImportViewModel(app: Application) : AndroidViewModel(app) {
         _switchState.value = SyncState.Running
         viewModelScope.launch {
             try {
-                val r = dev.cao.finch.data.SyncEngine.runSwitch(gameDao, sessionDao, token, settings.switchNaId)
+                val r = dev.cao.finch.data.SyncEngine.runSwitch(db, token, settings.switchNaId)
                 _switchState.value = SyncState.Done(
                     "同步完成：新增 ${r.created} 款、补信息 ${r.matched} 款、跳过 ${r.skipped} 款，写入 ${r.sessionsAdded} 条游玩记录"
                 )
@@ -187,6 +187,41 @@ class ImportViewModel(app: Application) : AndroidViewModel(app) {
         _steamState.value = SyncState.Idle
         _manualState.value = SyncState.Idle
         _switchState.value = SyncState.Idle
+    }
+
+    // ---- 备份与恢复 ----
+
+    private val _backupState = MutableStateFlow<SyncState>(SyncState.Idle)
+    val backupState: StateFlow<SyncState> = _backupState
+
+    /** 导出游玩记录库（zip，不含密钥）到用户选的位置 */
+    fun exportBackup(uri: Uri) {
+        _backupState.value = SyncState.Running
+        viewModelScope.launch {
+            try {
+                val bytes = withContext(Dispatchers.IO) {
+                    BackupManager.export(getApplication(), db, uri)
+                }
+                _backupState.value = SyncState.Done("已导出（${bytes / 1024} KB），可在下载目录找到")
+            } catch (e: Exception) {
+                _backupState.value = SyncState.Failed("导出失败：" + (e.message ?: e.toString()))
+            }
+        }
+    }
+
+    /** 从备份恢复：校验后整库替换并重启应用（成功路径不会返回） */
+    fun importBackup(uri: Uri) {
+        _backupState.value = SyncState.Running
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    BackupManager.restore(getApplication(), db, uri)
+                }
+                // restore 成功会重启进程，走不到这里
+            } catch (e: Exception) {
+                _backupState.value = SyncState.Failed("恢复失败：" + (e.message ?: e.toString()))
+            }
+        }
     }
 
     fun logoutSwitch() {

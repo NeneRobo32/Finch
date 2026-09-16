@@ -2,7 +2,7 @@
 
 个人游戏时长记录 App（Android）。三大平台（PC / Switch / PS）统一记账，手动计时器开玩/停止，月度与年度总结。
 
-## 功能（v0.10.8）
+## 功能（v0.10.9）
 
 - **计时页**：游戏列表（按最近游玩排序，可添加，多平台 PC / Switch / PS 标记），点「开玩」开始计时、「停止」结束；长按游戏可删除
 - **记录页**：最近 300 条会话（游戏、时间段、时长、进行中的实时走秒）
@@ -15,6 +15,7 @@
 - **超级岛适配**：Android 16 / HyperOS 3.1+ 上计时通知以 Live Update 形式上岛（`POST_PROMOTED_NOTIFICATIONS` + `setRequestPromotedOngoing`），低版本自动退化为普通常驻通知
 - 会话数据落 Room 数据库（`play_sessions`），服务被杀后重启自动恢复计时
 - 备份安全：Steam Key / Switch token 所在的 SharedPreferences 已排除出云备份与换机迁移（`res/xml/backup_rules.xml`、`data_extraction_rules.xml`）
+- **备份与恢复**：导入页底部可把游玩记录导出为 zip（不含密钥），或从备份整库恢复（自动校验 schema 版本）
 
 ## 构建
 
@@ -42,11 +43,17 @@ $env:GRADLE_USER_HOME='E:\Android\tools\gradle-home'
 产物：`app/build/outputs/apk/debug/app-debug.apk`
 安装：`adb install app-debug.apk`，或直接把 APK 拷到手机安装。
 
-Release：`.\gradlew.bat :app:assembleRelease`（已开 R8 + 资源缩减；产物为未签名 APK，签名流程待补，keystore 不要提交进仓库）。
+Release：`.\gradlew.bat :app:assembleRelease`（已开 R8 + 资源缩减）。仓库根放 `keystore.properties`（模板：storeFile / storePassword / keyAlias / keyPassword，文件已被 .gitignore 排除）即自动签名；没有则产出未签名 APK。
+
+## 测试
+
+```powershell
+.\gradlew.bat :app:testDebugUnitTest
+```
 
 ## 版本管理
 
-仓库用 git 管理。首个提交 `2b813e6` 为 v0.10.8 基线（R8/异步化改造之前）。提交身份当前是仓库本地配置（`cao / cao@localhost`），推送 GitHub 前请改成本人邮箱：
+仓库用 git 管理，发版打 tag（`v0.10.8` 对应基线 `2b813e6`）。提交身份当前是仓库本地配置（`cao / cao@localhost`），推送 GitHub 前请改成本人邮箱：
 
 ```bash
 git config user.email "you@example.com"

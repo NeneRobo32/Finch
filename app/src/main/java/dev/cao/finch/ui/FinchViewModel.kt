@@ -81,7 +81,7 @@ class FinchViewModel(app: Application) : AndroidViewModel(app) {
                 val hasSwitch = settings.switchSessionToken.isNotBlank()
                 if (hasSteam) {
                     try {
-                        val r = SyncEngine.runSteam(gameDao, sessionDao, snapshotDao, settings.steamApiKey, settings.steamId, settings.steamBaseUrl)
+                        val r = SyncEngine.runSteam(db, settings.steamApiKey, settings.steamId, settings.steamBaseUrl)
                         parts += "Steam +${r.sessionsAdded}条"
                     } catch (e: Exception) {
                         parts += "Steam ✗(${e.message?.take(60)})"
@@ -89,7 +89,7 @@ class FinchViewModel(app: Application) : AndroidViewModel(app) {
                 }
                 if (hasSwitch) {
                     try {
-                        val r = SyncEngine.runSwitch(gameDao, sessionDao, settings.switchSessionToken, settings.switchNaId)
+                        val r = SyncEngine.runSwitch(db, settings.switchSessionToken, settings.switchNaId)
                         parts += "Switch +${r.sessionsAdded}条"
                     } catch (e: Exception) {
                         parts += "Switch ✗(${e.message?.take(60)})"

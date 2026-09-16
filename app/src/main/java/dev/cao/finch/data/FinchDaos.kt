@@ -160,14 +160,6 @@ interface SessionDao {
         "GROUP BY g.id ORDER BY totalMs DESC")
     fun observeTopGamesWithCover(fromMillis: Long, toMillis: Long): Flow<List<TopGameRow>>
 
-    @Query(
-        """
-        SELECT SUM(endTime - startTime) FROM play_sessions
-        WHERE endTime IS NOT NULL AND startTime / 86400000 = :utcDay
-        """
-    )
-    fun observeTotalForUtcDay(utcDay: Long): Flow<Long?>
-
     /** Steam 同步的终身累计总分钟（只对账展示，不生成会话） */
     @Query("SELECT SUM(steamPlaytimeMin) FROM games WHERE steamPlaytimeMin IS NOT NULL")
     fun observeSteamTotalMinutes(): Flow<Long?>

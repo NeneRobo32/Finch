@@ -19,9 +19,12 @@ class Converters {
         value?.let { java.time.Instant.ofEpochMilli(it).atZone(java.time.ZoneId.systemDefault()).toLocalDateTime() }
 }
 
+/** Room schema 版本（迁移与备份校验共用） */
+const val FINCH_DB_VERSION = 6
+
 @Database(
     entities = [Game::class, PlaySession::class, PlaytimeSnapshot::class],
-    version = 6,
+    version = FINCH_DB_VERSION,
     exportSchema = false,
 )
 @TypeConverters(Converters::class)

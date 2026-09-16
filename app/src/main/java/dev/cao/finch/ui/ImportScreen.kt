@@ -1,5 +1,7 @@
 package dev.cao.finch.ui
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -21,6 +23,7 @@ import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -297,7 +300,50 @@ fun ImportScreen(
         ImportPendingCard("PlayStation", "PSN 时长：PS5 有官方数据，PS4 需轮询估算。将使用 PSNAWP 方案（npsso 登录，约两个月需重新授权）。")
         // ============ Nintendo Switch ============
         SwitchImportCard(importViewModel)
+        // ============ 备份与恢复 ============
+        BackupCard(importViewModel)
         Spacer(Modifier.height(24.dp))
+    }
+}
+
+/** 备份与恢复卡片：导出游玩记录 zip（不含密钥）/ 从备份整库恢复（覆盖后重启应用） */
+@Composable
+private fun BackupCard(importViewModel: ImportViewModel) {
+    val backupState by importViewModel.backupState.collectAsState()
+    val exportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/zip")
+    ) { uri -> if (uri != null) importViewModel.exportBackup(uri) }
+    val importLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri -> if (uri != null) importViewModel.importBackup(uri) }
+
+    GlassCard(modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("备份与恢复", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.weight(1f))
+                Text("本机数据", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+            }
+            Text(
+                "把游玩记录导出成一个 zip 文件（不含 Steam Key 等密钥）；恢复会覆盖当前全部记录并自动重启应用。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = {
+                    val stamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmm"))
+                    exportLauncher.launch("finch-backup-$stamp.zip")
+                }) {
+                    Text(if (backupState is ImportViewModel.SyncState.Running) "处理中…" else "导出备份")
+                }
+                OutlinedButton(onClick = {
+                    importLauncher.launch(arrayOf("application/zip", "application/octet-stream"))
+                }) {
+                    Text("从备份恢复")
+                }
+            }
+            StateBanner(backupState)
+        }
     }
 }
 
