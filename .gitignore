@@ -1,0 +1,25 @@
+# Build outputs
+build/
+captures/
+
+# Gradle
+.gradle/
+
+# Kotlin session dir
+.kotlin/
+
+# IDE
+.idea/
+*.iml
+
+# Local config
+local.properties
+
+# Signing secrets（keystore 绝不入库）
+*.jks
+*.keystore
+keystore.properties
+
+# OS
+.DS_Store
+Thumbs.db

@@ -1,0 +1,109 @@
+package dev.cao.finch.timer
+
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.content.Context
+import android.content.Intent
+import android.content.pm.ServiceInfo
+import androidx.core.app.NotificationCompat
+import androidx.core.app.ServiceCompat
+import dev.cao.finch.MainActivity
+import dev.cao.finch.R
+import dev.cao.finch.TimeFormatter
+import dev.cao.finch.data.Platform
+import java.time.Duration
+
+/**
+ * 计时通知构建（单路径全版本兼容，androidx core 1.17+）：
+ *  - Android 16 (API 36)+：setRequestPromotedOngoing(true) 请求 Live Update，
+ *    HyperOS 3.1+ 将其映射为小米超级岛
+ *  - Android 13-15：普通前台常驻通知
+ *
+ * 展示：
+ *  - 小图标 = 平台图标（Steam / NS / PS），岛内和状态栏都显示平台标识，不带封面
+ *  - 系统 chronometer（setUsesChronometer + setWhen）→ 秒数自己走，省电平滑
+ *  - 不设 subText / BigText，避免折叠态、展开态重复文案（曾出现两行冗余）
+ */
+object TimerNotifications {
+
+    const val CHANNEL_ID = "finch_timer_channel"
+    const val NOTIFICATION_ID = 1001
+    const val ACTION_STOP = "dev.cao.finch.timer.STOP"
+    const val ACTION_START = "dev.cao.finch.timer.START"
+    const val EXTRA_GAME_ID = "extra_game_id"
+
+    /** 平台 → 通知小图标资源（纯白 vector，系统着色） */
+    private fun iconRes(platform: Platform): Int = when (platform) {
+        Platform.PC -> R.drawable.ic_stat_steam
+        Platform.SWITCH -> R.drawable.ic_stat_switch
+        Platform.PS -> R.drawable.ic_stat_ps
+        Platform.Multi -> R.drawable.ic_stat_finch
+    }
+
+    fun ensureChannel(context: Context) {
+        val channel = NotificationChannel(
+            CHANNEL_ID,
+            context.getString(R.string.channel_timer_name),
+            NotificationManager.IMPORTANCE_LOW,
+        ).apply { description = context.getString(R.string.channel_timer_desc) }
+        context.getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
+    }
+
+    fun startForeground(service: android.app.Service, gameName: String, platform: Platform) {
+        ensureChannel(service)
+        val notification = build(service, gameName, platform, startedAtMillis = System.currentTimeMillis())
+        ServiceCompat.startForeground(
+            service,
+            NOTIFICATION_ID,
+            notification,
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE,
+        )
+    }
+
+    /** elapsed 为当前会话已玩时长（秒）；通知走秒由 chronometer 处理，整分刷新同步状态 */
+    fun update(service: android.app.Service, gameName: String, platform: Platform, startedAtMillis: Long, elapsedSeconds: Long) {
+        val notification = build(service, gameName, platform, startedAtMillis, elapsedSeconds)
+        service.getSystemService(NotificationManager::class.java)
+            .notify(NOTIFICATION_ID, notification)
+    }
+
+    private fun build(
+        context: Context,
+        gameName: String,
+        platform: Platform,
+        startedAtMillis: Long,
+        elapsedSeconds: Long = 0L,
+    ): Notification {
+        val contentIntent = PendingIntent.getActivity(
+            context, 0,
+            Intent(context, MainActivity::class.java),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+        val stopIntent = PendingIntent.getService(
+            context, 1,
+            Intent(context, TimerService::class.java).setAction(ACTION_STOP),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+        val stopText = context.getString(R.string.action_stop)
+
+        // 本次会话已玩时长（实时文案）
+        val elapsedText = TimeFormatter.hms(java.time.Duration.ofSeconds(elapsedSeconds))
+
+        return NotificationCompat.Builder(context, CHANNEL_ID)
+            .setSmallIcon(iconRes(platform)) // 平台图标：Steam / NS / PS
+            .setContentTitle(context.getString(R.string.timer_playing, gameName))
+            .setContentText(context.getString(R.string.timer_session_running, elapsedText))
+            .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .setContentIntent(contentIntent)
+            // Live Update / 超级岛：请求提升为常驻
+            .setRequestPromotedOngoing(true)
+            // 系统 chronometer：秒数自动走，省掉每秒刷新
+            .setWhen(startedAtMillis)
+            .setUsesChronometer(true)
+            .addAction(0, stopText, stopIntent)
+            .build()
+    }
+}

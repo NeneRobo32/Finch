@@ -1,0 +1,8 @@
+<resources>
+    <string name="app_name">Finch</string>
+    <string name="channel_timer_name">游戏计时</string>
+    <string name="channel_timer_desc">进行中的游戏会话计时通知</string>
+    <string name="action_stop">停止</string>
+    <string name="timer_playing">正在玩 %1$s</string>
+    <string name="timer_session_running">已玩 %1$s</string>
+</resources>
