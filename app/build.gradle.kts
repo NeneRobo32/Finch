@@ -6,6 +6,11 @@ plugins {
     id("com.google.devtools.ksp")
 }
 
+// Room schema 历史（迁移测试与备份校验的依据）
+ksp {
+    arg("room.schemaLocation", "$projectDir/schemas")
+}
+
 // 可选签名：仓库根放 keystore.properties（已被 .gitignore 排除）即自动签名 release；
 // 没有该文件则照常产出未签名 APK（新克隆/CI 可构建）。
 val keystoreProps = Properties().apply {
@@ -21,8 +26,8 @@ android {
         applicationId = "dev.cao.finch"
         minSdk = 26
         targetSdk = 36
-        versionCode = 43
-        versionName = "0.10.9"
+        versionCode = 44
+        versionName = "0.11.0"
     }
 
     signingConfigs {
@@ -77,6 +82,8 @@ dependencies {
     // Liquid Glass（backdrop 2.0.0：新版液态玻璃，API 与 1.0.6 二进制兼容；2.0.1 需 Kotlin 2.4.10 无 KSP 配套不可用）
     implementation("io.github.kyant0:backdrop:2.0.0")
     implementation("io.github.kyant0:shapes:1.2.0")
+    // 桌面小组件
+    implementation("androidx.glance:glance-appwidget:1.1.1")
     debugImplementation("androidx.compose.ui:ui-tooling")
     testImplementation("junit:junit:4.13.2")
 }

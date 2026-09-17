@@ -79,6 +79,7 @@ class FinchViewModel(app: Application) : AndroidViewModel(app) {
                 val parts = mutableListOf<String>()
                 val hasSteam = settings.steamApiKey.isNotBlank() && settings.steamId.isNotBlank()
                 val hasSwitch = settings.switchSessionToken.isNotBlank()
+                val hasPsn = settings.psnRefreshToken.isNotBlank()
                 if (hasSteam) {
                     try {
                         val r = SyncEngine.runSteam(db, settings.steamApiKey, settings.steamId, settings.steamBaseUrl)
@@ -95,8 +96,18 @@ class FinchViewModel(app: Application) : AndroidViewModel(app) {
                         parts += "Switch ✗(${e.message?.take(60)})"
                     }
                 }
-                if (!hasSteam && !hasSwitch) {
-                    _syncMessage.emit("未配置 Steam/Switch 同步，去导入页填写")
+                if (hasPsn) {
+                    try {
+                        val r = SyncEngine.runPSN(db, settings.psnRefreshToken)
+                        settings.psnRefreshToken = r.refreshTokenOut
+                        settings.psnRefreshExpiresAtMillis = r.refreshExpiresAtMillis
+                        parts += "PSN +${r.sessionsAdded}条"
+                    } catch (e: Exception) {
+                        parts += "PSN ✗(${e.message?.take(60)})"
+                    }
+                }
+                if (!hasSteam && !hasSwitch && !hasPsn) {
+                    _syncMessage.emit("未配置 Steam/Switch/PSN 同步，去导入页填写")
                 } else {
                     _syncMessage.emit(parts.joinToString("  "))
                 }

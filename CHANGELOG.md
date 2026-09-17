@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.11.0 (2026-09-16)
+
+功能版：
+
+- **新增**：PSN 导入——npsso 授权（约两个月有效，过期前卡片提示）→ gamelist 官方总时长（PS4/PS5）→ 快照差分写会话，与 Steam 同机制；协议按 PSNAWP（authz/v3 OAuth + gamelist/v2）逐项对齐；DB 6→7（games 加 psnTitleId/psnPlaytimeMin/psnSyncedAt）
+- **新增**：桌面小组件（Glance）——正在玩的游戏 + 已玩时长 / 今日总时长，点击进主界面；计时开/停、整分走分、App 启动时推送刷新
+- **新增**：Room schema 导出（`app/schemas/`，迁移测试与备份校验依据）
+- **变更**：下拉刷新同时覆盖 Steam / Switch / PSN
+- **测试**：新增 PsnClient 解析单测（playDuration / ISO 时间戳），共 20 个单测
+
 ## 0.10.9 (2026-09-16)
 
 维护版（首个 git 纳管后的功能+维护混合版）：

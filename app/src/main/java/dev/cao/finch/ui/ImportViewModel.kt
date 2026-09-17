@@ -183,10 +183,76 @@ class ImportViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    // ---- PSN 配置 ----
+    val psnLoggedIn = MutableStateFlow(settings.psnRefreshToken.isNotBlank())
+    private val _psnState = MutableStateFlow<SyncState>(SyncState.Idle)
+    val psnState: StateFlow<SyncState> = _psnState
+
+    /** npsso 授权是否快过期（7 天内），用于卡片提示 */
+    val psnExpiringSoon = MutableStateFlow(
+        settings.psnRefreshExpiresAtMillis in 1..(System.currentTimeMillis() + 7L * 24 * 3600 * 1000)
+    )
+
+    /** npsso（64 位）→ refresh_token 存本地 */
+    fun psnLogin(npsso: String) {
+        if (npsso.isBlank()) {
+            _psnState.value = SyncState.Failed("先填 npsso")
+            return
+        }
+        _psnState.value = SyncState.Running
+        viewModelScope.launch {
+            try {
+                val t = withContext(Dispatchers.IO) {
+                    dev.cao.finch.data.PsnClient.exchangeNpsso(npsso)
+                }
+                settings.psnRefreshToken = t.refreshToken
+                settings.psnRefreshExpiresAtMillis = t.refreshExpiresAtMillis
+                psnLoggedIn.value = true
+                psnExpiringSoon.value = false
+                _psnState.value = SyncState.Done("PSN 已授权，点同步拉取时长")
+            } catch (e: Exception) {
+                _psnState.value = SyncState.Failed("授权失败：" + (e.message ?: e.toString()))
+            }
+        }
+    }
+
+    /** 用已存 refresh_token 拉库内官方时长，快照差分写会话（token 轮换后写回） */
+    fun syncPSN() {
+        val token = settings.psnRefreshToken
+        if (token.isBlank()) {
+            _psnState.value = SyncState.Failed("尚未授权 PSN，先填 npsso 登录")
+            return
+        }
+        _psnState.value = SyncState.Running
+        viewModelScope.launch {
+            try {
+                val r = dev.cao.finch.data.SyncEngine.runPSN(db, token)
+                settings.psnRefreshToken = r.refreshTokenOut
+                settings.psnRefreshExpiresAtMillis = r.refreshExpiresAtMillis
+                psnExpiringSoon.value =
+                    r.refreshExpiresAtMillis in 1..(System.currentTimeMillis() + 7L * 24 * 3600 * 1000)
+                _psnState.value = SyncState.Done(
+                    "同步完成：新增 ${r.created} 款，匹配更新 ${r.matched} 款，跳过 ${r.skipped} 款，写入 ${r.sessionsAdded} 条游玩记录"
+                )
+            } catch (e: Exception) {
+                _psnState.value = SyncState.Failed(
+                    when (e) {
+                        is java.net.UnknownHostException -> "域名解析失败：PSN 接口网络不通（可能需科学上网）"
+                        is java.net.ConnectException -> "连接失败：PSN 接口网络不通（可能需科学上网）"
+                        is java.net.SocketTimeoutException -> "连接超时：PSN 接口响应慢，重试一次"
+                        is javax.net.ssl.SSLException -> "SSL 中断：网络不稳，重试"
+                        else -> e.message ?: e.toString()
+                    }
+                )
+            }
+        }
+    }
+
     fun clearStates() {
         _steamState.value = SyncState.Idle
         _manualState.value = SyncState.Idle
         _switchState.value = SyncState.Idle
+        _psnState.value = SyncState.Idle
     }
 
     // ---- 备份与恢复 ----

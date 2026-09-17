@@ -20,12 +20,12 @@ class Converters {
 }
 
 /** Room schema 版本（迁移与备份校验共用） */
-const val FINCH_DB_VERSION = 6
+const val FINCH_DB_VERSION = 7
 
 @Database(
     entities = [Game::class, PlaySession::class, PlaytimeSnapshot::class],
     version = FINCH_DB_VERSION,
-    exportSchema = false,
+    exportSchema = true,
 )
 @TypeConverters(Converters::class)
 abstract class FinchDatabase : RoomDatabase() {
@@ -79,9 +79,17 @@ abstract class FinchDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE games ADD COLUMN psnTitleId TEXT")
+                db.execSQL("ALTER TABLE games ADD COLUMN psnPlaytimeMin INTEGER")
+                db.execSQL("ALTER TABLE games ADD COLUMN psnSyncedAt INTEGER")
+            }
+        }
+
         fun build(context: Context): FinchDatabase =
             Room.databaseBuilder(context, FinchDatabase::class.java, "finch.db")
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
                 .build()
     }
 }

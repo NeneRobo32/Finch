@@ -27,6 +27,7 @@ class MainActivity : ComponentActivity() {
             ),
         )
         val store = (application as FinchApp).settings
+        dev.cao.finch.widget.FinchWidgetSync.update(this)
         setContent {
             AppRoot(store)
         }

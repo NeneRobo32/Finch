@@ -297,12 +297,66 @@ fun ImportScreen(
         }
 
         // ============ PS / Switch 卡片 ============
-        ImportPendingCard("PlayStation", "PSN 时长：PS5 有官方数据，PS4 需轮询估算。将使用 PSNAWP 方案（npsso 登录，约两个月需重新授权）。")
+        PsnImportCard(importViewModel)
         // ============ Nintendo Switch ============
         SwitchImportCard(importViewModel)
         // ============ 备份与恢复 ============
         BackupCard(importViewModel)
         Spacer(Modifier.height(24.dp))
+    }
+}
+
+/** PSN 导入卡片（gamelist 官方总时长：npsso 授权 → 快照差分写会话，与 Steam 同机制） */
+@Composable
+private fun PsnImportCard(importViewModel: ImportViewModel) {
+    val psnState by importViewModel.psnState.collectAsState()
+    val loggedIn by importViewModel.psnLoggedIn.collectAsState()
+    val expiringSoon by importViewModel.psnExpiringSoon.collectAsState()
+    var npssoField by remember { mutableStateOf("") }
+
+    GlassCard(modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("PlayStation", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.weight(1f))
+                Text(
+                    if (loggedIn) "已授权" else "已支持",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+            Text(
+                "拉取 PS4 / PS5 库内官方总时长，按快照差分写入记录（与 Steam 同机制，历史时长不会误算成增量）。" +
+                    "获取 npsso：电脑浏览器登录 playstation.com → F12 → Application → Cookies → 复制 npsso（约两个月有效）。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (!loggedIn) {
+                OutlinedTextField(
+                    value = npssoField,
+                    onValueChange = { npssoField = it },
+                    label = { Text("npsso（64 位）") },
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Button(onClick = { importViewModel.psnLogin(npssoField) }) {
+                    Text(if (psnState is ImportViewModel.SyncState.Running) "授权中…" else "授权 PSN")
+                }
+            } else {
+                if (expiringSoon) {
+                    Text(
+                        "npsso 授权快过期了，过期后同步会失败，需重新授权",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+                Button(onClick = { importViewModel.syncPSN() }) {
+                    Text(if (psnState is ImportViewModel.SyncState.Running) "同步中…" else "同步 PSN 时长")
+                }
+            }
+            StateBanner(psnState)
+        }
     }
 }
 
@@ -402,20 +456,6 @@ private fun SwitchImportCard(importViewModel: ImportViewModel) {
                 showLogin = false
             },
         )
-    }
-}
-
-@Composable
-private fun ImportPendingCard(title: String, desc: String) {
-    GlassCard(modifier = Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                Spacer(Modifier.weight(1f))
-                Text("待接入", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            Text(desc, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
     }
 }
 

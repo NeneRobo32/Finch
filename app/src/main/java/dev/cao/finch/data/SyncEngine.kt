@@ -29,6 +29,16 @@ object SyncEngine {
         val sessionsAdded: Int,
     )
 
+    data class PsnResult(
+        val created: Int,
+        val matched: Int,
+        val skipped: Int,
+        val sessionsAdded: Int,
+        /** 本次使用的 refresh_token（可能被 PSN 轮换），调用方须写回存储 */
+        val refreshTokenOut: String,
+        val refreshExpiresAtMillis: Long,
+    )
+
     /** 拉 Steam 库并按快照差分写入会话。 */
     suspend fun runSteam(
         db: FinchDatabase,
@@ -234,19 +244,136 @@ object SyncEngine {
         }
         return SwitchResult(created, matched, skipped, sessions)
     }
+
+    /** 拉 PSN 库内官方时长并按快照差分写会话。refresh_token 每次经本函数刷新，轮换结果在返回值里。 */
+    suspend fun runPSN(db: FinchDatabase, refreshToken: String): PsnResult {
+        val tokens = withContext(Dispatchers.IO) {
+            PsnClient.refreshAccessToken(refreshToken)
+        }
+        val titles = withContext(Dispatchers.IO) {
+            PsnClient.fetchTitleStats(tokens.accessToken)
+        }
+        val gameDao = db.gameDao()
+        val sessionDao = db.sessionDao()
+        val snapshotDao = db.snapshotDao()
+        var created = 0
+        var matched = 0
+        var skipped = 0
+        var sessionAdded = 0
+        val now = LocalDateTime.now()
+        val zone = ZoneId.systemDefault()
+        db.withTransaction {
+            for (t in titles) {
+                if (t.totalMinutes <= 0) { skipped++; continue } // 0 时长（未玩/仅入库）不建条目
+                val existing = gameDao.byName(t.name)
+                if (existing != null) {
+                    if (existing.platform == Platform.PS) {
+                        gameDao.update(
+                            existing.copy(
+                                psnTitleId = t.titleId ?: existing.psnTitleId,
+                                psnPlaytimeMin = t.totalMinutes,
+                                psnSyncedAt = now,
+                                coverUrl = existing.coverUrl ?: t.imageUrl,
+                            )
+                        )
+                        matched++
+                    } else {
+                        skipped++ // 同名但平台标记不同，不覆盖
+                        continue
+                    }
+                } else {
+                    val newId = gameDao.insert(
+                        Game(
+                            name = t.name,
+                            platform = Platform.PS,
+                            coverUrl = t.imageUrl,
+                            psnTitleId = t.titleId,
+                            psnPlaytimeMin = t.totalMinutes,
+                            psnSyncedAt = now,
+                        )
+                    )
+                    created++
+                    // 新建的游戏：首次拉取不写差分（快照只是存档，避免把历史时长当成一次增量）
+                    snapshotDao.insert(
+                        PlaytimeSnapshot(
+                            source = "psn",
+                            refKey = "psn:${t.titleId ?: t.name}",
+                            refName = t.name,
+                            totalMin = t.totalMinutes,
+                            at = now,
+                        )
+                    )
+                    continue // 新建的跳过，不差分
+                }
+                // 已有 PS 游戏：与上次快照差分
+                val refKey = "psn:${t.titleId ?: t.name}"
+                val prev = snapshotDao.byKey("psn", refKey)
+                if (prev == null) {
+                    // 首次见到快照，存档但不回溯
+                    snapshotDao.insert(
+                        PlaytimeSnapshot(
+                            source = "psn",
+                            refKey = refKey,
+                            refName = t.name,
+                            totalMin = t.totalMinutes,
+                            at = now,
+                        )
+                    )
+                    continue
+                }
+                val deltaMin = t.totalMinutes - prev.totalMin
+                snapshotDao.insert(
+                    PlaytimeSnapshot(
+                        source = "psn",
+                        refKey = refKey,
+                        refName = t.name,
+                        totalMin = t.totalMinutes,
+                        at = now,
+                    )
+                )
+                if (deltaMin <= 0) continue
+                val gameRow = gameDao.byId(existing.id) ?: continue
+                // PSN 有真实 lastPlayedDateTime，比 Steam 更容易落到真实起点
+                val lastPlayedEpochSec = t.lastPlayedEpochMillis?.let { it / 1000 }
+                for (s in allocateSteamSessions(deltaMin, prev.at, now, zone, lastPlayedEpochSec)) {
+                    val dup = sessionDao.countBetween(
+                        gameRow.id,
+                        s.start.atZone(zone).toInstant().toEpochMilli(),
+                        s.end.atZone(zone).toInstant().toEpochMilli() + 1,
+                    )
+                    if (dup == 0L) {
+                        sessionDao.insert(
+                            PlaySession(
+                                gameId = gameRow.id,
+                                startTime = s.start,
+                                endTime = s.end,
+                                source = SessionSource.PS,
+                            )
+                        )
+                        sessionAdded++
+                    }
+                }
+            }
+        }
+        return PsnResult(
+            created, matched, skipped, sessionAdded,
+            refreshTokenOut = tokens.refreshToken.ifBlank { refreshToken },
+            refreshExpiresAtMillis = tokens.refreshExpiresAtMillis,
+        )
+    }
 }
 
-/** Steam 差分摊出的单条占位会话 */
+/** Steam/PSN 差分摊出的单条占位会话 */
 data class AllocatedSession(val start: LocalDateTime, val end: LocalDateTime)
 
 /**
- * Steam 增量时长的逐日摊分（纯函数，可单测）。
+ * Steam/PSN 增量时长的逐日摊分（纯函数，可单测）。
  *
- * Steam 只有总时长没有逐次记录，这里把 [prevAt, now] 区间内的增量按天均摊，
+ * Steam 与 PSN 都只有总时长没有逐次记录，这里把 [prevAt, now] 区间内的增量按天均摊，
  * 每天固定占位起点 20:00（贴近真实游玩时段）：
  *  - 若当前时刻还没到 20:00，「今天」这一份的 20:00 落在未来 → 今天不参与分配，摊到昨天及之前
  *  - 最后一天吃掉整除余数，保证总量精确等于 delta
- *  - 若 Steam 返回了真实「上次游玩时间」且落在分摊日当天，用它的时刻作起点（比 20:00 真实）
+ *  - 若数据源返回了真实「上次游玩时间」且落在分摊日当天，用它的时刻作起点（比 20:00 真实）
  *  - 防御：任何产生未来结束时刻的会话直接丢弃
  */
 fun allocateSteamSessions(

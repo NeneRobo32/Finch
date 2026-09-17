@@ -8,6 +8,7 @@ import androidx.core.app.NotificationManagerCompat
 import dev.cao.finch.FinchApp
 import dev.cao.finch.data.Platform
 import dev.cao.finch.data.PlaySession
+import dev.cao.finch.widget.FinchWidgetSync
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -86,6 +87,7 @@ class TimerService : Service() {
         TimerServiceBridge.startedAtMillis = startedAtMillis
         goForeground()
         startTicker()
+        FinchWidgetSync.update(this)
     }
 
     private suspend fun stopTimer() {
@@ -96,6 +98,7 @@ class TimerService : Service() {
         NotificationManagerCompat.from(this).cancel(TimerNotifications.NOTIFICATION_ID)
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
+        FinchWidgetSync.update(this)
     }
 
     /** 服务被系统重建（intent=null）：恢复进行中的会话，没有则退出 */
@@ -114,6 +117,7 @@ class TimerService : Service() {
         TimerServiceBridge.startedAtMillis = startedAtMillis
         goForeground()
         startTicker()
+        FinchWidgetSync.update(this)
     }
 
     private suspend fun closeSession(sessionId: Long) {
@@ -143,6 +147,7 @@ class TimerService : Service() {
                     lastMinute = minute
                     try {
                         TimerNotifications.update(this@TimerService, runningGameName, runningPlatform, startedAtMillis, elapsedSeconds)
+                        FinchWidgetSync.update(this@TimerService) // 整分推一次小组件，保证"已玩 X 分钟"不走样
                     } catch (se: SecurityException) {
                         // 用户关闭了通知权限：前台通知必须尝试展示，失败则记录
                         Log.w("TimerService", "notify denied", se)

@@ -31,6 +31,16 @@ class SettingsStore(context: Context) {
         get() = sp.getString(KEY_SWITCH_NAID, "") ?: ""
         set(value) = sp.edit().putString(KEY_SWITCH_NAID, value.trim()).apply()
 
+    /** PSN refresh token（npsso 换取，约两个月有效；每次同步可能轮换，同步后写回） */
+    var psnRefreshToken: String
+        get() = sp.getString(KEY_PSN_REFRESH, "") ?: ""
+        set(value) = sp.edit().putString(KEY_PSN_REFRESH, value).apply()
+
+    /** PSN refresh token 过期时间（epochMillis，0=未知），用于 UI 提示快过期 */
+    var psnRefreshExpiresAtMillis: Long
+        get() = sp.getLong(KEY_PSN_REFRESH_EXP, 0L)
+        set(value) = sp.edit().putLong(KEY_PSN_REFRESH_EXP, value).apply()
+
     /** 上次自动同步的时间戳（epochMillis，0=从未），用于自动同步节流（每 6 小时最多一次） */
     var lastAutoSyncAt: Long
         get() = sp.getLong(KEY_LAST_AUTO_SYNC, 0L)
@@ -58,6 +68,8 @@ class SettingsStore(context: Context) {
         private const val KEY_TGDB_KEY = "tgdb_api_key"
         private const val KEY_SWITCH_TOKEN = "switch_session_token"
         private const val KEY_SWITCH_NAID = "switch_na_id"
+        private const val KEY_PSN_REFRESH = "psn_refresh_token"
+        private const val KEY_PSN_REFRESH_EXP = "psn_refresh_expires_at"
         private const val KEY_LAST_AUTO_SYNC = "last_auto_sync_at"
         private const val KEY_AUTO_SYNC_ENABLED = "auto_sync_enabled"
         private const val KEY_THEME_MODE = "theme_mode"

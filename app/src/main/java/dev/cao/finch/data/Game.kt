@@ -22,6 +22,10 @@ data class Game(
     val steamSyncedAt: LocalDateTime? = null,
     // Switch 游玩记录导入（家长监护 Moon API 的 applicationId）
     val switchAppId: String? = null,
+    // PSN 导入字段（gamelist 官方总时长，快照差分写会话）
+    val psnTitleId: String? = null,
+    val psnPlaytimeMin: Long? = null,
+    val psnSyncedAt: LocalDateTime? = null,
 ) {
     fun platformSet(): Set<Platform> =
         GameRepository.csvToPlatforms(platformsCsv).toSet().ifEmpty { setOf(platform) }
