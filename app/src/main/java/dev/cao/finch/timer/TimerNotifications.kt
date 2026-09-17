@@ -17,12 +17,11 @@ import java.time.Duration
 
 /**
  * 计时通知构建（单路径全版本兼容，androidx core 1.17+）：
- *  - Android 16 (API 36)+：setRequestPromotedOngoing(true) 请求 Live Update，
- *    HyperOS 3.1+ 将其映射为小米超级岛
+ *  - Android 16 (API 36)+：setRequestPromotedOngoing(true) 请求 Live Update
  *  - Android 13-15：普通前台常驻通知
  *
  * 展示：
- *  - 小图标 = 平台图标（Steam / NS / PS），岛内和状态栏都显示平台标识，不带封面
+ *  - 小图标 = 平台图标（Steam / NS / PS），状态栏显示平台标识，不带封面
  *  - 系统 chronometer（setUsesChronometer + setWhen）→ 秒数自己走，省电平滑
  *  - 不设 subText / BigText，避免折叠态、展开态重复文案（曾出现两行冗余）
  */
@@ -98,7 +97,7 @@ object TimerNotifications {
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setContentIntent(contentIntent)
-            // Live Update / 超级岛：请求提升为常驻
+            // Live Update：请求提升为常驻
             .setRequestPromotedOngoing(true)
             // 系统 chronometer：秒数自动走，省掉每秒刷新
             .setWhen(startedAtMillis)

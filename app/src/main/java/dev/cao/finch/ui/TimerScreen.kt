@@ -1,6 +1,11 @@
 package dev.cao.finch.ui
 
+import android.Manifest
+import android.app.Activity
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.core.app.ActivityCompat
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -184,6 +189,18 @@ fun TimerScreen(
                 running = runningGameId == game.id,
                 onBack = { selectedGameId = null },
                 onStart = {
+                    // Android 16+ 的 Live Update 需要用户授权 POST_PROMOTED_NOTIFICATIONS；
+                    // 未授权时仍走普通常驻通知，这里在开玩前请求一次（系统会记住授权结果）
+                    if (Build.VERSION.SDK_INT >= 36 &&
+                        ContextCompat.checkSelfPermission(
+                            context, Manifest.permission.POST_PROMOTED_NOTIFICATIONS
+                        ) != PackageManager.PERMISSION_GRANTED &&
+                        context is Activity
+                    ) {
+                        ActivityCompat.requestPermissions(
+                            context, arrayOf(Manifest.permission.POST_PROMOTED_NOTIFICATIONS), 2001
+                        )
+                    }
                     val intent = Intent(context, TimerService::class.java)
                         .setAction(TimerNotifications.ACTION_START)
                         .putExtra(TimerNotifications.EXTRA_GAME_ID, game.id)
@@ -537,7 +554,7 @@ private fun GamePlayScreen(
 
         Spacer(Modifier.height(8.dp))
         Text(
-            if (running) "计时中会显示在系统通知/小米超级岛上" else "点击开玩，计时会显示在系统通知/小米超级岛上",
+            if (running) "计时中会显示在系统通知上" else "点击开玩，计时会显示在系统通知上",
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
