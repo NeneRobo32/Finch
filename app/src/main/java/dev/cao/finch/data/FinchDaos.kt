@@ -163,6 +163,19 @@ interface SessionDao {
     /** Steam 同步的终身累计总分钟（只对账展示，不生成会话） */
     @Query("SELECT SUM(steamPlaytimeMin) FROM games WHERE steamPlaytimeMin IS NOT NULL")
     fun observeSteamTotalMinutes(): Flow<Long?>
+
+    /** 某游戏的会话历史（最近 50 条已完成） */
+    @Query("SELECT * FROM play_sessions WHERE gameId = :gameId AND endTime IS NOT NULL ORDER BY startTime DESC LIMIT 50")
+    fun observeSessionsForGame(gameId: Long): Flow<List<PlaySession>>
+
+    /** 某游戏的累计统计（总时长 / 会话数 / 最近游玩） */
+    @Query(
+        """
+        SELECT SUM(endTime - startTime) AS totalMs, COUNT(id) AS sessionCount, MAX(startTime) AS lastPlayedAt
+        FROM play_sessions WHERE gameId = :gameId AND endTime IS NOT NULL
+        """
+    )
+    fun observeStatsForGame(gameId: Long): Flow<GameStatsRow?>
 }
 
 @Dao

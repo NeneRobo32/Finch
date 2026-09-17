@@ -117,7 +117,7 @@ import java.time.format.DateTimeFormatter
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun TimerScreen(
+fun HomeScreen(
     viewModel: FinchViewModel,
     addViewModel: AddGameViewModel,
     backdrop: com.kyant.backdrop.Backdrop? = null,
@@ -134,7 +134,7 @@ fun TimerScreen(
         }
     }
     var showAddDialog by remember { mutableStateOf(false) }
-    var selectedGameId by remember { mutableStateOf<Long?>(null) } // 进入专门计时页
+    var selectedGameId by remember { mutableStateOf<Long?>(null) } // 进入游戏详情页
     var query by remember { mutableStateOf("") } // 搜索我的游戏
 
     // 本月数据：顶部大卡「玩得最多」
@@ -146,20 +146,19 @@ fun TimerScreen(
     val thisMonthTotal by viewModel.totalBetween(monthStartMillis, nextMonthMillis).collectAsState(0L)
     val topMonth by viewModel.topGamesWithCover(monthStartMillis, nextMonthMillis).collectAsState(initial = emptyList())
 
-    val runningGame = games.firstOrNull { it.id == runningGameId }
     val selectedGame = games.firstOrNull { it.id == selectedGameId }
 
-    // 返回手势/返回键：在计时页时先回主页，而不是直接退出 App
+    // 返回手势/返回键：在详情页时先回主页，而不是直接退出 App
     BackHandler(enabled = selectedGame != null) {
         selectedGameId = null
     }
 
-    // 专门计时页与主页之间滑动+淡入淡出过渡（spring 弹跳，M3 Expressive 风格）
+    // 详情页与主页之间滑动+淡入淡出过渡（spring 弹跳，M3 Expressive 风格）
     AnimatedContent(
         targetState = selectedGame,
         transitionSpec = {
             if (targetState != null) {
-                // 进入计时页：从右滑入，带弹性
+                // 进入详情页：从右滑入，带弹性
                 (slideInHorizontally(
                     animationSpec = spring<androidx.compose.ui.unit.IntOffset>(Spring.DampingRatioMediumBouncy, Spring.StiffnessMediumLow),
                     initialOffsetX = { it / 3 },
@@ -184,7 +183,7 @@ fun TimerScreen(
     ) { target ->
         val game = target
         if (game != null) {
-            GamePlayScreen(
+            GameDetailScreen(
                 game = game,
                 running = runningGameId == game.id,
                 onBack = { selectedGameId = null },
@@ -211,6 +210,7 @@ fun TimerScreen(
                         .setAction(TimerNotifications.ACTION_STOP)
                     ContextCompat.startForegroundService(context, intent)
                 },
+                viewModel = viewModel,
             )
         } else {
             Scaffold(
@@ -242,7 +242,7 @@ fun TimerScreen(
                 verticalArrangement = Arrangement.Center,
             ) {
                 Icon(
-                    Icons.Filled.Timer,
+                    Icons.Filled.VideogameAsset,
                     contentDescription = null,
                     modifier = Modifier.size(56.dp),
                     tint = MaterialTheme.colorScheme.primary,
@@ -372,199 +372,8 @@ fun TimerScreen(
     }
 }
 
-/** 专门计时页：大封面 + 计时 + 开始/停止 + 统计 */
 @Composable
-private fun GamePlayScreen(
-    game: Game,
-    running: Boolean,
-    onBack: () -> Unit,
-    onStart: () -> Unit,
-    onStop: () -> Unit,
-) {
-    // 本次会话已玩时长（实时走秒）
-    var elapsedText by remember { mutableStateOf("00:00:00") }
-    androidx.compose.runtime.LaunchedEffect(running) {
-        while (true) {
-            val started = dev.cao.finch.timer.TimerServiceBridge.startedAtMillis
-            if (running && started > 0) {
-                val dur = java.time.Duration.ofMillis(System.currentTimeMillis() - started)
-                elapsedText = TimeFormatter.hms(dur)
-            } else {
-                elapsedText = "00:00:00"
-            }
-            kotlinx.coroutines.delay(1000)
-        }
-    }
-
-    val context = LocalContext.current
-    val appDb = (context.applicationContext as dev.cao.finch.FinchApp).database
-
-    // 今日 / 本月累计
-    val now = LocalDateTime.now()
-    val todayStart = now.toLocalDate().atStartOfDay()
-    val tomStart = todayStart.plusDays(1)
-    val todayMillis = todayStart.atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
-    val tomMillis = tomStart.atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
-    val todayTotal by androidx.compose.runtime.produceState(initialValue = 0L, key1 = todayMillis) {
-        value = appDb.sessionDao().totalBetween(todayMillis, tomMillis) ?: 0L
-    }
-    val monthStart = now.withDayOfMonth(1).toLocalDate().atStartOfDay()
-    val nextMonthStart = monthStart.plusMonths(1)
-    val monthMillis = monthStart.atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
-    val nextMonthMillis = nextMonthStart.atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
-    val monthTotal by androidx.compose.runtime.produceState(initialValue = 0L, key1 = monthMillis) {
-        value = appDb.sessionDao().totalBetween(monthMillis, nextMonthMillis) ?: 0L
-    }
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
-            .verticalScroll(androidx.compose.foundation.rememberScrollState())
-            .padding(24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        // 顶栏返回
-        Row(
-            Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            TextButton(onClick = onBack) { Icon(Icons.Filled.ArrowBack, contentDescription = "返回") }
-            Text(
-                "计时",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Spacer(Modifier.width(48.dp)) // 占位对称
-        }
-
-        Spacer(Modifier.height(16.dp))
-
-        // 封面进场动画：轻缩放 + 淡入（M3 强调进入）
-        val coverProgress by androidx.compose.animation.core.animateFloatAsState(
-            targetValue = 1f,
-            animationSpec = spring(Spring.DampingRatioMediumBouncy, Spring.StiffnessMediumLow),
-            label = "coverIn",
-        )
-
-        // 大封面
-        if (game.coverUrl != null) {
-            AsyncImage(
-                model = game.coverUrl,
-                contentDescription = null,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .aspectRatio(16f / 9f)
-                    .clip(RoundedCornerShape(20.dp))
-                    .graphicsLayer {
-                        scaleX = coverProgress
-                        scaleY = coverProgress
-                        alpha = coverProgress
-                    },
-                contentScale = ContentScale.Crop,
-            )
-        } else {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .aspectRatio(16f / 9f)
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(platformIcon(game.platform), contentDescription = null, modifier = Modifier.size(72.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-        }
-
-        Spacer(Modifier.height(20.dp))
-
-        // 游戏名 + 平台
-        Text(
-            game.name,
-            style = MaterialTheme.typography.headlineSmall,
-            fontWeight = FontWeight.Bold,
-            textAlign = TextAlign.Center,
-        )
-        Spacer(Modifier.height(4.dp))
-        Text(
-            GameRepository.labelFor(game.platformSet()),
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-
-        Spacer(Modifier.height(32.dp))
-
-        // 本次会话大计时（秒数变化时轻微缩放脉冲，让「活着」的观感）
-        androidx.compose.animation.AnimatedContent(
-            targetState = elapsedText,
-            transitionSpec = {
-                (androidx.compose.animation.fadeIn(animationSpec = spring<Float>()) +
-                    scaleIn(
-                        animationSpec = spring<Float>(Spring.DampingRatioMediumBouncy, Spring.StiffnessMedium),
-                        initialScale = 0.92f,
-                    )) togetherWith
-                    androidx.compose.animation.fadeOut(animationSpec = spring<Float>())
-            },
-            label = "elapsedPulse",
-        ) { text ->
-            Text(
-                text,
-                style = MaterialTheme.typography.displayLarge,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.primary,
-            )
-        }
-        Text(
-            if (running) "本次游玩" else "未开始",
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-
-        Spacer(Modifier.height(32.dp))
-
-        // 今日/本月统计卡
-        Row(
-            Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            StatBox("今日", TimeFormatter.hoursMinutes(java.time.Duration.ofMillis(todayTotal)), Modifier.weight(1f))
-            StatBox("本月", TimeFormatter.hoursMinutes(java.time.Duration.ofMillis(monthTotal)), Modifier.weight(1f))
-        }
-
-        Spacer(Modifier.height(40.dp))
-
-        // 大按钮
-        Button(
-            onClick = { if (running) onStop() else onStart() },
-            shape = RoundedCornerShape(50),
-            colors = androidx.compose.material3.ButtonDefaults.buttonColors(
-                containerColor = if (running) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
-            ),
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(56.dp),
-        ) {
-            Icon(
-                if (running) Icons.Filled.Stop else Icons.Filled.PlayArrow,
-                contentDescription = null,
-            )
-            Spacer(Modifier.width(8.dp))
-            Text(if (running) "停止计时" else "开玩", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-        }
-
-        Spacer(Modifier.height(8.dp))
-        Text(
-            if (running) "计时中会显示在系统通知上" else "点击开玩，计时会显示在系统通知上",
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.Center,
-        )
-        Spacer(Modifier.height(16.dp))
-    }
-}
-
-@Composable
-private fun StatBox(label: String, value: String, modifier: Modifier = Modifier) {
+internal fun StatBox(label: String, value: String, modifier: Modifier = Modifier) {
     GlassCard(modifier = modifier, shape = RoundedCornerShape(18.dp)) {
         Column(
             modifier = Modifier
@@ -657,79 +466,8 @@ private fun MonthHeroCard(allGames: List<Game>, runningGameId: Long, top: TopGam
     }
 }
 
-/** 运行中横幅：悬浮底部，闪烁提示、秒数跳动的停止按钮 */
-@Composable
-private fun RunningBanner(game: Game, onStop: () -> Unit) {
-    var elapsedText by remember { mutableStateOf("00:00") }
-    val transition = androidx.compose.animation.core.rememberInfiniteTransition(label = "banner")
-    // spring 呼吸：比生硬 tween 均匀往返更柔和、有生命感
-    val alpha by transition.animateFloat(
-        initialValue = 1f,
-        targetValue = 0.5f,
-        animationSpec = infiniteRepeatable(
-            androidx.compose.animation.core.tween(
-                durationMillis = 900,
-                easing = androidx.compose.animation.core.FastOutSlowInEasing,
-            ),
-            RepeatMode.Reverse,
-        ),
-        label = "bannerAlpha",
-    )
-    Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(16.dp),
-        shape = RoundedCornerShape(16.dp),
-        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.95f),
-        shadowElevation = 4.dp,
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(Modifier.weight(1f)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(
-                        Modifier
-                            .size(8.dp)
-                            .clip(RoundedCornerShape(4.dp))
-                            .background(MaterialTheme.colorScheme.primary.copy(alpha = alpha)),
-                    )
-                    Spacer(Modifier.width(6.dp))
-                    Text(
-                        "正在玩 · ${game.name}",
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                }
-                Text(
-                    elapsedText,
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer,
-                )
-            }
-            Button(onClick = onStop, colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)) {
-                Icon(Icons.Filled.Stop, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(6.dp))
-                Text("停止")
-            }
-        }
-    }
-    androidx.compose.runtime.LaunchedEffect(game.id) {
-        while (true) {
-            // 从 TimerServiceBridge 读开始时间
-            val started = dev.cao.finch.timer.TimerServiceBridge.startedAtMillis
-            if (started > 0) {
-                val dur = java.time.Duration.ofMillis(System.currentTimeMillis() - started)
-                elapsedText = TimeFormatter.hms(dur)
-            }
-            kotlinx.coroutines.delay(1000)
-        }
-    }
-}
-
 /** 游戏卡片（封面在下）：
- *  点卡片 → 进专门计时页（onClick）；不直接开关计时，避免主页杂乱 */
+ *  点卡片 → 进游戏详情页（onClick）；不直接开关计时，避免主页杂乱 */
 @Composable
 private fun GameGridCard(
     game: Game,
@@ -806,6 +544,29 @@ private fun GameGridCard(
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                    if (game.completed || (game.rating != null && game.rating > 0)) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            if (game.completed) {
+                                Text(
+                                    "已通关",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.primary,
+                                )
+                            }
+                            if (game.rating != null && game.rating > 0) {
+                                Text(
+                                    "★ ${game.rating}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = Color(0xFFF5B301),
+                                )
+                            }
+                        }
+                    }
                     lastPlayedAt?.let { played ->
                         Text(
                             "上次玩 · ${relativeTime(played)}",
@@ -824,7 +585,7 @@ private fun GameGridCard(
                 }
                 androidx.compose.material3.Icon(
                     Icons.Filled.PlayArrow,
-                    contentDescription = "进入计时",
+                    contentDescription = "查看详情",
                     tint = MaterialTheme.colorScheme.primary,
                 )
             }
@@ -844,7 +605,7 @@ private fun GameGridCard(
 }
 
 @Composable
-private fun platformIcon(platform: Platform): ImageVector = when (platform) {
+internal fun platformIcon(platform: Platform): ImageVector = when (platform) {
     Platform.PC -> Icons.Filled.Computer
     Platform.SWITCH -> Icons.Filled.VideogameAsset
     Platform.PS -> Icons.Filled.SportsEsports
@@ -852,7 +613,7 @@ private fun platformIcon(platform: Platform): ImageVector = when (platform) {
 }
 
 /** 相对时间人性化：刚刚 / X 分钟前 / X 小时前 / 昨天 / X 天前 / 日期 */
-private fun relativeTime(epochMillis: Long): String {
+internal fun relativeTime(epochMillis: Long): String {
     val now = System.currentTimeMillis()
     val diff = now - epochMillis
     return when {

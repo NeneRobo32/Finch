@@ -19,7 +19,7 @@ import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.Event
 import androidx.compose.material.icons.filled.History
-import androidx.compose.material.icons.filled.Timer
+import androidx.compose.material.icons.filled.Home
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -43,7 +43,7 @@ import dev.cao.finch.ui.theme.ThemeState
 import dev.cao.finch.ui.theme.glassPalette
 
 enum class Tab(val label: String) {
-    Timer("计时"),
+    Home("主页"),
     Upcoming("日程"),
     History("记录"),
     Stats("总结"),
@@ -57,7 +57,7 @@ fun FinchAppScaffold(
     themeState: ThemeState? = null,
     finchThemeState: FinchThemeState? = null,
 ) {
-    var tab by remember { mutableStateOf(Tab.Timer) }
+    var tab by remember { mutableStateOf(Tab.Home) }
     // 采样静态背景的 Backdrop（官方语义：玻璃只折射不动层，避免滚动/动画内容让玻璃闪烁）
     val backgroundBackdrop = rememberLayerBackdrop()
 
@@ -92,7 +92,7 @@ fun FinchAppScaffold(
             ) { t ->
                 Box(Modifier.fillMaxSize()) {
                     when (t) {
-                        Tab.Timer -> TimerScreen(viewModel, addViewModel, backgroundBackdrop)
+                        Tab.Home -> HomeScreen(viewModel, addViewModel, backgroundBackdrop)
                         Tab.Upcoming -> UpcomingScreen(backdrop = backgroundBackdrop)
                         Tab.History -> HistoryScreen(viewModel, backgroundBackdrop)
                         Tab.Stats -> StatsScreen(viewModel)
@@ -123,7 +123,7 @@ fun FinchAppScaffold(
                     ) {
                         Icon(
                             when (t) {
-                                Tab.Timer -> Icons.Filled.Timer
+                                Tab.Home -> Icons.Filled.Home
                                 Tab.Upcoming -> Icons.Filled.Event
                                 Tab.History -> Icons.Filled.History
                                 Tab.Stats -> Icons.Filled.BarChart

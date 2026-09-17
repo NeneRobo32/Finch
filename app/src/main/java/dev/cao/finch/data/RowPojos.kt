@@ -36,3 +36,10 @@ data class LastPlayedRow(
     val gameId: Long,
     val lastPlayedAt: Long?,
 )
+
+/** 单游戏的累计统计（只聚合已完成会话） */
+data class GameStatsRow(
+    val totalMs: Long?,
+    val sessionCount: Long,
+    val lastPlayedAt: Long?,
+)

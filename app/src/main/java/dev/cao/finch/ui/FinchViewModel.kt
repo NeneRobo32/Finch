@@ -5,6 +5,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import dev.cao.finch.FinchApp
 import dev.cao.finch.data.Game
+import dev.cao.finch.data.GameStatsRow
 import dev.cao.finch.data.Platform
 import dev.cao.finch.data.SessionWithGame
 import dev.cao.finch.data.SyncEngine
@@ -15,6 +16,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import java.time.LocalDateTime
 
 class FinchViewModel(app: Application) : AndroidViewModel(app) {
     private val db = (app as FinchApp).database
@@ -56,6 +58,47 @@ class FinchViewModel(app: Application) : AndroidViewModel(app) {
 
     fun deleteSession(id: Long) {
         viewModelScope.launch { sessionDao.deleteById(id) }
+    }
+
+    // ---- 游戏详情：收藏 / 通关 / 评分 / 感想 ----
+
+    /** 单游戏累计统计（总时长 / 会话数 / 最近游玩） */
+    fun gameStats(gameId: Long) = sessionDao.observeStatsForGame(gameId)
+        .map { it ?: GameStatsRow(totalMs = 0L, sessionCount = 0L, lastPlayedAt = null) }
+
+    /** 单游戏会话历史（最近 50 条已完成） */
+    fun sessionsFor(gameId: Long) = sessionDao.observeSessionsForGame(gameId)
+
+    fun toggleFavorite(id: Long) {
+        viewModelScope.launch {
+            gameDao.byId(id)?.let { gameDao.update(it.copy(favorite = !it.favorite)) }
+        }
+    }
+
+    /** 勾选通关时自动记录通关日期；取消勾选清空 */
+    fun setCompleted(id: Long, completed: Boolean) {
+        viewModelScope.launch {
+            gameDao.byId(id)?.let {
+                gameDao.update(
+                    it.copy(
+                        completed = completed,
+                        completedAt = if (completed) (it.completedAt ?: LocalDateTime.now()) else null,
+                    )
+                )
+            }
+        }
+    }
+
+    fun setRating(id: Long, rating: Int?) {
+        viewModelScope.launch {
+            gameDao.byId(id)?.let { gameDao.update(it.copy(rating = rating)) }
+        }
+    }
+
+    fun setThoughts(id: Long, text: String) {
+        viewModelScope.launch {
+            gameDao.byId(id)?.let { gameDao.update(it.copy(thoughts = text.trim().ifEmpty { null })) }
+        }
     }
 
     // ---- 下拉刷新同步（Steam + Switch） ----

@@ -1,5 +1,6 @@
 package dev.cao.finch.data
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 import java.time.LocalDateTime
@@ -26,6 +27,15 @@ data class Game(
     val psnTitleId: String? = null,
     val psnPlaytimeMin: Long? = null,
     val psnSyncedAt: LocalDateTime? = null,
+    // 收藏（详情页心形）
+    @ColumnInfo(defaultValue = "0") val favorite: Boolean = false,
+    // 已通关 + 通关日期（勾选时自动记录）
+    @ColumnInfo(defaultValue = "0") val completed: Boolean = false,
+    val completedAt: LocalDateTime? = null,
+    // 评分 0-5 星（null = 未评分）
+    val rating: Int? = null,
+    // 感想
+    val thoughts: String? = null,
 ) {
     fun platformSet(): Set<Platform> =
         GameRepository.csvToPlatforms(platformsCsv).toSet().ifEmpty { setOf(platform) }
