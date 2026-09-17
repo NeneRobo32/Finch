@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -46,6 +47,7 @@ fun HistoryScreen(viewModel: FinchViewModel, backdrop: com.kyant.backdrop.Backdr
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .statusBarsPadding()
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
@@ -53,7 +55,7 @@ fun HistoryScreen(viewModel: FinchViewModel, backdrop: com.kyant.backdrop.Backdr
         if (sessions.isEmpty()) {
             GlassCard(modifier = Modifier.fillMaxWidth()) {
                 Text(
-                    "暂无记录，去「计时」页点「开玩」。",
+                    "暂无记录，去「主页」点「开玩」。",
                     Modifier.padding(16.dp),
                     style = MaterialTheme.typography.bodySmall,
                 )

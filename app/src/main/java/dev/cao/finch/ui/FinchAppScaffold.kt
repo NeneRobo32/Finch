@@ -13,7 +13,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.CloudDownload
@@ -70,8 +69,8 @@ fun FinchAppScaffold(
                 .layerBackdrop(backgroundBackdrop)
                 .background(MaterialTheme.colorScheme.surface),
         )
-        // ② 内容层：滚动/动画内容，在采样层之上（不被玻璃采样，无闪烁）
-        Box(Modifier.fillMaxSize().statusBarsPadding()) {
+        // ② 内容层：滚动/动画内容（状态栏沉浸：各屏自行处理 insets）
+        Box(Modifier.fillMaxSize()) {
             androidx.compose.animation.AnimatedContent(
                 targetState = tab,
                 transitionSpec = {

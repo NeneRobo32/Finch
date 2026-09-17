@@ -34,7 +34,6 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -155,7 +154,7 @@ fun HomeScreen(
 
     // 详情页与主页之间滑动+淡入淡出过渡（spring 弹跳，M3 Expressive 风格）
     AnimatedContent(
-        targetState = selectedGame,
+        targetState = selectedGameId,
         transitionSpec = {
             if (targetState != null) {
                 // 进入详情页：从右滑入，带弹性
@@ -180,8 +179,8 @@ fun HomeScreen(
             }
         },
         label = "timerPlayTransition",
-    ) { target ->
-        val game = target
+    ) { targetId ->
+        val game = targetId?.let { id -> games.firstOrNull { it.id == id } }
         if (game != null) {
             GameDetailScreen(
                 game = game,
@@ -214,7 +213,6 @@ fun HomeScreen(
             )
         } else {
             Scaffold(
-        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         snackbarHost = { androidx.compose.material3.SnackbarHost(snackbarHostState) },
         floatingActionButton = {
             // 抬高到悬浮底栏上方，避免被胶囊遮挡
