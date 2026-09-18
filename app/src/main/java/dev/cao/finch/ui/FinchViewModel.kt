@@ -6,7 +6,6 @@ import androidx.lifecycle.viewModelScope
 import dev.cao.finch.FinchApp
 import dev.cao.finch.data.Game
 import dev.cao.finch.data.GameStatsRow
-import dev.cao.finch.data.Platform
 import dev.cao.finch.data.SessionWithGame
 import dev.cao.finch.data.SyncEngine
 import dev.cao.finch.timer.TimerServiceBridge
@@ -22,7 +21,6 @@ class FinchViewModel(app: Application) : AndroidViewModel(app) {
     private val db = (app as FinchApp).database
     private val gameDao = db.gameDao()
     private val sessionDao = db.sessionDao()
-    private val snapshotDao = db.snapshotDao()
     private val settings = (app as FinchApp).settings
 
     val games: StateFlow<List<Game>> = gameDao.observeAllByRecentPlay()
@@ -47,11 +45,6 @@ class FinchViewModel(app: Application) : AndroidViewModel(app) {
     fun topGamesWithCover(fromMillis: Long, toMillis: Long) = sessionDao.observeTopGamesWithCover(fromMillis, toMillis)
     fun steamTotalMinutes() = sessionDao.observeSteamTotalMinutes().map { it ?: 0L }
 
-    fun addGame(name: String, platform: Platform) {
-        if (name.isBlank()) return
-        viewModelScope.launch { gameDao.insert(Game(name = name.trim(), platform = platform)) }
-    }
-
     fun deleteGame(id: Long) {
         viewModelScope.launch { gameDao.deleteById(id) }
     }
@@ -69,36 +62,33 @@ class FinchViewModel(app: Application) : AndroidViewModel(app) {
     /** 单游戏会话历史（最近 50 条已完成） */
     fun sessionsFor(gameId: Long) = sessionDao.observeSessionsForGame(gameId)
 
+    /** 按当前库里的值做字段级更新（四个 setter 共用的读写样板） */
+    private suspend fun updateGame(id: Long, transform: (Game) -> Game) {
+        gameDao.byId(id)?.let { gameDao.update(transform(it)) }
+    }
+
     fun toggleFavorite(id: Long) {
-        viewModelScope.launch {
-            gameDao.byId(id)?.let { gameDao.update(it.copy(favorite = !it.favorite)) }
-        }
+        viewModelScope.launch { updateGame(id) { it.copy(favorite = !it.favorite) } }
     }
 
     /** 勾选通关时自动记录通关日期；取消勾选清空 */
     fun setCompleted(id: Long, completed: Boolean) {
         viewModelScope.launch {
-            gameDao.byId(id)?.let {
-                gameDao.update(
-                    it.copy(
-                        completed = completed,
-                        completedAt = if (completed) (it.completedAt ?: LocalDateTime.now()) else null,
-                    )
+            updateGame(id) {
+                it.copy(
+                    completed = completed,
+                    completedAt = if (completed) (it.completedAt ?: LocalDateTime.now()) else null,
                 )
             }
         }
     }
 
     fun setRating(id: Long, rating: Int?) {
-        viewModelScope.launch {
-            gameDao.byId(id)?.let { gameDao.update(it.copy(rating = rating)) }
-        }
+        viewModelScope.launch { updateGame(id) { it.copy(rating = rating) } }
     }
 
     fun setThoughts(id: Long, text: String) {
-        viewModelScope.launch {
-            gameDao.byId(id)?.let { gameDao.update(it.copy(thoughts = text.trim().ifEmpty { null })) }
-        }
+        viewModelScope.launch { updateGame(id) { it.copy(thoughts = text.trim().ifEmpty { null }) } }
     }
 
     // ---- 下拉刷新同步（Steam + Switch） ----

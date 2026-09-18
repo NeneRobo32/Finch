@@ -118,15 +118,19 @@ fun GameDetailScreen(
     onStop: () -> Unit,
     viewModel: FinchViewModel,
 ) {
-    // 本次会话已玩时长（实时走秒）
+    // 本次会话已玩时长（实时走秒；空闲时不每秒空转）
     var elapsedText by remember { mutableStateOf("00:00:00") }
     LaunchedEffect(running) {
+        if (!running) {
+            elapsedText = "00:00:00"
+            return@LaunchedEffect
+        }
         while (true) {
             val started = TimerServiceBridge.startedAtMillis
-            if (running && started > 0) {
-                elapsedText = TimeFormatter.hms(Duration.ofMillis(System.currentTimeMillis() - started))
+            elapsedText = if (started > 0) {
+                TimeFormatter.hms(Duration.ofMillis(System.currentTimeMillis() - started))
             } else {
-                elapsedText = "00:00:00"
+                "00:00:00"
             }
             delay(1000)
         }

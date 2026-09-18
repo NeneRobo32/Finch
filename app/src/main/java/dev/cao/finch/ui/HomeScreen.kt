@@ -2,79 +2,53 @@ package dev.cao.finch.ui
 
 import android.Manifest
 import android.app.Activity
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import androidx.core.app.ActivityCompat
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.fadeIn
-import androidx.compose.animation.scaleIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Computer
-import androidx.compose.material.icons.filled.DevicesOther
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.SportsEsports
-import androidx.compose.material.icons.filled.Stop
-import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.VideogameAsset
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.AssistChip
-import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -91,7 +65,6 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import dev.cao.finch.ui.theme.pressScale
 import androidx.compose.ui.layout.ContentScale
@@ -100,19 +73,40 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat
 import coil3.compose.AsyncImage
 import dev.cao.finch.TimeFormatter
 import dev.cao.finch.data.Game
 import dev.cao.finch.data.GameRepository
-import dev.cao.finch.data.Platform
 import dev.cao.finch.data.TopGameRow
 import dev.cao.finch.timer.TimerNotifications
 import dev.cao.finch.timer.TimerService
 import java.time.LocalDateTime
-import java.time.format.DateTimeFormatter
+
+/** Android 16+ 的 Live Update 需要用户授权 POST_PROMOTED_NOTIFICATIONS；
+ *  未授权时仍走普通常驻通知（系统会记住授权结果） */
+private fun ensureLiveUpdatePermission(context: Context) {
+    if (Build.VERSION.SDK_INT >= 36 &&
+        ContextCompat.checkSelfPermission(
+            context, Manifest.permission.POST_PROMOTED_NOTIFICATIONS
+        ) != PackageManager.PERMISSION_GRANTED &&
+        context is Activity
+    ) {
+        ActivityCompat.requestPermissions(
+            context, arrayOf(Manifest.permission.POST_PROMOTED_NOTIFICATIONS), 2001
+        )
+    }
+}
+
+/** 启动/停止计时服务的唯一入口（详情页与卡片共用） */
+private fun startTimerService(context: Context, action: String, gameId: Long? = null) {
+    val intent = Intent(context, TimerService::class.java)
+        .setAction(action)
+    if (gameId != null) {
+        intent.putExtra(TimerNotifications.EXTRA_GAME_ID, gameId)
+    }
+    ContextCompat.startForegroundService(context, intent)
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -178,7 +172,7 @@ fun HomeScreen(
                     ) + fadeOut(animationSpec = spring<Float>()))
             }
         },
-        label = "timerPlayTransition",
+        label = "homeDetailTransition",
     ) { targetId ->
         val game = targetId?.let { id -> games.firstOrNull { it.id == id } }
         if (game != null) {
@@ -187,28 +181,10 @@ fun HomeScreen(
                 running = runningGameId == game.id,
                 onBack = { selectedGameId = null },
                 onStart = {
-                    // Android 16+ 的 Live Update 需要用户授权 POST_PROMOTED_NOTIFICATIONS；
-                    // 未授权时仍走普通常驻通知，这里在开玩前请求一次（系统会记住授权结果）
-                    if (Build.VERSION.SDK_INT >= 36 &&
-                        ContextCompat.checkSelfPermission(
-                            context, Manifest.permission.POST_PROMOTED_NOTIFICATIONS
-                        ) != PackageManager.PERMISSION_GRANTED &&
-                        context is Activity
-                    ) {
-                        ActivityCompat.requestPermissions(
-                            context, arrayOf(Manifest.permission.POST_PROMOTED_NOTIFICATIONS), 2001
-                        )
-                    }
-                    val intent = Intent(context, TimerService::class.java)
-                        .setAction(TimerNotifications.ACTION_START)
-                        .putExtra(TimerNotifications.EXTRA_GAME_ID, game.id)
-                    ContextCompat.startForegroundService(context, intent)
+                    ensureLiveUpdatePermission(context)
+                    startTimerService(context, TimerNotifications.ACTION_START, game.id)
                 },
-                onStop = {
-                    val intent = Intent(context, TimerService::class.java)
-                        .setAction(TimerNotifications.ACTION_STOP)
-                    ContextCompat.startForegroundService(context, intent)
-                },
+                onStop = { startTimerService(context, TimerNotifications.ACTION_STOP) },
                 viewModel = viewModel,
             )
         } else {
@@ -343,11 +319,7 @@ fun HomeScreen(
                             backdrop = backdrop,
                             onClick = { selectedGameId = game.id },
                             onStart = { selectedGameId = game.id },
-                            onStop = {
-                                val intent = Intent(context, TimerService::class.java)
-                                    .setAction(TimerNotifications.ACTION_STOP)
-                                ContextCompat.startForegroundService(context, intent)
-                            },
+                            onStop = { startTimerService(context, TimerNotifications.ACTION_STOP) },
                             onDelete = { viewModel.deleteGame(game.id) },
                         )
                     }
@@ -367,22 +339,6 @@ fun HomeScreen(
                 showAddDialog = false
             },
         )
-    }
-}
-
-@Composable
-internal fun StatBox(label: String, value: String, modifier: Modifier = Modifier) {
-    GlassCard(modifier = modifier, shape = RoundedCornerShape(18.dp)) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 14.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Spacer(Modifier.height(2.dp))
-            Text(value, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-        }
     }
 }
 
@@ -599,235 +555,5 @@ private fun GameGridCard(
             },
             dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("取消") } },
         )
-    }
-}
-
-@Composable
-internal fun platformIcon(platform: Platform): ImageVector = when (platform) {
-    Platform.PC -> Icons.Filled.Computer
-    Platform.SWITCH -> Icons.Filled.VideogameAsset
-    Platform.PS -> Icons.Filled.SportsEsports
-    Platform.Multi -> Icons.Filled.DevicesOther
-}
-
-/** 相对时间人性化：刚刚 / X 分钟前 / X 小时前 / 昨天 / X 天前 / 日期 */
-internal fun relativeTime(epochMillis: Long): String {
-    val now = System.currentTimeMillis()
-    val diff = now - epochMillis
-    return when {
-        diff < 60_000 -> "刚刚"
-        diff < 3600_000 -> "${diff / 60_000} 分钟前"
-        diff < 24 * 3600_000 -> "${diff / 3600_000} 小时前"
-        diff < 48 * 3600_000 -> "昨天"
-        diff < 30 * 24 * 3600_000 -> "${diff / (24 * 3600_000)} 天前"
-        else -> {
-            val d = java.time.Instant.ofEpochMilli(epochMillis)
-                .atZone(java.time.ZoneId.systemDefault()).toLocalDate()
-            "%d-%02d".format(d.year, d.monthValue)
-        }
-    }
-}
-
-@Composable
-fun platformLabel(platform: Platform): String = when (platform) {
-    Platform.PC -> "PC"
-    Platform.SWITCH -> "Switch"
-    Platform.PS -> "PS"
-    Platform.Multi -> "多平台"
-}
-
-fun platformLabelStatic(p: Platform): String = GameRepository.shortLabel(p)
-
-/** 封面图：有 URL 显示图，没有就显示平台图标块 */
-@Composable
-fun GameCover(game: Game, size: androidx.compose.ui.unit.Dp) {
-    if (game.coverUrl != null) {
-        AsyncImage(
-            model = game.coverUrl,
-            contentDescription = null,
-            modifier = Modifier
-                .size(size)
-                .clip(RoundedCornerShape(8.dp)),
-            contentScale = ContentScale.Crop,
-        )
-    } else {
-        Box(
-            modifier = Modifier
-                .size(size)
-                .clip(RoundedCornerShape(8.dp))
-                .background(MaterialTheme.colorScheme.surfaceVariant),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(
-                platformIcon(game.platform),
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-    }
-}
-
-/** 添加游戏：在线搜索选条目 + 选平台 + 断网手动兜底 */
-@Composable
-private fun AddGameDialog(addViewModel: AddGameViewModel, onDismiss: () -> Unit) {
-    val state by addViewModel.state.collectAsState()
-    val selected by addViewModel.selectedPlatforms.collectAsState()
-
-    var query by remember { mutableStateOf("") }
-    var selectedItem by remember { mutableStateOf<dev.cao.finch.data.GameSearchClient.Item?>(null) }
-    var manualMode by remember { mutableStateOf(false) }
-
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false),
-    ) {
-        Surface(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            shape = RoundedCornerShape(16.dp),
-            color = MaterialTheme.colorScheme.surface,
-        ) {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("添加游戏", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    OutlinedTextField(
-                        value = query,
-                        onValueChange = {
-                            query = it
-                            selectedItem = null
-                        },
-                        label = { Text("游戏名（中英文皆可）") },
-                        singleLine = true,
-                        modifier = Modifier.weight(1f),
-                    )
-                    Button(
-                        onClick = { manualMode = true; selectedItem = null },
-                        enabled = query.isNotBlank(),
-                    ) { Text("手动加") }
-                    Button(
-                        onClick = { addViewModel.search(query) },
-                        enabled = query.isNotBlank() && state !is AddGameViewModel.SearchState.Searching,
-                    ) {
-                        if (state is AddGameViewModel.SearchState.Searching) {
-                            CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                        } else {
-                            Icon(Icons.Filled.Search, contentDescription = null)
-                        }
-                    }
-                }
-
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    listOf(Platform.PC, Platform.SWITCH, Platform.PS).forEach { p ->
-                        FilterChip(
-                            selected = p in selected,
-                            onClick = { addViewModel.togglePlatform(p) },
-                            label = { Text(platformLabel(p)) },
-                        )
-                    }
-                }
-
-                val s = state
-                when (s) {
-                    is AddGameViewModel.SearchState.Done -> {
-                        if (s.notes.isNotEmpty()) {
-                            Text(
-                                "源状态：${s.notes.joinToString("  ")}",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        if (s.items.isEmpty() && !manualMode) {
-                            Text("没有本地匹配，点搜索查在线资料库", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                        LazyColumn(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .heightIn(max = 360.dp),
-                            verticalArrangement = Arrangement.spacedBy(6.dp),
-                        ) {
-                            items(s.items) { item ->
-                                val isSel = selectedItem?.name == item.name && selectedItem?.source == item.source
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clip(RoundedCornerShape(10.dp))
-                                        .background(
-                                            if (isSel) MaterialTheme.colorScheme.primaryContainer
-                                            else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-                                        )
-                                        .then(
-                                            if (isSel) Modifier.border(1.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(10.dp))
-                                            else Modifier
-                                        )
-                                        .clickable {
-                                            selectedItem = item
-                                            manualMode = false
-                                            addViewModel.select(item)
-                                        }
-                                        .padding(8.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    if (item.coverUrl != null) {
-                                        AsyncImage(
-                                            model = item.coverUrl,
-                                            contentDescription = null,
-                                            modifier = Modifier
-                                                .size(52.dp)
-                                                .clip(RoundedCornerShape(8.dp)),
-                                            contentScale = ContentScale.Crop,
-                                        )
-                                    } else {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(52.dp)
-                                                .clip(RoundedCornerShape(8.dp))
-                                                .background(MaterialTheme.colorScheme.surfaceVariant),
-                                            contentAlignment = Alignment.Center,
-                                        ) {
-                                            Icon(Icons.Filled.VideogameAsset, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                                        }
-                                    }
-                                    Spacer(Modifier.width(10.dp))
-                                    Column(Modifier.weight(1f)) {
-                                        Text(item.name, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                        item.nameCn?.let {
-                                            if (it != item.name) {
-                                                Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                            }
-                                        }
-                                        val plats = item.platforms.filter { it != Platform.Multi }
-                                        Text(
-                                            (if (plats.isEmpty()) "平台待选" else GameRepository.labelFor(plats)) + " · " + item.source,
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    is AddGameViewModel.SearchState.Failed -> {
-                        Text(s.message, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
-                    }
-                    else -> {}
-                }
-
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.align(Alignment.End)) {
-                    TextButton(onClick = onDismiss) { Text("取消") }
-                    Button(
-                        enabled = selected.isNotEmpty() && (selectedItem != null || manualMode && query.isNotBlank()),
-                        onClick = {
-                            addViewModel.confirm(selectedItem, query, selected) { onDismiss() }
-                        },
-                    ) { Text("添加") }
-                }
-                Text(
-                    "搜索走 Bangumi/Steam 资料库，选条目自动带封面和平台；点「手动加」直接用输入的名字（不联网）。",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
     }
 }

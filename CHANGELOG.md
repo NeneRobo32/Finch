@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.12.2 (2026-09-17)
+
+重构版（无行为变更，纯结构与性能整理）：
+
+- **拆分**：HomeScreen.kt 833 行拆为三个文件——HomeScreen（主页+月度大卡+游戏卡片）、AddGameDialog、SharedUi（StatBox/platformIcon/platformLabel/relativeTime 跨屏共享）
+- **抽取**：SyncEngine 的 Steam/PSN 快照差分逻辑合并为 `diffWriteSessions` + `saveSnapshot`，消除约 50 行重复
+- **抽取**：FinchViewModel 四个详情 setter 共用 `updateGame` 读写样板；ImportViewModel 全限定名改为 import
+- **性能**：详情页空闲时计时协程不再每秒空转（未计时直接返回）
+- **清理**：删除死代码 `addGame`、`GameCover`、`platformLabelStatic`、未用的 snapshotDao 字段与失效 import
+
 ## 0.12.1 (2026-09-17)
 
 体验修复版（详情页反馈五连修）：

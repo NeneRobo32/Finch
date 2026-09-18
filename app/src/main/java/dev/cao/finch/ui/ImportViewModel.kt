@@ -8,9 +8,11 @@ import dev.cao.finch.FinchApp
 import dev.cao.finch.data.BackupManager
 import dev.cao.finch.data.Game
 import dev.cao.finch.data.PlaySession
-import dev.cao.finch.data.PlaytimeSnapshot
+import dev.cao.finch.data.PsnClient
+import dev.cao.finch.data.SessionSource
 import dev.cao.finch.data.SettingsStore
 import dev.cao.finch.data.SwitchClient
+import dev.cao.finch.data.SyncEngine
 import dev.cao.finch.timer.TimerServiceBridge
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -86,7 +88,7 @@ class ImportViewModel(app: Application) : AndroidViewModel(app) {
         _steamState.value = SyncState.Running
         viewModelScope.launch {
             try {
-                val r = dev.cao.finch.data.SyncEngine.runSteam(db, key, sid, base)
+                val r = SyncEngine.runSteam(db, key, sid, base)
                 _steamState.value = SyncState.Done(
                     "同步完成：新增 ${r.created} 款，匹配更新 ${r.matched} 款，跳过 ${r.skipped} 款，写入 ${r.sessionsAdded} 条游玩记录"
                 )
@@ -122,7 +124,7 @@ class ImportViewModel(app: Application) : AndroidViewModel(app) {
                         gameId = gameId,
                         startTime = startTime,
                         endTime = endTime,
-                        source = dev.cao.finch.data.SessionSource.MANUAL,
+                        source = SessionSource.MANUAL,
                     )
                 )
                 _manualState.value = SyncState.Done("已补录一条记录")
@@ -144,7 +146,7 @@ class ImportViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             try {
                 val auth = withContext(Dispatchers.IO) {
-                    dev.cao.finch.data.SwitchClient.exchangeCode(code, verifier)
+                    SwitchClient.exchangeCode(code, verifier)
                 }
                 settings.switchSessionToken = auth.sessionToken
                 settings.switchNaId = auth.naId
@@ -166,7 +168,7 @@ class ImportViewModel(app: Application) : AndroidViewModel(app) {
         _switchState.value = SyncState.Running
         viewModelScope.launch {
             try {
-                val r = dev.cao.finch.data.SyncEngine.runSwitch(db, token, settings.switchNaId)
+                val r = SyncEngine.runSwitch(db, token, settings.switchNaId)
                 _switchState.value = SyncState.Done(
                     "同步完成：新增 ${r.created} 款、补信息 ${r.matched} 款、跳过 ${r.skipped} 款，写入 ${r.sessionsAdded} 条游玩记录"
                 )
@@ -203,7 +205,7 @@ class ImportViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             try {
                 val t = withContext(Dispatchers.IO) {
-                    dev.cao.finch.data.PsnClient.exchangeNpsso(npsso)
+                    PsnClient.exchangeNpsso(npsso)
                 }
                 settings.psnRefreshToken = t.refreshToken
                 settings.psnRefreshExpiresAtMillis = t.refreshExpiresAtMillis
@@ -226,7 +228,7 @@ class ImportViewModel(app: Application) : AndroidViewModel(app) {
         _psnState.value = SyncState.Running
         viewModelScope.launch {
             try {
-                val r = dev.cao.finch.data.SyncEngine.runPSN(db, token)
+                val r = SyncEngine.runPSN(db, token)
                 settings.psnRefreshToken = r.refreshTokenOut
                 settings.psnRefreshExpiresAtMillis = r.refreshExpiresAtMillis
                 psnExpiringSoon.value =

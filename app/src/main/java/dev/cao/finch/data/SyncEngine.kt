@@ -2,7 +2,6 @@ package dev.cao.finch.data
 
 import androidx.room.withTransaction
 import java.time.Instant
-import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
 import java.time.ZoneId
@@ -10,7 +9,7 @@ import java.time.temporal.ChronoUnit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-/** 同步引擎：Steam/Switch 数据拉取 + 差分写 play_sessions 的核心逻辑。
+/** 同步引擎：Steam/Switch/PSN 数据拉取 + 差分写 play_sessions 的核心逻辑。
  *  手动同步（ImportViewModel）和下拉刷新（FinchViewModel）共用同一实现，避免逻辑分叉。
  *  网络请求在事务外完成；库内写入整体包在 withTransaction 里，中断不会留半套数据。 */
 object SyncEngine {
@@ -38,6 +37,65 @@ object SyncEngine {
         val refreshTokenOut: String,
         val refreshExpiresAtMillis: Long,
     )
+
+    // ---- Steam / PSN 共用的快照差分积木 ----
+
+    /** 存一条快照（同 (source, refKey) REPLACE） */
+    private suspend fun saveSnapshot(
+        snapshotDao: SnapshotDao,
+        source: String,
+        refKey: String,
+        refName: String,
+        totalMin: Long,
+        now: LocalDateTime,
+    ) {
+        snapshotDao.insert(
+            PlaytimeSnapshot(source = source, refKey = refKey, refName = refName, totalMin = totalMin, at = now)
+        )
+    }
+
+    /**
+     * 快照差分写会话（Steam / PSN 共用，须在事务内调用）：
+     *  - prev == null：首次见到，只建档不回溯（避免把历史时长当成一次增量）
+     *  - 无增量：只更新快照（REPLACE 同一行，作为下次差分的时间基准）
+     *  - 有增量：逐日摊分写会话（同游戏同日开始时间已存在则跳过）
+     * 返回本次写入的会话条数。
+     */
+    private suspend fun diffWriteSessions(
+        sessionDao: SessionDao,
+        snapshotDao: SnapshotDao,
+        source: String,
+        refKey: String,
+        refName: String,
+        gameId: Long,
+        totalMin: Long,
+        prev: PlaytimeSnapshot?,
+        lastPlayedEpoch: Long?,
+        sessionSource: SessionSource,
+        now: LocalDateTime,
+        zone: ZoneId,
+    ): Int {
+        saveSnapshot(snapshotDao, source, refKey, refName, totalMin, now)
+        if (prev == null) return 0
+        val deltaMin = totalMin - prev.totalMin
+        if (deltaMin <= 0) return 0
+        var added = 0
+        for (s in allocateSteamSessions(deltaMin, prev.at, now, zone, lastPlayedEpoch)) {
+            // 去重：同游戏同日开始时间已存在则跳过
+            val dup = sessionDao.countBetween(
+                gameId,
+                s.start.atZone(zone).toInstant().toEpochMilli(),
+                s.end.atZone(zone).toInstant().toEpochMilli() + 1,
+            )
+            if (dup == 0L) {
+                sessionDao.insert(
+                    PlaySession(gameId = gameId, startTime = s.start, endTime = s.end, source = sessionSource)
+                )
+                added++
+            }
+        }
+        return added
+    }
 
     /** 拉 Steam 库并按快照差分写入会话。 */
     suspend fun runSteam(
@@ -79,7 +137,7 @@ object SyncEngine {
                     }
                 } else {
                     val cover = "https://cdn.cloudflare.steamstatic.com/steam/apps/${g.appid}/header.jpg"
-                    val newId = gameDao.insert(
+                    gameDao.insert(
                         Game(
                             name = g.name,
                             platform = Platform.PC,
@@ -90,68 +148,23 @@ object SyncEngine {
                         )
                     )
                     created++
-                    // 新建的游戏：首次拉取不写差分（快照只是存档，避免把历史时长当成一次增量）
-                    snapshotDao.insert(
-                        PlaytimeSnapshot(
-                            source = "steam",
-                            refKey = "steam:${g.appid}",
-                            refName = g.name,
-                            totalMin = g.playtimeMinutes,
-                            at = now,
-                        )
-                    )
-                    continue // 新建的跳过，不差分
+                    // 新建的游戏：首次拉取只建档不差分
+                    saveSnapshot(snapshotDao, "steam", "steam:${g.appid}", g.name, g.playtimeMinutes, now)
+                    continue
                 }
                 // 已有 PC 游戏：与上次快照差分
                 val refKey = "steam:${g.appid}"
-                val prev = snapshotDao.byKey("steam", refKey)
-                if (prev == null) {
-                    // 首次见到快照，存档但不回溯
-                    snapshotDao.insert(
-                        PlaytimeSnapshot(
-                            source = "steam",
-                            refKey = refKey,
-                            refName = g.name,
-                            totalMin = g.playtimeMinutes,
-                            at = now,
-                        )
-                    )
-                    continue
-                }
-                val deltaMin = g.playtimeMinutes - prev.totalMin
-                // 无新增时长：只更新快照（同一行 REPLACE，作为下次差分的时间基准）
-                snapshotDao.insert(
-                    PlaytimeSnapshot(
-                        source = "steam",
-                        refKey = refKey,
-                        refName = g.name,
-                        totalMin = g.playtimeMinutes,
-                        at = now,
-                    )
+                // 与上面 byName 匹配到的同一行；若已有别的行占着该 appid 则以它为准
+                val gameId = gameDao.bySteamAppId(g.appid)?.id ?: existing.id
+                sessionAdded += diffWriteSessions(
+                    sessionDao, snapshotDao,
+                    source = "steam", refKey = refKey, refName = g.name,
+                    gameId = gameId, totalMin = g.playtimeMinutes,
+                    prev = snapshotDao.byKey("steam", refKey),
+                    lastPlayedEpoch = g.lastPlayedEpoch,
+                    sessionSource = SessionSource.STEAM,
+                    now = now, zone = zone,
                 )
-                if (deltaMin <= 0) continue
-                // 找到对应游戏 id（与上面 byName 匹配到的同一行）
-                val gameRow = gameDao.bySteamAppId(g.appid) ?: gameDao.byId(existing.id) ?: continue
-                // 逐日摊分（纯函数，见 allocateSteamSessions 的说明）
-                for (s in allocateSteamSessions(deltaMin, prev.at, now, zone, g.lastPlayedEpoch)) {
-                    // 去重：同游戏同日开始时间已存在则跳过
-                    val dup = sessionDao.countBetween(
-                        gameRow.id,
-                        s.start.atZone(zone).toInstant().toEpochMilli(),
-                        s.end.atZone(zone).toInstant().toEpochMilli() + 1,
-                    )
-                    if (dup == 0L) {
-                        sessionDao.insert(
-                            PlaySession(
-                                gameId = gameRow.id,
-                                startTime = s.start,
-                                endTime = s.end,
-                                source = SessionSource.STEAM,
-                            )
-                        )
-                        sessionAdded++
-                    }
-                }
             }
         }
         return SteamResult(created, matched, skipped, sessionAdded)
@@ -282,7 +295,7 @@ object SyncEngine {
                         continue
                     }
                 } else {
-                    val newId = gameDao.insert(
+                    gameDao.insert(
                         Game(
                             name = t.name,
                             platform = Platform.PS,
@@ -293,66 +306,21 @@ object SyncEngine {
                         )
                     )
                     created++
-                    // 新建的游戏：首次拉取不写差分（快照只是存档，避免把历史时长当成一次增量）
-                    snapshotDao.insert(
-                        PlaytimeSnapshot(
-                            source = "psn",
-                            refKey = "psn:${t.titleId ?: t.name}",
-                            refName = t.name,
-                            totalMin = t.totalMinutes,
-                            at = now,
-                        )
-                    )
-                    continue // 新建的跳过，不差分
-                }
-                // 已有 PS 游戏：与上次快照差分
-                val refKey = "psn:${t.titleId ?: t.name}"
-                val prev = snapshotDao.byKey("psn", refKey)
-                if (prev == null) {
-                    // 首次见到快照，存档但不回溯
-                    snapshotDao.insert(
-                        PlaytimeSnapshot(
-                            source = "psn",
-                            refKey = refKey,
-                            refName = t.name,
-                            totalMin = t.totalMinutes,
-                            at = now,
-                        )
-                    )
+                    // 新建的游戏：首次拉取只建档不差分
+                    saveSnapshot(snapshotDao, "psn", "psn:${t.titleId ?: t.name}", t.name, t.totalMinutes, now)
                     continue
                 }
-                val deltaMin = t.totalMinutes - prev.totalMin
-                snapshotDao.insert(
-                    PlaytimeSnapshot(
-                        source = "psn",
-                        refKey = refKey,
-                        refName = t.name,
-                        totalMin = t.totalMinutes,
-                        at = now,
-                    )
+                // 已有 PS 游戏：与上次快照差分（PSN 有真实 lastPlayedDateTime，容易落到真实起点）
+                val refKey = "psn:${t.titleId ?: t.name}"
+                sessionAdded += diffWriteSessions(
+                    sessionDao, snapshotDao,
+                    source = "psn", refKey = refKey, refName = t.name,
+                    gameId = existing.id, totalMin = t.totalMinutes,
+                    prev = snapshotDao.byKey("psn", refKey),
+                    lastPlayedEpoch = t.lastPlayedEpochMillis?.let { it / 1000 },
+                    sessionSource = SessionSource.PS,
+                    now = now, zone = zone,
                 )
-                if (deltaMin <= 0) continue
-                val gameRow = gameDao.byId(existing.id) ?: continue
-                // PSN 有真实 lastPlayedDateTime，比 Steam 更容易落到真实起点
-                val lastPlayedEpochSec = t.lastPlayedEpochMillis?.let { it / 1000 }
-                for (s in allocateSteamSessions(deltaMin, prev.at, now, zone, lastPlayedEpochSec)) {
-                    val dup = sessionDao.countBetween(
-                        gameRow.id,
-                        s.start.atZone(zone).toInstant().toEpochMilli(),
-                        s.end.atZone(zone).toInstant().toEpochMilli() + 1,
-                    )
-                    if (dup == 0L) {
-                        sessionDao.insert(
-                            PlaySession(
-                                gameId = gameRow.id,
-                                startTime = s.start,
-                                endTime = s.end,
-                                source = SessionSource.PS,
-                            )
-                        )
-                        sessionAdded++
-                    }
-                }
             }
         }
         return PsnResult(
