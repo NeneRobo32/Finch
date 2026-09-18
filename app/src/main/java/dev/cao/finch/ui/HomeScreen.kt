@@ -19,6 +19,7 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Box
@@ -66,6 +67,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.rememberScrollState
 import dev.cao.finch.ui.theme.pressScale
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -82,6 +84,9 @@ import dev.cao.finch.data.TopGameRow
 import dev.cao.finch.timer.TimerNotifications
 import dev.cao.finch.timer.TimerService
 import java.time.LocalDateTime
+
+/** 主页排序：最近游玩（DAO 默认序）/ 总时长 / 评分 / 名称 */
+private enum class HomeSort { RECENT, TOTAL, RATING, NAME }
 
 /** Android 16+ 的 Live Update 需要用户授权 POST_PROMOTED_NOTIFICATIONS；
  *  未授权时仍走普通常驻通知（系统会记住授权结果） */
@@ -118,7 +123,9 @@ fun HomeScreen(
     val context = LocalContext.current
     val games by viewModel.games.collectAsState()
     val lastPlayedMap by viewModel.lastPlayedMap.collectAsState()
+    val totalsMap by viewModel.totalsMap.collectAsState()
     val runningGameId by viewModel.runningGameId.collectAsState()
+    val runningPaused by dev.cao.finch.timer.TimerServiceBridge.isPaused.collectAsState()
     val syncing by viewModel.syncing.collectAsState()
     val snackbarHostState = remember { androidx.compose.material3.SnackbarHostState() }
     LaunchedEffect(Unit) {
@@ -129,6 +136,11 @@ fun HomeScreen(
     var showAddDialog by remember { mutableStateOf(false) }
     var selectedGameId by remember { mutableStateOf<Long?>(null) } // 进入游戏详情页
     var query by remember { mutableStateOf("") } // 搜索我的游戏
+    // 主页筛选：状态 / 收藏 / 平台 + 排序
+    var statusFilter by remember { mutableStateOf<dev.cao.finch.data.GameStatus?>(null) }
+    var favOnly by remember { mutableStateOf(false) }
+    var platformFilter by remember { mutableStateOf<dev.cao.finch.data.Platform?>(null) }
+    var sortMode by remember { mutableStateOf(HomeSort.RECENT) }
 
     // 本月数据：顶部大卡「玩得最多」
     val now = LocalDateTime.now()
@@ -179,12 +191,15 @@ fun HomeScreen(
             GameDetailScreen(
                 game = game,
                 running = runningGameId == game.id,
+                paused = runningGameId == game.id && runningPaused,
                 onBack = { selectedGameId = null },
                 onStart = {
                     ensureLiveUpdatePermission(context)
                     startTimerService(context, TimerNotifications.ACTION_START, game.id)
                 },
                 onStop = { startTimerService(context, TimerNotifications.ACTION_STOP) },
+                onPause = { startTimerService(context, TimerNotifications.ACTION_PAUSE) },
+                onResume = { startTimerService(context, TimerNotifications.ACTION_RESUME) },
                 viewModel = viewModel,
             )
         } else {
@@ -249,7 +264,7 @@ fun HomeScreen(
                     item { MonthHeroCard(games, runningGameId, topMonth.first(), thisMonthTotal) }
                 }
 
-                // 搜索 + 标题行
+                // 筛选 + 标题行
                 item {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Row(
@@ -265,6 +280,82 @@ fun HomeScreen(
                             )
                             if (query.isNotBlank()) {
                                 TextButton(onClick = { query = "" }) { Text("清除") }
+                            }
+                        }
+                        // 状态筛选（横滑）
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            androidx.compose.material3.FilterChip(
+                                selected = statusFilter == null,
+                                onClick = { statusFilter = null },
+                                label = { Text("全部") },
+                            )
+                            dev.cao.finch.data.GameStatus.values().forEach { s ->
+                                androidx.compose.material3.FilterChip(
+                                    selected = statusFilter == s,
+                                    onClick = { statusFilter = if (statusFilter == s) null else s },
+                                    label = { Text(s.label) },
+                                )
+                            }
+                            androidx.compose.material3.FilterChip(
+                                selected = favOnly,
+                                onClick = { favOnly = !favOnly },
+                                label = { Text("★ 收藏") },
+                            )
+                        }
+                        // 平台 + 排序行
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            listOf(
+                                null to "全平台",
+                                dev.cao.finch.data.Platform.PC to "PC",
+                                dev.cao.finch.data.Platform.SWITCH to "Switch",
+                                dev.cao.finch.data.Platform.PS to "PS",
+                            ).forEach { (p, label) ->
+                                androidx.compose.material3.FilterChip(
+                                    selected = platformFilter == p,
+                                    onClick = { platformFilter = p },
+                                    label = { Text(label) },
+                                )
+                            }
+                            Spacer(Modifier.weight(1f))
+                            var sortMenu by remember { mutableStateOf(false) }
+                            TextButton(onClick = { sortMenu = true }) {
+                                Text(
+                                    when (sortMode) {
+                                        HomeSort.RECENT -> "最近玩 ↓"
+                                        HomeSort.TOTAL -> "总时长 ↓"
+                                        HomeSort.RATING -> "评分 ↓"
+                                        HomeSort.NAME -> "名称 A-Z"
+                                    }
+                                )
+                            }
+                            androidx.compose.material3.DropdownMenu(
+                                expanded = sortMenu,
+                                onDismissRequest = { sortMenu = false },
+                            ) {
+                                HomeSort.values().forEach { m ->
+                                    androidx.compose.material3.DropdownMenuItem(
+                                        text = {
+                                            Text(
+                                                when (m) {
+                                                    HomeSort.RECENT -> "按最近游玩"
+                                                    HomeSort.TOTAL -> "按总时长"
+                                                    HomeSort.RATING -> "按评分"
+                                                    HomeSort.NAME -> "按名称"
+                                                }
+                                            )
+                                        },
+                                        onClick = { sortMode = m; sortMenu = false },
+                                    )
+                                }
                             }
                         }
                         if (query.isNotBlank() || games.size > 8) {
@@ -288,13 +379,25 @@ fun HomeScreen(
                 }
 
                 val q = query.trim().lowercase()
-                val shown = if (q.isEmpty()) games else games.filter {
-                    it.name.lowercase().contains(q)
+                val shownBase = games.filter { g ->
+                    (statusFilter == null || g.statusResolved() == statusFilter) &&
+                        (!favOnly || g.favorite) &&
+                        (platformFilter == null || dev.cao.finch.data.GameRepository.supportsPlatform(g, platformFilter!!)) &&
+                        (q.isEmpty() || g.name.lowercase().contains(q))
                 }
-                if (q.isNotEmpty() && shown.isEmpty()) {
+                val shown = when (sortMode) {
+                    HomeSort.RECENT -> shownBase // DAO 已按最近游玩排好
+                    HomeSort.TOTAL -> shownBase.sortedByDescending { totalsMap[it.id] ?: 0L }
+                    HomeSort.RATING -> shownBase.sortedWith(
+                        compareByDescending<dev.cao.finch.data.Game> { it.rating ?: -1 }
+                            .thenBy { it.name.lowercase() }
+                    )
+                    HomeSort.NAME -> shownBase.sortedBy { it.name.lowercase() }
+                }
+                if ((q.isNotEmpty() || statusFilter != null || favOnly || platformFilter != null) && shown.isEmpty()) {
                     item {
                         Text(
-                            "没有匹配「$query」的游戏",
+                            "没有符合筛选的游戏",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             textAlign = TextAlign.Center,
@@ -315,7 +418,9 @@ fun HomeScreen(
                         GameGridCard(
                             game = game,
                             lastPlayedAt = lastPlayedMap[game.id],
+                            totalMs = totalsMap[game.id],
                             running = game.id == runningGameId,
+                            paused = game.id == runningGameId && runningPaused,
                             backdrop = backdrop,
                             onClick = { selectedGameId = game.id },
                             onStart = { selectedGameId = game.id },
@@ -426,7 +531,9 @@ private fun MonthHeroCard(allGames: List<Game>, runningGameId: Long, top: TopGam
 private fun GameGridCard(
     game: Game,
     lastPlayedAt: Long?,
+    totalMs: Long? = null,
     running: Boolean,
+    paused: Boolean = false,
     backdrop: com.kyant.backdrop.Backdrop?,
     onClick: () -> Unit,
     onStart: () -> Unit,
@@ -477,10 +584,14 @@ private fun GameGridCard(
                             .align(Alignment.TopEnd)
                             .padding(8.dp)
                             .clip(RoundedCornerShape(999.dp))
-                            .background(MaterialTheme.colorScheme.error)
+                            .background(if (paused) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.error)
                             .padding(horizontal = 8.dp, vertical = 3.dp),
                     ) {
-                        Text("计时中", style = MaterialTheme.typography.labelSmall, color = Color.White)
+                        Text(
+                            if (paused) "已暂停" else "计时中",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Color.White,
+                        )
                     }
                 }
             }
@@ -494,7 +605,7 @@ private fun GameGridCard(
                 Column(Modifier.weight(1f)) {
                     Text(game.name, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Text(
-                        GameRepository.labelFor(game.platformSet()),
+                        GameRepository.labelFor(game.platformSet()) + " · " + game.statusResolved().label,
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -528,6 +639,15 @@ private fun GameGridCard(
                             color = if (System.currentTimeMillis() - played < 7L * 24 * 3600 * 1000)
                                 MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                         )
+                    }
+                    totalMs?.let { ms ->
+                        if (ms > 0) {
+                            Text(
+                                "累计 ${TimeFormatter.hoursMinutes(java.time.Duration.ofMillis(ms))}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                     }
                     game.steamPlaytimeMin?.let { mins ->
                         Text(

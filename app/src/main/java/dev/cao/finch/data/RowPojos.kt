@@ -43,3 +43,9 @@ data class GameStatsRow(
     val sessionCount: Long,
     val lastPlayedAt: Long?,
 )
+
+/** 全库每游戏累计（主页按总时长排序用） */
+data class GameTotalMini(
+    val gameId: Long,
+    val totalMs: Long?,
+)

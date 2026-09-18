@@ -75,11 +75,13 @@ import dev.cao.finch.TimeFormatter
 import dev.cao.finch.data.Game
 import dev.cao.finch.data.GameRepository
 import dev.cao.finch.data.GameStatsRow
+import dev.cao.finch.data.GameStatus
 import dev.cao.finch.data.PlaySession
 import dev.cao.finch.timer.TimerServiceBridge
 import java.time.Duration
 import java.time.format.DateTimeFormatter
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 /** 评分星的金色 */
 private val StarGold = Color(0xFFF5B301)
@@ -113,22 +115,26 @@ private data class ConfettiPiece(
 fun GameDetailScreen(
     game: Game,
     running: Boolean,
+    paused: Boolean = false,
     onBack: () -> Unit,
     onStart: () -> Unit,
     onStop: () -> Unit,
+    onPause: () -> Unit = {},
+    onResume: () -> Unit = {},
     viewModel: FinchViewModel,
 ) {
-    // 本次会话已玩时长（实时走秒；空闲时不每秒空转）
+    // 本次会话已玩时长（实时走秒，扣掉暂停；空闲时不每秒空转）
     var elapsedText by remember { mutableStateOf("00:00:00") }
-    LaunchedEffect(running) {
+    LaunchedEffect(running, paused) {
         if (!running) {
             elapsedText = "00:00:00"
             return@LaunchedEffect
         }
         while (true) {
             val started = TimerServiceBridge.startedAtMillis
+            val pauseMs = TimerServiceBridge.pauseAccumMs + TimerServiceBridge.currentPauseMs()
             elapsedText = if (started > 0) {
-                TimeFormatter.hms(Duration.ofMillis(System.currentTimeMillis() - started))
+                TimeFormatter.hms(Duration.ofMillis((System.currentTimeMillis() - started - pauseMs).coerceAtLeast(0L)))
             } else {
                 "00:00:00"
             }
@@ -156,6 +162,9 @@ fun GameDetailScreen(
 
     // 待删除的会话（弹确认框）
     var pendingDelete by remember { mutableStateOf<PlaySession?>(null) }
+    // 待编辑的会话（弹编辑框）
+    var pendingEdit by remember { mutableStateOf<PlaySession?>(null) }
+    var sessionEditError by remember { mutableStateOf<String?>(null) }
 
     // 单游戏统计 + 会话历史
     val stats by remember(game.id) { viewModel.gameStats(game.id) }
@@ -256,49 +265,68 @@ fun GameDetailScreen(
 
                 Spacer(Modifier.height(20.dp))
 
-                // 计时卡：走秒在左、开玩/停止在旁
+                // 计时卡：走秒在左、开玩/暂停/停止在旁
                 GlassCard(modifier = Modifier.fillMaxWidth()) {
-                    Row(
+                    Column(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 16.dp, vertical = 14.dp),
-                        verticalAlignment = Alignment.CenterVertically,
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
-                        Column(Modifier.weight(1f)) {
-                            Text(
-                                if (running) "本次游玩" else "未开始",
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                            AnimatedContent(
-                                targetState = elapsedText,
-                                transitionSpec = {
-                                    (fadeIn(animationSpec = spring<Float>()) +
-                                        scaleIn(
-                                            animationSpec = spring<Float>(Spring.DampingRatioMediumBouncy, Spring.StiffnessMedium),
-                                            initialScale = 0.92f,
-                                        )) togetherWith fadeOut(animationSpec = spring<Float>())
-                                },
-                                label = "elapsedPulse",
-                            ) { text ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(Modifier.weight(1f)) {
                                 Text(
-                                    text,
-                                    style = MaterialTheme.typography.headlineMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.primary,
+                                    when {
+                                        !running -> "未开始"
+                                        paused -> "已暂停"
+                                        else -> "本次游玩"
+                                    },
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
+                                AnimatedContent(
+                                    targetState = elapsedText,
+                                    transitionSpec = {
+                                        (fadeIn(animationSpec = spring<Float>()) +
+                                            scaleIn(
+                                                animationSpec = spring<Float>(Spring.DampingRatioMediumBouncy, Spring.StiffnessMedium),
+                                                initialScale = 0.92f,
+                                            )) togetherWith fadeOut(animationSpec = spring<Float>())
+                                    },
+                                    label = "elapsedPulse",
+                                ) { text ->
+                                    Text(
+                                        text,
+                                        style = MaterialTheme.typography.headlineMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.primary,
+                                    )
+                                }
+                            }
+                            Button(
+                                onClick = { if (running) onStop() else onStart() },
+                                shape = RoundedCornerShape(50),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = if (running) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                                ),
+                            ) {
+                                Icon(if (running) Icons.Filled.Stop else Icons.Filled.PlayArrow, contentDescription = null)
+                                Spacer(Modifier.width(6.dp))
+                                Text(if (running) "停止" else "开玩", fontWeight = FontWeight.SemiBold)
                             }
                         }
-                        Button(
-                            onClick = { if (running) onStop() else onStart() },
-                            shape = RoundedCornerShape(50),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = if (running) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
-                            ),
-                        ) {
-                            Icon(if (running) Icons.Filled.Stop else Icons.Filled.PlayArrow, contentDescription = null)
-                            Spacer(Modifier.width(6.dp))
-                            Text(if (running) "停止" else "开玩", fontWeight = FontWeight.SemiBold)
+                        if (running) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.End,
+                            ) {
+                                TextButton(onClick = { if (paused) onResume() else onPause() }) {
+                                    Text(if (paused) "继续" else "暂停")
+                                }
+                            }
                         }
                     }
                 }
@@ -314,9 +342,26 @@ fun GameDetailScreen(
 
                 Spacer(Modifier.height(12.dp))
 
-                // 状态卡：已通关 + 评分
+                // 状态卡：游戏状态 + 已通关 + 评分
                 GlassCard(modifier = Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
+                        // 状态选择（想玩/在玩/搁置/通关/全成就）
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 4.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            val cur = game.statusResolved()
+                            GameStatus.values().forEach { s ->
+                                androidx.compose.material3.FilterChip(
+                                    selected = cur == s,
+                                    onClick = { viewModel.setStatus(game.id, s) },
+                                    label = { Text(s.label) },
+                                )
+                            }
+                        }
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Checkbox(
                                 checked = game.completed,
@@ -429,7 +474,7 @@ fun GameDetailScreen(
                             )
                         } else {
                             sessions.forEach { s ->
-                                SessionRow(s, onDelete = { pendingDelete = s })
+                                SessionRow(s, onDelete = { pendingDelete = s }, onEdit = { pendingEdit = s })
                             }
                         }
                     }
@@ -482,11 +527,98 @@ fun GameDetailScreen(
             dismissButton = { TextButton(onClick = { pendingDelete = null }) { Text("取消") } },
         )
     }
+
+    pendingEdit?.let { s ->
+        val scope = remember { kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main) }
+        SessionEditDialog(
+            session = s,
+            error = sessionEditError,
+            onDismiss = { pendingEdit = null; sessionEditError = null },
+            onConfirm = { start, end ->
+                scope.launch {
+                    val r = viewModel.updateSessionTimes(s.id, start, end)
+                    if (r.isSuccess) {
+                        pendingEdit = null
+                        sessionEditError = null
+                    } else {
+                        sessionEditError = r.exceptionOrNull()?.message ?: "保存失败"
+                    }
+                }
+            },
+        )
+    }
 }
 
-/** 单条游玩记录：起止时间 + 时长 + 删除 */
+/** 会话起止编辑框：日期 + 开始/结束（结束必须晚于开始，跨夜自动+1天） */
 @Composable
-private fun SessionRow(s: PlaySession, onDelete: () -> Unit) {
+private fun SessionEditDialog(
+    session: PlaySession,
+    error: String?,
+    onDismiss: () -> Unit,
+    onConfirm: (start: java.time.LocalDateTime, end: java.time.LocalDateTime) -> Unit,
+) {
+    val dateFmt = DateTimeFormatter.ofPattern("yyyy-M-d")
+    val timeFmt = DateTimeFormatter.ofPattern("H:mm")
+    var dateField by remember(session.id) { mutableStateOf(session.startTime.format(dateFmt)) }
+    var startField by remember(session.id) { mutableStateOf(session.startTime.format(timeFmt)) }
+    var endField by remember(session.id) {
+        mutableStateOf(session.endTime?.format(timeFmt) ?: session.startTime.format(timeFmt))
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("编辑记录") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(
+                    value = dateField,
+                    onValueChange = { dateField = it },
+                    label = { Text("日期 2025-8-30") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = startField,
+                        onValueChange = { startField = it },
+                        label = { Text("开始 21:30") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f),
+                    )
+                    OutlinedTextField(
+                        value = endField,
+                        onValueChange = { endField = it },
+                        label = { Text("结束 23:05") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+                if (error != null) {
+                    Text(error, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                runCatching {
+                    val date = java.time.LocalDate.parse(dateField.trim(), dateFmt)
+                    val start = java.time.LocalTime.parse(startField.trim(), timeFmt)
+                    val end = java.time.LocalTime.parse(endField.trim(), timeFmt)
+                    var s = java.time.LocalDateTime.of(date, start)
+                    var e = java.time.LocalDateTime.of(date, end)
+                    if (e.isBefore(s)) e = e.plusDays(1) // 跨夜
+                    onConfirm(s, e)
+                }.onFailure {
+                    // 格式错误本地直接提示，不进 ViewModel
+                }
+            }) { Text("保存") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+    )
+}
+
+/** 单条游玩记录：起止时间 + 时长（扣暂停） + 编辑 + 删除 */
+@Composable
+private fun SessionRow(s: PlaySession, onDelete: () -> Unit, onEdit: () -> Unit) {
     val end = s.endTime ?: return
     val fmt = DateTimeFormatter.ofPattern("M月d日 HH:mm")
     Row(
@@ -498,11 +630,12 @@ private fun SessionRow(s: PlaySession, onDelete: () -> Unit) {
         Column(Modifier.weight(1f)) {
             Text("${s.startTime.format(fmt)} – ${end.format(fmt)}", style = MaterialTheme.typography.bodyMedium)
             Text(
-                "时长 ${TimeFormatter.hoursMinutes(Duration.between(s.startTime, end))}",
+                "时长 ${TimeFormatter.hoursMinutes(Duration.ofMillis(s.effectiveMillis()))}",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
+        TextButton(onClick = onEdit) { Text("编辑") }
         IconButton(onClick = onDelete, modifier = Modifier.size(32.dp)) {
             Icon(
                 Icons.Filled.Delete,

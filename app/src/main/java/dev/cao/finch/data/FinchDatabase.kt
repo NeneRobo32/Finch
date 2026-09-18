@@ -20,7 +20,7 @@ class Converters {
 }
 
 /** Room schema 版本（迁移与备份校验共用） */
-const val FINCH_DB_VERSION = 8
+const val FINCH_DB_VERSION = 9
 
 @Database(
     entities = [Game::class, PlaySession::class, PlaytimeSnapshot::class],
@@ -97,9 +97,22 @@ abstract class FinchDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_8_9 = object : Migration(8, 9) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // 游戏状态（默认“在玩”=PLAYING；已通关的回填 COMPLETED）
+                db.execSQL("ALTER TABLE games ADD COLUMN status TEXT")
+                db.execSQL("ALTER TABLE games ADD COLUMN statusUpdatedAt INTEGER")
+                db.execSQL("UPDATE games SET status = 'COMPLETED' WHERE completed = 1")
+                db.execSQL("UPDATE games SET status = 'PLAYING' WHERE status IS NULL")
+                // 计时暂停累计
+                db.execSQL("ALTER TABLE play_sessions ADD COLUMN pauseAccumMs INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE play_sessions ADD COLUMN pauseStartedAt INTEGER")
+            }
+        }
+
         fun build(context: Context): FinchDatabase =
             Room.databaseBuilder(context, FinchDatabase::class.java, "finch.db")
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9)
                 .build()
     }
 }

@@ -39,6 +39,7 @@ import dev.cao.finch.TimeFormatter
 import dev.cao.finch.data.SessionWithGame
 import java.time.Duration
 import java.time.LocalDateTime
+import kotlinx.coroutines.launch
 
 @Composable
 fun HistoryScreen(viewModel: FinchViewModel, backdrop: com.kyant.backdrop.Backdrop? = null) {
@@ -66,21 +67,38 @@ fun HistoryScreen(viewModel: FinchViewModel, backdrop: com.kyant.backdrop.Backdr
             contentPadding = PaddingValues(bottom = 120.dp),
         ) {
             items(sessions, key = { it.session.id }) { item ->
-                SessionRow(item, backdrop, onDelete = { viewModel.deleteSession(item.session.id) })
+                SessionRow(
+                    item, backdrop,
+                    viewModel = viewModel,
+                    onDelete = { viewModel.deleteSession(item.session.id) },
+                )
             }
         }
     }
 }
 
 @Composable
-private fun SessionRow(item: SessionWithGame, backdrop: com.kyant.backdrop.Backdrop?, onDelete: () -> Unit) {
+private fun SessionRow(
+    item: SessionWithGame,
+    backdrop: com.kyant.backdrop.Backdrop?,
+    viewModel: FinchViewModel,
+    onDelete: () -> Unit,
+) {
     val s = item.session
     val running = s.endTime == null
     var showConfirm by remember { mutableStateOf(false) }
-    val duration = Duration.between(
-        s.startTime,
-        s.endTime ?: LocalDateTime.now(),
-    )
+    var showEdit by remember { mutableStateOf(false) }
+    var editError by remember { mutableStateOf<String?>(null) }
+    val scope = remember { kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main) }
+    // 已完成会话扣暂停，计时中实时走（扣暂停）
+    val duration = if (s.endTime != null) {
+        Duration.ofMillis(s.effectiveMillis())
+    } else {
+        Duration.between(s.startTime, LocalDateTime.now())
+            .minusMillis(s.pauseAccumMs + (s.pauseStartedAt?.let {
+                Duration.between(it, LocalDateTime.now()).toMillis()
+            } ?: 0L)).let { if (it.isNegative) Duration.ZERO else it }
+    }
     GlassCard(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp), backdrop = backdrop) {
         Row(
             modifier = Modifier
@@ -97,7 +115,7 @@ private fun SessionRow(item: SessionWithGame, backdrop: com.kyant.backdrop.Backd
                 )
                 Text(
                     TimeFormatter.range(s.startTime, s.endTime ?: LocalDateTime.now()) +
-                        if (running) " · 计时中" else "",
+                        if (running) (if (s.isPaused()) " · 已暂停" else " · 计时中") else "",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -115,6 +133,9 @@ private fun SessionRow(item: SessionWithGame, backdrop: com.kyant.backdrop.Backd
                     if (running) TimeFormatter.hms(duration) else TimeFormatter.hoursMinutes(duration),
                     style = MaterialTheme.typography.titleMedium,
                 )
+                if (!running) {
+                    TextButton(onClick = { showEdit = true }) { Text("编辑") }
+                }
                 IconButton(onClick = { showConfirm = true }) {
                     Icon(
                         Icons.Filled.Delete,
@@ -124,6 +145,24 @@ private fun SessionRow(item: SessionWithGame, backdrop: com.kyant.backdrop.Backd
                 }
             }
         }
+    }
+    if (showEdit && s.endTime != null) {
+        HistorySessionEditDialog(
+            session = s,
+            error = editError,
+            onDismiss = { showEdit = false; editError = null },
+            onConfirm = { start, end ->
+                scope.launch {
+                    val r = viewModel.updateSessionTimes(s.id, start, end)
+                    if (r.isSuccess) {
+                        showEdit = false
+                        editError = null
+                    } else {
+                        editError = r.exceptionOrNull()?.message ?: "保存失败"
+                    }
+                }
+            },
+        )
     }
     if (showConfirm) {
         AlertDialog(
@@ -141,6 +180,71 @@ private fun SessionRow(item: SessionWithGame, backdrop: com.kyant.backdrop.Backd
             },
         )
     }
+}
+
+/** 记录页的会话起止编辑框（与详情页同逻辑，独立一份避免跨文件私有复用） */
+@Composable
+private fun HistorySessionEditDialog(
+    session: dev.cao.finch.data.PlaySession,
+    error: String?,
+    onDismiss: () -> Unit,
+    onConfirm: (start: LocalDateTime, end: LocalDateTime) -> Unit,
+) {
+    val dateFmt = java.time.format.DateTimeFormatter.ofPattern("yyyy-M-d")
+    val timeFmt = java.time.format.DateTimeFormatter.ofPattern("H:mm")
+    var dateField by remember(session.id) { mutableStateOf(session.startTime.format(dateFmt)) }
+    var startField by remember(session.id) { mutableStateOf(session.startTime.format(timeFmt)) }
+    var endField by remember(session.id) {
+        mutableStateOf(session.endTime?.format(timeFmt) ?: session.startTime.format(timeFmt))
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("编辑记录") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                androidx.compose.material3.OutlinedTextField(
+                    value = dateField,
+                    onValueChange = { dateField = it },
+                    label = { Text("日期 2025-8-30") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    androidx.compose.material3.OutlinedTextField(
+                        value = startField,
+                        onValueChange = { startField = it },
+                        label = { Text("开始 21:30") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f),
+                    )
+                    androidx.compose.material3.OutlinedTextField(
+                        value = endField,
+                        onValueChange = { endField = it },
+                        label = { Text("结束 23:05") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+                if (error != null) {
+                    Text(error, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                runCatching {
+                    val date = java.time.LocalDate.parse(dateField.trim(), dateFmt)
+                    val start = java.time.LocalTime.parse(startField.trim(), timeFmt)
+                    val end = java.time.LocalTime.parse(endField.trim(), timeFmt)
+                    var s = LocalDateTime.of(date, start)
+                    var e = LocalDateTime.of(date, end)
+                    if (e.isBefore(s)) e = e.plusDays(1) // 跨夜
+                    onConfirm(s, e)
+                }
+            }) { Text("保存") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+    )
 }
 
 @Composable

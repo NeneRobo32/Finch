@@ -24,7 +24,6 @@ import androidx.glance.text.TextStyle
 import androidx.glance.unit.ColorProvider
 import dev.cao.finch.FinchApp
 import dev.cao.finch.data.PlaySession
-import java.time.Duration
 import java.time.LocalDateTime
 import java.time.ZoneId
 import kotlinx.coroutines.CoroutineScope
@@ -49,15 +48,19 @@ class FinchWidget : GlanceAppWidget() {
         val running: PlaySession? = db.sessionDao().running()
         val runningName: String? = running?.let { db.gameDao().byId(it.gameId)?.name }
         val startedAt = running?.startTime
+        val paused = running?.isPaused() == true
+        // 进行中这段按 effective 口径（扣暂停）；已完成会话聚合已在 DAO 层扣过暂停
+        val runningElapsedMin = running?.effectiveMillis()?.div(60_000) ?: 0L
+        // 今日总时长：已完成会话聚合是 DAO 层的（已扣暂停）；进行中这段用 effective 口径
         val todayMinutes = (db.sessionDao().totalBetween(todayStart, todayEnd) ?: 0L) / 60_000
 
         provideContent {
-            Content(runningName, startedAt, todayMinutes)
+            Content(runningName, runningElapsedMin, todayMinutes, paused)
         }
     }
 
     @Composable
-    private fun Content(runningName: String?, startedAt: LocalDateTime?, todayMinutes: Long) {
+    private fun Content(runningName: String?, runningElapsedMin: Long, todayMinutes: Long, paused: Boolean) {
         val muted = ColorProvider(Color(0xFF9AA4AE))
         Column(
             modifier = GlanceModifier
@@ -71,14 +74,13 @@ class FinchWidget : GlanceAppWidget() {
                     )
                 ),
         ) {
-            if (runningName != null && startedAt != null) {
-                val elapsedMin = Duration.between(startedAt, LocalDateTime.now()).toMinutes()
+            if (runningName != null) {
                 Text(
-                    "正在玩 $runningName",
+                    (if (paused) "已暂停 " else "正在玩 ") + runningName,
                     style = TextStyle(color = ColorProvider(Color.White), fontSize = 14.sp),
                     maxLines = 1,
                 )
-                Text("已玩 $elapsedMin 分钟", style = TextStyle(color = muted, fontSize = 12.sp))
+                Text("已玩 $runningElapsedMin 分钟", style = TextStyle(color = muted, fontSize = 12.sp))
             } else {
                 Text("Finch", style = TextStyle(color = ColorProvider(Color.White), fontSize = 14.sp))
             }

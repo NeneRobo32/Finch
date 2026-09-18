@@ -36,7 +36,14 @@ data class Game(
     val rating: Int? = null,
     // 感想
     val thoughts: String? = null,
+    // 游戏状态（v0.13：想玩/在玩/搁置/通关/全成就）；null/未知 → 在玩
+    val status: GameStatus? = null,
+    val statusUpdatedAt: LocalDateTime? = null,
 ) {
     fun platformSet(): Set<Platform> =
         GameRepository.csvToPlatforms(platformsCsv).toSet().ifEmpty { setOf(platform) }
+
+    /** 有效状态：status 为空的老数据按 completed 回填（通关→COMPLETED，否则在玩） */
+    fun statusResolved(): GameStatus =
+        status ?: if (completed) GameStatus.COMPLETED else GameStatus.PLAYING
 }

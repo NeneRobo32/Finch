@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import dev.cao.finch.FinchApp
 import dev.cao.finch.data.Game
 import dev.cao.finch.data.GameStatsRow
+import dev.cao.finch.data.GameStatus
 import dev.cao.finch.data.SessionWithGame
 import dev.cao.finch.data.SyncEngine
 import dev.cao.finch.timer.TimerServiceBridge
@@ -71,13 +72,15 @@ class FinchViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { updateGame(id) { it.copy(favorite = !it.favorite) } }
     }
 
-    /** 勾选通关时自动记录通关日期；取消勾选清空 */
+    /** 勾选通关时自动记录通关日期；取消勾选清空（同步 status 双写） */
     fun setCompleted(id: Long, completed: Boolean) {
         viewModelScope.launch {
             updateGame(id) {
                 it.copy(
                     completed = completed,
                     completedAt = if (completed) (it.completedAt ?: LocalDateTime.now()) else null,
+                    status = if (completed) GameStatus.COMPLETED else GameStatus.PLAYING,
+                    statusUpdatedAt = LocalDateTime.now(),
                 )
             }
         }
@@ -85,6 +88,36 @@ class FinchViewModel(app: Application) : AndroidViewModel(app) {
 
     fun setRating(id: Long, rating: Int?) {
         viewModelScope.launch { updateGame(id) { it.copy(rating = rating) } }
+    }
+
+    /** 游戏状态：设为通关/全成就时同步旧 completed 布尔与通关日期，保持双写一致 */
+    fun setStatus(id: Long, status: GameStatus) {
+        viewModelScope.launch {
+            updateGame(id) {
+                val done = status.isCompleted()
+                it.copy(
+                    status = status,
+                    statusUpdatedAt = LocalDateTime.now(),
+                    completed = done,
+                    completedAt = if (done) (it.completedAt ?: LocalDateTime.now()) else null,
+                )
+            }
+        }
+    }
+
+    /** 主页排序：每游戏累计（扣暂停） */
+    val totalsMap: StateFlow<Map<Long, Long>> = sessionDao.observeTotalsAll()
+        .map { rows -> rows.mapNotNull { r -> r.totalMs?.let { r.gameId to it } }.toMap() }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
+
+    /** 会话起止编辑（结束必须晚于开始；只允许改已完成会话） */
+    suspend fun updateSessionTimes(id: Long, start: LocalDateTime, end: LocalDateTime): Result<Unit> {
+        if (!end.isAfter(start)) return Result.failure(IllegalArgumentException("结束时间需晚于开始时间"))
+        val s = sessionDao.byId(id) ?: return Result.failure(IllegalArgumentException("记录不存在"))
+        if (s.endTime == null) return Result.failure(IllegalArgumentException("进行中的会话不能改时间，先停止"))
+        if (start.isAfter(LocalDateTime.now())) return Result.failure(IllegalArgumentException("开始时间不能在未来"))
+        sessionDao.update(s.copy(startTime = start, endTime = end))
+        return Result.success(Unit)
     }
 
     fun setThoughts(id: Long, text: String) {

@@ -87,6 +87,16 @@ interface SessionDao {
     @Query("SELECT * FROM play_sessions WHERE endTime IS NULL ORDER BY startTime DESC LIMIT 1")
     suspend fun running(): PlaySession?
 
+    @Query("SELECT * FROM play_sessions WHERE id = :id")
+    suspend fun byId(id: Long): PlaySession?
+
+    /** 每款游戏的已完成会话累计（扣暂停），主页按总时长排序用 */
+    @Query(
+        "SELECT gameId, SUM(endTime - startTime - COALESCE(pauseAccumMs, 0)) AS totalMs " +
+            "FROM play_sessions WHERE endTime IS NOT NULL GROUP BY gameId"
+    )
+    fun observeTotalsAll(): Flow<List<GameTotalMini>>
+
     /** 每款游戏最后游玩时间（会话里 endTime 非空才算完成游玩） */
     @Query(
         "SELECT gameId, MAX(startTime) AS lastPlayedAt FROM play_sessions " +
@@ -110,7 +120,7 @@ interface SessionDao {
 
     @Query(
         """
-        SELECT SUM(endTime - startTime) FROM play_sessions
+        SELECT SUM(endTime - startTime - COALESCE(pauseAccumMs, 0)) FROM play_sessions
         WHERE endTime IS NOT NULL AND startTime >= :fromMillis AND startTime < :toMillis
         """
     )
@@ -118,7 +128,7 @@ interface SessionDao {
 
     @Query(
         """
-        SELECT SUM(endTime - startTime) FROM play_sessions
+        SELECT SUM(endTime - startTime - COALESCE(pauseAccumMs, 0)) FROM play_sessions
         WHERE endTime IS NOT NULL AND startTime >= :fromMillis AND startTime < :toMillis
         """
     )
@@ -135,7 +145,7 @@ interface SessionDao {
     @Query(
         """
         SELECT strftime('%Y-%m-%d', startTime / 1000, 'unixepoch', 'localtime') AS day,
-               SUM(endTime - startTime) AS totalMs
+               SUM(endTime - startTime - COALESCE(pauseAccumMs, 0)) AS totalMs
         FROM play_sessions
         WHERE endTime IS NOT NULL AND startTime >= :fromMillis AND startTime < :toMillis
         GROUP BY day ORDER BY day
@@ -145,7 +155,7 @@ interface SessionDao {
 
     @Query(
         """
-        SELECT g.platform AS platform, SUM(s.endTime - s.startTime) AS totalMs
+        SELECT g.platform AS platform, SUM(s.endTime - s.startTime - COALESCE(s.pauseAccumMs, 0)) AS totalMs
         FROM play_sessions s JOIN games g ON g.id = s.gameId
         WHERE s.endTime IS NOT NULL AND s.startTime >= :fromMillis AND s.startTime < :toMillis
         GROUP BY g.platform
@@ -154,7 +164,7 @@ interface SessionDao {
     fun observePlatformTotals(fromMillis: Long, toMillis: Long): Flow<List<PlatformTotal>>
 
     @Query("SELECT g.id AS gameId, g.name AS name, g.platform AS platform, g.coverUrl AS coverUrl,\n" +
-        "       g.steamPlaytimeMin AS steamPlaytimeMin, SUM(s.endTime - s.startTime) AS totalMs, COUNT(s.id) AS sessionCount\n" +
+        "       g.steamPlaytimeMin AS steamPlaytimeMin, SUM(s.endTime - s.startTime - COALESCE(s.pauseAccumMs, 0)) AS totalMs, COUNT(s.id) AS sessionCount\n" +
         "FROM play_sessions s JOIN games g ON g.id = s.gameId\n" +
         "WHERE s.endTime IS NOT NULL AND s.startTime >= :fromMillis AND s.startTime < :toMillis\n" +
         "GROUP BY g.id ORDER BY totalMs DESC")
@@ -168,10 +178,10 @@ interface SessionDao {
     @Query("SELECT * FROM play_sessions WHERE gameId = :gameId AND endTime IS NOT NULL ORDER BY startTime DESC LIMIT 50")
     fun observeSessionsForGame(gameId: Long): Flow<List<PlaySession>>
 
-    /** 某游戏的累计统计（总时长 / 会话数 / 最近游玩） */
+    /** 某游戏的累计统计（总时长扣掉暂停 / 会话数 / 最近游玩） */
     @Query(
         """
-        SELECT SUM(endTime - startTime) AS totalMs, COUNT(id) AS sessionCount, MAX(startTime) AS lastPlayedAt
+        SELECT SUM(endTime - startTime - COALESCE(pauseAccumMs, 0)) AS totalMs, COUNT(id) AS sessionCount, MAX(startTime) AS lastPlayedAt
         FROM play_sessions WHERE gameId = :gameId AND endTime IS NOT NULL
         """
     )
