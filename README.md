@@ -22,24 +22,20 @@
 
 ## 构建
 
-工具链已装在 `E:\Android\tools\`（JDK17、Gradle 9.7.1、Android SDK），无需 Android Studio。
-
-Gradle Wrapper 固定 9.7.1，`distributionUrl` 指向腾讯镜像；本地已有 `E:\Android\gradle-9.7.1-bin.zip`，离线时可解压到 `tools\` 使用。
+需要 JDK 17 + Android SDK（`compileSdk 36`），无需 Android Studio。
 
 Git Bash：
 
 ```bash
-export JAVA_HOME='E:\Android\tools\jdk-17.0.20.1+1'
-export GRADLE_USER_HOME='E:\Android\tools\gradle-home'
-cd /e/Android/Finch
+export JAVA_HOME='<你的 JDK 17 路径>'
+cd Finch
 ./gradlew :app:assembleDebug
 ```
 
 PowerShell：
 
 ```powershell
-$env:JAVA_HOME='E:\Android\tools\jdk-17.0.20.1+1'
-$env:GRADLE_USER_HOME='E:\Android\tools\gradle-home'
+$env:JAVA_HOME='<你的 JDK 17 路径>'
 .\gradlew.bat :app:assembleDebug
 ```
 
@@ -56,11 +52,11 @@ Release：`.\gradlew.bat :app:assembleRelease`（已开 R8 + 资源缩减）。�
 
 ## 版本管理
 
-仓库用 git 管理，发版打 tag（`v0.10.8` 对应基线 `2b813e6`）。提交身份当前是仓库本地配置（`cao / cao@localhost`），推送 GitHub 前请改成本人邮箱：
+发版打 tag（`v0.10.8` 起为基线版本）。
 
-```bash
-git config user.email "you@example.com"
-```
+## 开源协议
+
+MIT，见 [LICENSE](./LICENSE)。
 
 ## 路线图
 
