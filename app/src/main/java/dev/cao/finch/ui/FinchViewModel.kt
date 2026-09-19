@@ -126,6 +126,15 @@ class FinchViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { updateGame(id) { it.copy(thoughts = text.trim().ifEmpty { null }) } }
     }
 
+    /** 通关参考时长（分钟）：手动填/抓取写入；null/<=0 清除（隐藏进度条） */
+    fun setHltb(id: Long, minutes: Long?) {
+        viewModelScope.launch {
+            updateGame(id) {
+                it.copy(hltbMainMin = minutes?.takeIf { m -> m > 0 })
+            }
+        }
+    }
+
     // ---- 下拉刷新同步（Steam + Switch） ----
 
     /** 是否正在同步（下拉刷新的转圈显示） */

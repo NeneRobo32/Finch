@@ -1,9 +1,10 @@
 # Finch 路线图
 
-基线：`v0.14.1`（DB v11，versionCode 52）。三大源导入已齐，详情页/总结页/小组件已落地；
+基线：`v0.15.0`（DB v12，versionCode 54）。三大源导入已齐，详情页/总结页/小组件已落地；
 v0.13 已交付游戏状态＋主页筛选、计时暂停/继续、会话可编辑；
-v0.14 已交付热力图＋作息＋战报分享 v1（回本率按需求移除，DB 11 去掉价格列）。
-下阶段主题：**让日程有用 → 让数据更安全 → 让留存更有趣**。
+v0.14 已交付热力图＋作息＋战报分享 v1（回本率按需求移除）；
+v0.15 已交付发售关注＋推送、通关进度条、WorkManager 基建。
+下阶段主题：**让数据更安全 → 让留存更有趣**。
 
 ## 规划原则
 
@@ -18,6 +19,7 @@ v0.14 已交付热力图＋作息＋战报分享 v1（回本率按需求移除�
 |------|------|----------|----|----------|
 | v0.13 ✅已交付 | 库管与计时可信 | 游戏状态＋主页筛选；计时暂停/继续；会话可编辑 | 8→9 | 无 |
 | v0.14 ✅已交付 | 总结可视化 | 热力图；作息（周几/几点）；战报分享 v1（回本率已移除） | 9→10→11 | 无 |
+| v0.15 ✅已交付 | 日程变有用 | 发售关注＋推送；通关进度条；WorkManager 基建 | 11→12 | `work-runtime-ktx` |
 | v0.14 | 总结可视化 | 年度热力图；时段分布（周几/几点）；元/小时回本率；月度战报海报 v1 | 9→10 | 无（加 `share` 用系统 API） |
 | v0.15 | 日程变有用 | 发售关注＋发售前推送；通关进度条（HLTB 参考）；WorkManager 基建 | 10→11 | `androidx.work:work-runtime-ktx` |
 | v0.16 | 数据安全与分发 | 自动备份；CSV 导出；私有分发＋应用内版本检查 | 11（不变） | 无（复用 WorkManager） |
@@ -91,16 +93,24 @@ gantt
 
 </details>
 
-## v0.15 —— 日程变有用（DB 10→11）
+## v0.15 —— 日程变有用（DB 11→12）✅ 已交付（v0.15.0）
 
-**为什么**：日程页现在只能“看”，加关注+推送就变成“用”。WorkManager 在此版一次性引入，后面自动备份直接复用。
+**为什么**：日程页从“看”到“用”。WorkManager 在此版一次性引入，v0.16 自动备份直接复用。
 
+- **发售关注＋推送** ✅：`release_follows` 表（MIGRATION_11_12），日程行 ☆/★ + 顶部置顶卡，Worker 每天检查发售前 3 天推送
+- **通关进度条** ✅：`games.hltbMainMin`（并入 11→12），手动填参考时长（清空隐藏）；HLTB 在线抓取降级为手动，可用性优先
+- **WorkManager 基建** ✅：`work-runtime-ktx:2.10.4`，`FinchApp.onCreate` 调度（KEEP）
+
+<details>
+<summary>原计划明细（已实现，展开查看）</summary>
 - **WorkManager 基建**：加 `androidx.work:work-runtime-ktx`，先做一个 `DailyCheckWorker` 空壳（每天跑一次，打 log），为关注推送和自动备份铺路。注意 Doze/省电白名单提示文案。
 - **发售关注＋推送**：新表 `release_follows(name/coverUrl/date/source/notifyDays)`（MIGRATION_10_11 建表），日程页每行加“☆关注”，3 天内发售发本地通知，点通知进详情/入库。
   改动：`ui/UpcomingScreen.kt`、`ui/UpcomingViewModel.kt`、新 `data/ReleaseFollow.kt + Worker`。
 - **通关进度条（HLTB 参考）**：`games` 加 `hltbMainMin INTEGER`（并入 10→11 迁移），数据源先用 Bangumi 条目信息/手动填，HLTB 抓取做成可降级（抓不到就隐藏进度条，不报错）。详情页显示“已玩 Xh / 主线 Yh（Z%）”。
 - **验收**：关注 3 天后的游戏能收到通知（杀进程后仍能）；无 HLTB 数据时详情页无变化；WorkManager 在小米/三星上不过度耗电。
 - **工作量**：L（约 3 周，推送联调是风险点）。
+
+</details>
 
 ## v0.16 —— 数据安全与分发（DB 不变）
 
@@ -133,7 +143,8 @@ gantt
 | 8 | v0.12.2（旧基线） | `favorite/completed/completedAt/rating/thoughts` |
 | 9 | v0.13.x（已交付） | `games.status + statusUpdatedAt`（已通关回填 COMPLETED）；`play_sessions.pauseAccumMs + pauseStartedAt` |
 | 10 | v0.14.0（过渡） | `games.priceCny + priceFetchedAt`（回本率引入；v0.14.1 移除，仅作迁移垫脚） |
-| 11 | v0.14.1（现状） | 重建 games 表去掉价格列（与 v9 表结构一致） |
+| 11 | v0.14.x（已交付） | 重建 games 表去掉价格列（与 v9 表结构一致） |
+| 12 | v0.15.0（现状） | 新表 `release_follows`；`games.hltbMainMin` |
 | 10 | v0.14 | `games.priceCny + priceFetchedAt` |
 | 11 | v0.15 | 新表 `release_follows`；`games.hltbMainMin` |
 | 11 | v0.16 / v0.17 | 不变（设置项走 `SettingsStore`，徽章纯算） |
@@ -150,6 +161,7 @@ gantt
 ## 建议的动手顺序
 
 1. **v0.13 ✅ 已交付**：状态＋暂停＋编辑，一版让“记”可信。
-2. **v0.14 ✅ 已交付**：热力图＋作息＋回本率＋战报分享 v1，让“看”值得分享。
-3. v0.15/0.16 可并行：一个做推送、一个做备份分发，互不 blok。
+2. **v0.14 ✅ 已交付**：热力图＋作息＋战报分享 v1，让“看”值得分享。
+3. **v0.15 ✅ 已交付**：发售关注＋推送、通关进度条，WorkManager 基建一次到位。
+4. v0.16 跟上：自动备份＋CSV＋版本检查（复用 WorkManager），纯工程版。
 4. v0.17 收尾：徽章＋预算，把留存拉起来。

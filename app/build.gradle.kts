@@ -26,8 +26,8 @@ android {
         applicationId = "dev.cao.finch"
         minSdk = 26
         targetSdk = 36
-        versionCode = 53
-        versionName = "0.14.2"
+        versionCode = 54
+        versionName = "0.15.0"
     }
 
     signingConfigs {
@@ -84,6 +84,8 @@ dependencies {
     implementation("io.github.kyant0:shapes:1.2.0")
     // 桌面小组件
     implementation("androidx.glance:glance-appwidget:1.1.1")
+    // 后台任务（v0.15 发售提醒 + v0.16 自动备份/版本检查共用）
+    implementation("androidx.work:work-runtime-ktx:2.10.4")
     debugImplementation("androidx.compose.ui:ui-tooling")
     testImplementation("junit:junit:4.13.2")
 }

@@ -17,7 +17,10 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.time.LocalDate
@@ -26,7 +29,49 @@ import java.time.LocalDate
 class UpcomingViewModel(app: Application) : AndroidViewModel(app) {
     private val db = (app as FinchApp).database
     private val gameDao = db.gameDao()
+    private val followDao = db.releaseFollowDao()
     private val cacheSp = app.getSharedPreferences("finch_upcoming", android.content.Context.MODE_PRIVATE)
+
+    /** 已关注的 key 集合（日程行显示 ★ 状态用） */
+    val followKeys: StateFlow<Set<String>> = followDao.observeKeys()
+        .map { it.toSet() }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptySet())
+
+    /** 我的关注列表（置顶展示用） */
+    val follows: StateFlow<List<dev.cao.finch.data.ReleaseFollow>> = followDao.observeAll()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    /** 关注去重键：bangumi / steam 优先，否则归一化名字 */
+    fun followKeyOf(entry: UpcomingEntry): String = when {
+        entry.bangumiId != null -> "bangumi:${entry.bangumiId}"
+        entry.steamAppId != null -> "steam:${entry.steamAppId}"
+        else -> "name:" + entry.name.lowercase().replace(" ", "")
+    }
+
+    /** 切换关注（关注默认提前 3 天提醒；取消直接删） */
+    fun toggleFollow(entry: UpcomingEntry) {
+        viewModelScope.launch {
+            val key = followKeyOf(entry)
+            if (followDao.byKey(key) != null) {
+                followDao.deleteByKey(key)
+            } else {
+                followDao.insert(
+                    dev.cao.finch.data.ReleaseFollow(
+                        key = key,
+                        name = entry.name,
+                        coverUrl = entry.coverUrl,
+                        dateIso = entry.date?.toString(),
+                        source = entry.source,
+                        notifyDays = 3,
+                    )
+                )
+                // 顺手排一次后台检查（应用在前台时立刻有一条兜底判断，不等明天）
+                runCatching {
+                    dev.cao.finch.notify.ReleaseCheckWorker.schedule(getApplication())
+                }
+            }
+        }
+    }
 
     data class UpcomingEntry(
         val name: String,

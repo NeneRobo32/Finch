@@ -66,6 +66,8 @@ fun UpcomingScreen(
     var platformPickerFor by remember { mutableStateOf<UpcomingViewModel.UpcomingEntry?>(null) }
     var query by remember { mutableStateOf("") }
     val source by upcomingViewModel.source.collectAsState()
+    val followKeys by upcomingViewModel.followKeys.collectAsState()
+    val follows by upcomingViewModel.follows.collectAsState()
 
     Column(
         modifier = Modifier
@@ -119,6 +121,54 @@ fun UpcomingScreen(
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
         )
+
+        // 我的关注（置顶，有关注才出现）
+        if (follows.isNotEmpty()) {
+            GlassCard(modifier = Modifier.fillMaxWidth(), backdrop = backdrop) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        "我的关注（${follows.size}）",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    follows.take(10).forEach { f ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                f.name,
+                                style = MaterialTheme.typography.bodyMedium,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f),
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            val countdown = remember(f.dateIso) {
+                                val d = runCatching {
+                                    LocalDate.parse(f.dateIso, DateTimeFormatter.ISO_DATE)
+                                }.getOrNull()
+                                if (d == null) "日期待定"
+                                else dev.cao.finch.notify.ReleaseCheckWorker.countdownText(LocalDate.now(), d, f.notifyDays)
+                                    ?: d.format(DateTimeFormatter.ofPattern("M月d日"))
+                            }
+                            Text(
+                                countdown,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.primary,
+                                maxLines = 1,
+                            )
+                        }
+                    }
+                    Text(
+                        "每天检查一次，发售前 3 天发通知（省电模式下可能延迟）",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
 
         val s = state
         when (s) {
@@ -198,6 +248,8 @@ fun UpcomingScreen(
                                     UpcomingRow(
                                         entry = entry,
                                         backdrop = backdrop,
+                                        followed = upcomingViewModel.followKeyOf(entry) in followKeys,
+                                        onToggleFollow = { upcomingViewModel.toggleFollow(entry) },
                                         onAdd = {
                                             if (entry.platforms.isEmpty()) {
                                                 platformPickerFor = entry
@@ -236,6 +288,8 @@ fun UpcomingScreen(
 private fun UpcomingRow(
     entry: UpcomingViewModel.UpcomingEntry,
     backdrop: com.kyant.backdrop.Backdrop?,
+    followed: Boolean,
+    onToggleFollow: () -> Unit,
     onAdd: () -> Unit,
 ) {
     GlassCard(modifier = Modifier.fillMaxWidth(), backdrop = backdrop) {
@@ -314,9 +368,14 @@ private fun UpcomingRow(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             } else {
-                Button(onClick = onAdd) {
-                    Icon(Icons.Filled.Add, contentDescription = null)
-                    Text("入库")
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    TextButton(onClick = onToggleFollow) {
+                        Text(if (followed) "★" else "☆", maxLines = 1)
+                    }
+                    Button(onClick = onAdd) {
+                        Icon(Icons.Filled.Add, contentDescription = null)
+                        Text("入库")
+                    }
                 }
             }
         }

@@ -20,10 +20,10 @@ class Converters {
 }
 
 /** Room schema 版本（迁移与备份校验共用） */
-const val FINCH_DB_VERSION = 11
+const val FINCH_DB_VERSION = 12
 
 @Database(
-    entities = [Game::class, PlaySession::class, PlaytimeSnapshot::class],
+    entities = [Game::class, PlaySession::class, PlaytimeSnapshot::class, ReleaseFollow::class],
     version = FINCH_DB_VERSION,
     exportSchema = true,
 )
@@ -32,6 +32,7 @@ abstract class FinchDatabase : RoomDatabase() {
     abstract fun gameDao(): GameDao
     abstract fun sessionDao(): SessionDao
     abstract fun snapshotDao(): SnapshotDao
+    abstract fun releaseFollowDao(): ReleaseFollowDao
 
     companion object {
         val MIGRATION_1_2 = object : Migration(1, 2) {
@@ -148,9 +149,27 @@ abstract class FinchDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_11_12 = object : Migration(11, 12) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // 发售关注表 + 通关参考时长（null=未知，不回填）
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `release_follows` (" +
+                        "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "`key` TEXT NOT NULL, `name` TEXT NOT NULL, `coverUrl` TEXT, " +
+                        "`dateIso` TEXT, `source` TEXT NOT NULL, `notifyDays` INTEGER NOT NULL, " +
+                        "`addedAt` INTEGER NOT NULL, `notifiedFor` TEXT)"
+                )
+                db.execSQL(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS `index_release_follows_key` " +
+                        "ON `release_follows` (`key`)"
+                )
+                db.execSQL("ALTER TABLE games ADD COLUMN hltbMainMin INTEGER")
+            }
+        }
+
         fun build(context: Context): FinchDatabase =
             Room.databaseBuilder(context, FinchDatabase::class.java, "finch.db")
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12)
                 .build()
     }
 }

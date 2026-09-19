@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -341,6 +342,22 @@ fun GameDetailScreen(
                     StatBox("最近", stats.lastPlayedAt?.let { relativeTime(it) } ?: "—", Modifier.weight(1f))
                 }
 
+                // 通关进度（有参考时长才展示；无数据整卡隐藏，不打扰）
+                val playedMin = (stats.totalMs ?: 0L) / 60_000
+                val hltbMin = game.hltbMainMin
+                if (hltbMin != null && hltbMin > 0) {
+                    Spacer(Modifier.height(12.dp))
+                    HltbProgressCard(
+                        playedMin = playedMin,
+                        hltbMin = hltbMin,
+                        onEdit = { viewModel.setHltb(game.id, it) },
+                    )
+                } else {
+                    // 无参考时长：给个小入口手动填（折叠成一行，不占地方）
+                    Spacer(Modifier.height(12.dp))
+                    HltbEmptyRow(onSave = { viewModel.setHltb(game.id, it) })
+                }
+
                 Spacer(Modifier.height(12.dp))
 
                 // 状态卡：游戏状态 + 已通关 + 评分
@@ -617,6 +634,116 @@ private fun SessionEditDialog(
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
     )
+}
+
+/** 通关进度条：已玩 Xh / 主线 Yh（Z%）；点数字可改参考时长，清空则隐藏 */
+@Composable
+private fun HltbProgressCard(playedMin: Long, hltbMin: Long, onEdit: (Long?) -> Unit) {
+    var editing by remember { mutableStateOf(false) }
+    var field by remember(hltbMin) { mutableStateOf((hltbMin / 60).toString()) }
+    val frac = (playedMin.toFloat() / hltbMin).coerceIn(0f, 1f)
+    val done = playedMin >= hltbMin
+    GlassCard(modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("通关进度", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                TextButton(onClick = { editing = !editing }) { Text(if (editing) "收起" else "改参考") }
+            }
+            // 进度条
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .height(12.dp)
+                    .clip(androidx.compose.foundation.shape.CircleShape)
+                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)),
+            ) {
+                Box(
+                    Modifier
+                        .fillMaxWidth(frac.coerceAtLeast(0.04f))
+                        .fillMaxHeight()
+                        .clip(androidx.compose.foundation.shape.CircleShape)
+                        .background(
+                            if (done) MaterialTheme.colorScheme.tertiary
+                            else MaterialTheme.colorScheme.primary
+                        ),
+                )
+            }
+            Text(
+                "已玩 ${TimeFormatter.hoursMinutes(Duration.ofMinutes(playedMin))} / " +
+                    "主线约 ${TimeFormatter.hoursMinutes(Duration.ofMinutes(hltbMin))}" +
+                    "（${(frac * 100).toInt()}%）" +
+                    if (done) " · 超了，加量不加价 ✓" else "",
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            Text(
+                "参考时长可手动填（查 HowLongToBeat 主线时间）；清空则隐藏本卡",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (editing) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = field,
+                        onValueChange = { field = it.filter { c -> c.isDigit() }.take(4) },
+                        label = { Text("主线小时数") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f),
+                    )
+                    TextButton(onClick = {
+                        val mins = field.toLongOrNull()?.times(60)
+                        onEdit(mins)
+                        editing = false
+                    }) { Text("保存") }
+                    TextButton(onClick = {
+                        onEdit(null)
+                        editing = false
+                    }) { Text("清除") }
+                }
+            }
+        }
+    }
+}
+
+/** 无参考时长时的一行小入口：展开填主线小时数 */
+@Composable
+private fun HltbEmptyRow(onSave: (Long?) -> Unit) {
+    var editing by remember { mutableStateOf(false) }
+    var field by remember { mutableStateOf("") }
+    GlassCard(modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "通关进度（未设参考时长）",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                TextButton(onClick = { editing = !editing }) { Text(if (editing) "收起" else "设置") }
+            }
+            if (editing) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = field,
+                        onValueChange = { field = it.filter { c -> c.isDigit() }.take(4) },
+                        label = { Text("主线小时数（如 40）") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f),
+                    )
+                    TextButton(onClick = {
+                        onSave(field.toLongOrNull()?.times(60))
+                        editing = false
+                    }) { Text("保存") }
+                }
+            }
+        }
+    }
 }
 
 /** 单条游玩记录：起止时间 + 时长（扣暂停） + 编辑 + 删除 */

@@ -39,6 +39,8 @@ data class Game(
     // 游戏状态（v0.13：想玩/在玩/搁置/通关/全成就）；null/未知 → 在玩
     val status: GameStatus? = null,
     val statusUpdatedAt: LocalDateTime? = null,
+    // 通关参考时长（v0.15 进度条）：主线分钟数；null=未知（隐藏进度条）
+    val hltbMainMin: Long? = null,
 ) {
     fun platformSet(): Set<Platform> =
         GameRepository.csvToPlatforms(platformsCsv).toSet().ifEmpty { setOf(platform) }
