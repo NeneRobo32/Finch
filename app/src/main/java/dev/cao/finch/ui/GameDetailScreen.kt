@@ -342,9 +342,22 @@ fun GameDetailScreen(
                     StatBox("最近", stats.lastPlayedAt?.let { relativeTime(it) } ?: "—", Modifier.weight(1f))
                 }
 
-                // 通关进度（三段：主线/支线/全收集；有任一段才展示，否则给小入口）
+                // 通关进度（三段：主线/支线/全收集；有点开自动获取一次，有任一段即展示）
                 val playedMin = (stats.totalMs ?: 0L) / 60_000
                 val hltbMin = game.hltbMainMin
+                // 点开卡片自动获取：无三围时触发一次；已有任一段不再自动抓
+                var hltbAutoState by remember(game.id) { mutableStateOf(HltbAuto.IDLE) }
+                LaunchedEffect(game.id) {
+                    val g = game
+                    if ((g.hltbMainMin ?: 0) <= 0 && (g.hltbExtraMin ?: 0) <= 0 && (g.hltb100Min ?: 0) <= 0) {
+                        hltbAutoState = HltbAuto.LOADING
+                        viewModel.fetchHltbTimes(g.id, null) { r ->
+                            hltbAutoState = if (r.isSuccess) HltbAuto.DONE else HltbAuto.FAILED
+                        }
+                    } else {
+                        hltbAutoState = HltbAuto.DONE // 已有数据：不自动抓
+                    }
+                }
                 if (hltbMin != null && hltbMin > 0) {
                     Spacer(Modifier.height(12.dp))
                     HltbProgressCard(
@@ -358,12 +371,19 @@ fun GameDetailScreen(
                         onEdit = { viewModel.setHltb(game.id, it) },
                     )
                 } else {
-                    // 无参考时长：给个小入口（自动获取 HLTB / 手动填，不占地方）
+                    // 无参考时长：自动获取中 / 失败原因 + 手动入口（不占地方）
                     Spacer(Modifier.height(12.dp))
                     HltbEmptyRow(
                         viewModel = viewModel,
                         gameId = game.id,
                         steamAppId = game.steamAppId,
+                        autoState = hltbAutoState,
+                        onRetry = {
+                            hltbAutoState = HltbAuto.LOADING
+                            viewModel.fetchHltbTimes(game.id, null) { r ->
+                                hltbAutoState = if (r.isSuccess) HltbAuto.DONE else HltbAuto.FAILED
+                            }
+                        },
                         onSave = { viewModel.setHltb(game.id, it) },
                     )
                 }
@@ -646,6 +666,9 @@ private fun SessionEditDialog(
     )
 }
 
+/** HLTB 点开自动获取的状态机：只在无三围时触发一次 */
+private enum class HltbAuto { IDLE, LOADING, DONE, FAILED }
+
 /** 通关进度条（三段）：已玩 Xh / 主线 Yh（Z%），支线/全收集参考行；可改参考，可自动从 HLTB 获取 */
 @Composable
 private fun HltbProgressCard(
@@ -756,9 +779,10 @@ private fun HltbProgressCard(
                         onClick = {
                             fetching = true
                             fetchMsg = null
-                            viewModel.fetchHltbTimes(gameId, hltbInput.ifBlank { null }) { times ->
+                            viewModel.fetchHltbTimes(gameId, hltbInput.ifBlank { null }) { r ->
                                 fetching = false
-                                fetchMsg = if (times != null) "已更新" else "没抓到，手动填或换个 id"
+                                fetchMsg = if (r.isSuccess) "已更新"
+                                else (r.exceptionOrNull()?.message ?: "没抓到")
                             }
                         },
                     ) { Text(if (fetching) "获取中…" else "从 HLTB 获取") }
@@ -783,12 +807,14 @@ private fun HltbProgressCard(
     }
 }
 
-/** 无参考时长时的一行小入口：HLTB 自动获取 / 手动填 */
+/** 无参考时长时的一行小入口：自动获取状态 + HLTB 手动贴 / 手动填 */
 @Composable
 private fun HltbEmptyRow(
     viewModel: FinchViewModel,
     gameId: Long,
     steamAppId: Long?,
+    autoState: HltbAuto,
+    onRetry: () -> Unit,
     onSave: (Long?) -> Unit,
 ) {
     var editing by remember { mutableStateOf(false) }
@@ -804,11 +830,23 @@ private fun HltbEmptyRow(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    "通关进度（未设参考时长）",
+                    when (autoState) {
+                        HltbAuto.LOADING -> "通关进度（正在从 HLTB 获取…）"
+                        HltbAuto.FAILED -> "通关进度（自动获取失败）"
+                        else -> "通关进度（未设参考时长）"
+                    },
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                TextButton(onClick = { editing = !editing }) { Text(if (editing) "收起" else "设置") }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (autoState == HltbAuto.FAILED) {
+                        TextButton(onClick = {
+                            fetchMsg = null
+                            onRetry()
+                        }) { Text("重试") }
+                    }
+                    TextButton(onClick = { editing = !editing }) { Text(if (editing) "收起" else "设置") }
+                }
             }
             if (editing) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -837,13 +875,13 @@ private fun HltbEmptyRow(
                         onClick = {
                             fetching = true
                             fetchMsg = null
-                            viewModel.fetchHltbTimes(gameId, hltbInput.ifBlank { null }) { times ->
+                            viewModel.fetchHltbTimes(gameId, hltbInput.ifBlank { null }) { r ->
                                 fetching = false
-                                if (times != null) {
+                                if (r.isSuccess) {
                                     fetchMsg = "已更新"
                                     editing = false
                                 } else {
-                                    fetchMsg = "没抓到，手动填或换个 id"
+                                    fetchMsg = r.exceptionOrNull()?.message ?: "没抓到"
                                 }
                             }
                         },
@@ -859,7 +897,7 @@ private fun HltbEmptyRow(
                 }
                 if (steamAppId == null && hltbInput.isBlank()) {
                     Text(
-                        "Steam 游戏不填也能试（从商店页找 HLTB 外链）",
+                        "Steam 游戏不填也能试（从商店页找 HLTB 外链）；IGDB 配了凭证会先走 IGDB 联动",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

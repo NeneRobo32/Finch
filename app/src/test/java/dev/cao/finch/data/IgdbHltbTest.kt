@@ -105,4 +105,14 @@ class IgdbHltbTest {
         assertNull(HltbClient.parseGameId(""))
         assertNull(HltbClient.parseGameId("abc"))
     }
+
+    @Test
+    fun `HLTB归一化_中英符号去噪`() {
+        // findIdViaIgdb 内部归一化：小写+去非字母数字/CJK——与单测同规则冒烟
+        fun norm(s: String): String =
+            s.lowercase().replace(Regex("[^a-z0-9\u4e00-\u9fa5]"), "")
+        assertEquals("eldenring", norm("Elden Ring"))
+        assertEquals("xenoblade2", norm("Xenoblade 2"))
+        assertEquals("thewitcher3wildhunt", norm("The Witcher 3: Wild Hunt"))
+    }
 }

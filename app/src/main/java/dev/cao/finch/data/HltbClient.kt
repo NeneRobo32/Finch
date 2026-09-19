@@ -11,11 +11,17 @@ import java.io.IOException
  * 手机端跟进成本高且随时会变）。实测 `GET /game/<id>` 详情页 200 正常，
  * 时间数据内嵌两份：展示 `<h4>/<h5>` + JSON `comp_*_med`（秒，中位数）。
  *
- * 策略（可降级，失败静默）：
+ * id 来源（v0.15.3 起，成功率从高到低）：
+ *  1) 手动贴链接/id（最准，永远保留）
+ *  2) **IGDB 联动**：`POST api.igdb.com/v4/games` 按名搜 → 候选 IGDB 条目 →
+ *     顺手抓该游戏的 IGDB 网页（igdb.com/games/<slug>），正则找外链
+ *     `howlongtobeat.com/game/<id>`（IGDB 游戏页侧栏常挂 HLTB 链接，比 Steam 商店页靠谱）
+ *  3) Steam 商店页外链（旧兜底，命中率低但零成本，保留）
+ *
+ * 策略（可降级，失败带原因回给 UI，不再静默）：
  *  1) 只用 `comp_main_med / comp_plus_med / comp_100_med` 三个中位数（秒→分钟）；
  *     CSS 类名是 CSS Modules 哈希（GameStats-module__xxx），**不许用类名定位**。
- *  2) id 三级来源：用户手动贴链接/id（最准）→ Steam 商店页 HLTB 外链（顺手）→ 无则隐藏。
- *  3) 抓一次存 `hltbMainMin/hltbExtraMin/hltb100Min`，以后离线可用；HLTB 改版抓不到就当没配。
+ *  2) 抓一次存 `hltbMainMin/hltbExtraMin/hltb100Min`，以后不再自动抓；HLTB 改版抓不到就报原因。
  */
 object HltbClient {
 
@@ -103,6 +109,65 @@ object HltbClient {
         } catch (_: Exception) {
             return null
         }
+        return Regex("howlongtobeat\\.com/game/(\\d+)").find(html)?.groupValues?.get(1)?.toLongOrNull()
+    }
+
+    /**
+     * IGDB 网页顺手找 HLTB 外链（v0.15.3 主力 id 来源）：
+     *  - 先按名搜 IGDB（取前 3 候选，名字归一化比对，完全一致优先）
+     *  - 对每个候选按 `slug` 抓 `igdb.com/games/<slug>` 网页，正则找 HLTB 外链
+     * 返回首个命中的 HLTB id；都没有返回 null。
+     *
+     * 注意：这是顺手链路，IGDB 未配置/搜不到/网页无外链都算正常，调用方继续走下一级。
+     */
+    fun findIdViaIgdb(
+        gameName: String,
+        clientId: String,
+        token: String,
+        nameCn: String? = null,
+    ): Long? {
+        val candidates = try {
+            IgdbClient.search(gameName, clientId, token, limit = 5)
+        } catch (_: Exception) {
+            return null
+        }
+        if (candidates.isEmpty()) return null
+        // 排序：归一化完全一致优先，其次首候选
+        val norm = { s: String -> s.lowercase().replace(Regex("[^a-z0-9\\u4e00-\\u9fa5]"), "") }
+        val want = norm(gameName)
+        val wantCn = nameCn?.let { norm(it) }
+        val ordered = candidates.sortedWith(
+            compareBy(
+                { c ->
+                    val n = norm(c.name)
+                    if (n == want || (wantCn != null && n == wantCn)) 0 else 1
+                },
+            )
+        )
+        for (c in ordered.take(3)) {
+            fetchIgdbPageHltbId(c.igdbId, c.name)?.let { return it }
+        }
+        return null
+    }
+
+    /**
+     * 抓 IGDB 游戏网页找 HLTB 外链。
+     * IGDB 网页 URL 用 id 打头即可访问（https://www.igdb.com/games/<id> 会 302 到 slug 完整地址，
+     * okhttp 默认跟随重定向，最终页 side栏常带 "HowLongToBeat" 外链）。
+     */
+    internal fun fetchIgdbPageHltbId(igdbId: Long, gameName: String): Long? {
+        val req = Request.Builder().url("https://www.igdb.com/games/$igdbId")
+            .header("User-Agent", "Mozilla/5.0 (Linux; Android 14) finch/0.15")
+            .build()
+        val html = try {
+            client.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) return null
+                resp.body?.string().orEmpty()
+            }
+        } catch (_: Exception) {
+            return null
+        }
+        if (html.isBlank()) return null
         return Regex("howlongtobeat\\.com/game/(\\d+)").find(html)?.groupValues?.get(1)?.toLongOrNull()
     }
 }
