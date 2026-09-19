@@ -13,10 +13,8 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
@@ -141,6 +139,13 @@ fun HomeScreen(
     var favOnly by remember { mutableStateOf(false) }
     var platformFilter by remember { mutableStateOf<dev.cao.finch.data.Platform?>(null) }
     var sortMode by remember { mutableStateOf(HomeSort.RECENT) }
+    // 列表滚动位置必须 hoist 到 AnimatedContent 外部：进详情页时列表组合会被销毁，
+    // state 放在里面会导致返回时重建并回到顶部
+    val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+    // 筛选/搜索/排序变化时回到顶部（keys 里不含 selectedGameId，进出详情页不触发）
+    LaunchedEffect(statusFilter, favOnly, platformFilter, sortMode, query) {
+        listState.scrollToItem(0)
+    }
 
     // 本月数据：顶部大卡「玩得最多」
     val now = LocalDateTime.now()
@@ -248,6 +253,7 @@ fun HomeScreen(
             }
         } else {
             LazyColumn(
+                state = listState,
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(padding),
@@ -418,27 +424,20 @@ fun HomeScreen(
                 }
 
                 items(shown, key = { it.id }) { game ->
-                    // 列表项入场动画：spring 滑入 + 淡入（首次组合播放一次）
-                    androidx.compose.animation.AnimatedVisibility(
-                        visible = true,
-                        enter = slideInVertically(
-                            animationSpec = spring(Spring.DampingRatioMediumBouncy, Spring.StiffnessMediumLow),
-                            initialOffsetY = { it / 2 },
-                        ) + fadeIn(animationSpec = spring(Spring.DampingRatioNoBouncy, Spring.StiffnessMedium)),
-                    ) {
-                        GameGridCard(
-                            game = game,
-                            lastPlayedAt = lastPlayedMap[game.id],
-                            totalMs = totalsMap[game.id],
-                            running = game.id == runningGameId,
-                            paused = game.id == runningGameId && runningPaused,
-                            backdrop = backdrop,
-                            onClick = { selectedGameId = game.id },
-                            onStart = { selectedGameId = game.id },
-                            onStop = { startTimerService(context, TimerNotifications.ACTION_STOP) },
-                            onDelete = { viewModel.deleteGame(game.id) },
-                        )
-                    }
+                    // 已去掉列表项入场动画：AnimatedVisibility 包着每个 item 会在详情页返回、
+                    // 筛选变化等重组时反复触发滑入，既闪又可能干扰滚动位置保持
+                    GameGridCard(
+                        game = game,
+                        lastPlayedAt = lastPlayedMap[game.id],
+                        totalMs = totalsMap[game.id],
+                        running = game.id == runningGameId,
+                        paused = game.id == runningGameId && runningPaused,
+                        backdrop = backdrop,
+                        onClick = { selectedGameId = game.id },
+                        onStart = { selectedGameId = game.id },
+                        onStop = { startTimerService(context, TimerNotifications.ACTION_STOP) },
+                        onDelete = { viewModel.deleteGame(game.id) },
+                    )
                 }
             }
         }
