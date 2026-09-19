@@ -39,6 +39,8 @@ class FinchViewModel(app: Application) : AndroidViewModel(app) {
 
     fun totalBetween(fromMillis: Long, toMillis: Long) =
         sessionDao.observeTotalBetween(fromMillis, toMillis).map { it ?: 0L }
+    fun weekdayTotals(fromMillis: Long, toMillis: Long) = sessionDao.observeWeekdayTotals(fromMillis, toMillis)
+    fun hourTotals(fromMillis: Long, toMillis: Long) = sessionDao.observeHourTotals(fromMillis, toMillis)
     fun distinctGamesInRange(fromMillis: Long, toMillis: Long) =
         sessionDao.observeDistinctGamesInRange(fromMillis, toMillis).map { it ?: 0 }
     fun dailyTotals(fromMillis: Long, toMillis: Long) = sessionDao.observeDailyTotals(fromMillis, toMillis)
@@ -122,6 +124,37 @@ class FinchViewModel(app: Application) : AndroidViewModel(app) {
 
     fun setThoughts(id: Long, text: String) {
         viewModelScope.launch { updateGame(id) { it.copy(thoughts = text.trim().ifEmpty { null }) } }
+    }
+
+    /**
+     * 回本率价格：Steam 游戏按 steamAppId 抓一次 appdetails 存库（失败/无定价静默跳过）。
+     * 30 天内抓过的不重复抓；非 Steam 游戏直接返回 null。
+     */
+    fun fetchPriceOnce(id: Long, onDone: (Double?) -> Unit = {}) {
+        viewModelScope.launch {
+            val game = gameDao.byId(id)
+            val appid = game?.steamAppId
+            if (game == null || appid == null) {
+                onDone(null)
+                return@launch
+            }
+            val monthAgo = LocalDateTime.now().minusDays(30)
+            if (game.priceCny != null && game.priceFetchedAt != null && game.priceFetchedAt.isAfter(monthAgo)) {
+                onDone(game.priceCny)
+                return@launch
+            }
+            val price = try {
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    dev.cao.finch.data.SteamStoreClient.fetchPrice(appid)
+                }
+            } catch (_: Exception) {
+                null
+            }
+            if (price?.cny != null) {
+                updateGame(id) { it.copy(priceCny = price.cny, priceFetchedAt = LocalDateTime.now()) }
+            }
+            onDone(price?.cny)
+        }
     }
 
     // ---- 下拉刷新同步（Steam + Switch） ----

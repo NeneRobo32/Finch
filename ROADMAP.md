@@ -1,8 +1,9 @@
 # Finch 路线图
 
-基线：`v0.13.0`（DB v9，versionCode 49）。三大源导入已齐，详情页/总结页/小组件已落地；
-v0.13 已交付游戏状态＋主页筛选、计时暂停/继续、会话可编辑。
-下阶段主题：**让总结更好看 → 让日程有用 → 让数据更安全 → 让留存更有趣**。
+基线：`v0.14.0`（DB v10，versionCode 51）。三大源导入已齐，详情页/总结页/小组件已落地；
+v0.13 已交付游戏状态＋主页筛选、计时暂停/继续、会话可编辑；
+v0.14 已交付热力图＋作息＋回本率＋战报分享 v1。
+下阶段主题：**让日程有用 → 让数据更安全 → 让留存更有趣**。
 
 ## 规划原则
 
@@ -16,6 +17,7 @@ v0.13 已交付游戏状态＋主页筛选、计时暂停/继续、会话可编�
 | 版本 | 主题 | 核心内容 | DB | 依赖新增 |
 |------|------|----------|----|----------|
 | v0.13 ✅已交付 | 库管与计时可信 | 游戏状态＋主页筛选；计时暂停/继续；会话可编辑 | 8→9 | 无 |
+| v0.14 ✅已交付 | 总结可视化 | 热力图；作息（周几/几点）；回本率；战报分享 v1 | 9→10 | 无 |
 | v0.14 | 总结可视化 | 年度热力图；时段分布（周几/几点）；元/小时回本率；月度战报海报 v1 | 9→10 | 无（加 `share` 用系统 API） |
 | v0.15 | 日程变有用 | 发售关注＋发售前推送；通关进度条（HLTB 参考）；WorkManager 基建 | 10→11 | `androidx.work:work-runtime-ktx` |
 | v0.16 | 数据安全与分发 | 自动备份；CSV 导出；私有分发＋应用内版本检查 | 11（不变） | 无（复用 WorkManager） |
@@ -65,10 +67,17 @@ gantt
 
 </details>
 
-## v0.14 —— 总结可视化（DB 9→10）
+## v0.14 —— 总结可视化（DB 9→10）✅ 已交付（v0.14.0）
 
 **为什么**：`StatsScreen.kt` 已有 `dailyTotals/topGames`，全是现成数据做展示，零联调、传播最强。
 
+- **热力图** ✅：月视图按周对齐，年视图 12 月横滑
+- **作息** ✅：周几条形（周一开头）+ 24 小时高峰柱
+- **回本率** ✅：`priceCny/priceFetchedAt`（MIGRATION_9_10），appdetails 国区价，30 天有效
+- **战报分享 v1** ✅：文本版走系统分享（图片模板延到 v0.17）
+
+<details>
+<summary>原计划明细（已实现，展开查看）</summary>
 - **年度热力图**：GitHub 式 365 格（月视图 30 格），复用 `observeDailyTotals`，峰值高亮。不新增 DAO。
   改动：`ui/StatsScreen.kt` 新 `HeatmapCard`。
 - **时段分布**：`SessionDao` 加两个聚合查询——按周几（`strftime('%w')`）、按小时（`strftime('%H')`）分组求和，画两排条形。
@@ -78,6 +87,8 @@ gantt
 - **月度战报海报 v1**：把现有 `HeroTotalCard + MonthReportCard + TopGames` 拼成一张 Bitmap，长按分享（系统 ShareSheet）。先做静态拼图，动画/模板放到 v0.17。
 - **验收**：热力图与柱状图数字与 Hero 总时长对得上；无价格游戏不显示回本行；海报在浅/深主题下都不糊。
 - **工作量**：M（约 2 周）。
+
+</details>
 
 ## v0.15 —— 日程变有用（DB 10→11）
 
@@ -119,7 +130,8 @@ gantt
 | DB | 版本 | 变更 |
 |----|------|------|
 | 8 | v0.12.2（旧基线） | `favorite/completed/completedAt/rating/thoughts` |
-| 9 | v0.13.0（现状） | `games.status + statusUpdatedAt`（已通关回填 COMPLETED）；`play_sessions.pauseAccumMs + pauseStartedAt` |
+| 9 | v0.13.x（已交付） | `games.status + statusUpdatedAt`（已通关回填 COMPLETED）；`play_sessions.pauseAccumMs + pauseStartedAt` |
+| 10 | v0.14.0（现状） | `games.priceCny + priceFetchedAt`（null=未抓过） |
 | 10 | v0.14 | `games.priceCny + priceFetchedAt` |
 | 11 | v0.15 | 新表 `release_follows`；`games.hltbMainMin` |
 | 11 | v0.16 / v0.17 | 不变（设置项走 `SettingsStore`，徽章纯算） |
@@ -136,6 +148,6 @@ gantt
 ## 建议的动手顺序
 
 1. **v0.13 ✅ 已交付**：状态＋暂停＋编辑，一版让“记”可信。
-2. v0.14 跟上：热力图＋回本率＋海报 v1，让“看”值得分享。
+2. **v0.14 ✅ 已交付**：热力图＋作息＋回本率＋战报分享 v1，让“看”值得分享。
 3. v0.15/0.16 可并行：一个做推送、一个做备份分发，互不 blok。
 4. v0.17 收尾：徽章＋预算，把留存拉起来。

@@ -49,3 +49,9 @@ data class GameTotalMini(
     val gameId: Long,
     val totalMs: Long?,
 )
+
+/** 时段分布聚合桶（bucket=周几0-6 / 小时0-23） */
+data class BucketTotal(
+    val bucket: Int,
+    val totalMs: Long?,
+)

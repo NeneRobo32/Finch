@@ -186,6 +186,30 @@ interface SessionDao {
         """
     )
     fun observeStatsForGame(gameId: Long): Flow<GameStatsRow?>
+
+    /** 时段分布：按周几聚合（0=周日..6=周六，SQLite %w 口径），时长扣暂停 */
+    @Query(
+        """
+        SELECT CAST(strftime('%w', startTime / 1000, 'unixepoch', 'localtime') AS INTEGER) AS bucket,
+               SUM(endTime - startTime - COALESCE(pauseAccumMs, 0)) AS totalMs
+        FROM play_sessions
+        WHERE endTime IS NOT NULL AND startTime >= :fromMillis AND startTime < :toMillis
+        GROUP BY bucket ORDER BY bucket
+        """
+    )
+    fun observeWeekdayTotals(fromMillis: Long, toMillis: Long): Flow<List<BucketTotal>>
+
+    /** 时段分布：按小时聚合（0..23，本地时间），时长扣暂停 */
+    @Query(
+        """
+        SELECT CAST(strftime('%H', startTime / 1000, 'unixepoch', 'localtime') AS INTEGER) AS bucket,
+               SUM(endTime - startTime - COALESCE(pauseAccumMs, 0)) AS totalMs
+        FROM play_sessions
+        WHERE endTime IS NOT NULL AND startTime >= :fromMillis AND startTime < :toMillis
+        GROUP BY bucket ORDER BY bucket
+        """
+    )
+    fun observeHourTotals(fromMillis: Long, toMillis: Long): Flow<List<BucketTotal>>
 }
 
 @Dao

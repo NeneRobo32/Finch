@@ -7,8 +7,7 @@ import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
-/** Steam 商店接口（okhttp 直连）：搜索 + 即将推出列表 */
-object SteamStoreClient {
+/** Steam 商店接口（okhttp 直连）：搜索 + 即将推出列表 */object SteamStoreClient {
 
     data class Result(val appid: Long, val name: String, val coverUrl: String?)
 
@@ -19,6 +18,31 @@ object SteamStoreClient {
         val releaseText: String?,
         val releaseDate: LocalDate?,
     )
+
+    data class Price(val cny: Double?, val isFree: Boolean)
+
+    /**
+     * appdetails 价格（v0.14 回本率用）：
+     * 成功返回人民币价格（元，final/分→元）；免费游戏 isFree=true；抓不到/无定价返回 null。
+     * 价格单位是“分”，`price_overview.final / 100.0` 即元。
+     */
+    fun fetchPrice(appid: Long): Price? {
+        val json = try {
+            get("https://store.steampowered.com/api/appdetails?appids=$appid&l=schinese&cc=CN")
+        } catch (_: Exception) {
+            return null
+        }
+        val root = runCatching { JSONObject(json).optJSONObject(appid.toString()) }?.getOrNull() ?: return null
+        // appdetails 的 success 字段有时是 boolean 有时缺失：只有明确 false 才判失败
+        if (root.optBoolean("success", true) == false) return null
+        val data = root.optJSONObject("data") ?: return null
+        if (data.optBoolean("is_free", false)) return Price(cny = 0.0, isFree = true)
+        val overview = data.optJSONObject("price_overview") ?: return null
+        // final 在打折时是折后价，未打折时与 initial 一致；无 final 则退回 initial
+        val cents = if (overview.has("final")) overview.optLong("final", -1) else overview.optLong("initial", -1)
+        if (cents < 0) return null
+        return Price(cny = cents / 100.0, isFree = false)
+    }
 
     private val client by lazy { BangumiClient.client } // 复用共享直连客户端
 
@@ -60,8 +84,7 @@ object SteamStoreClient {
         return out
     }
 
-    /** 商店「即将推出」+「新上架」（featuredcategories 的 coming_soon + new_releases 合并去重） */
-    fun fetchComingSoon(): List<ComingSoonGame> {
+    /** 商店「即将推出」+「新上架」（featuredcategories 的 coming_soon + new_releases 合并去重） */    fun fetchComingSoon(): List<ComingSoonGame> {
         // 主 URL 失败自动试备用（featured/comingsoon 编辑精选——量少但稳定）
         val json = get(
             "https://store.steampowered.com/api/featuredcategories/?l=schinese&cc=CN",

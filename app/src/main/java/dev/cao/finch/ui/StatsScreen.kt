@@ -11,6 +11,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -33,6 +34,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -122,6 +124,14 @@ fun StatsScreen(viewModel: FinchViewModel) {
     val distinctGames by remember(fromMillis, toMillis) {
         viewModel.distinctGamesInRange(fromMillis, toMillis)
     }.collectAsState(initial = 0)
+    val weekday by remember(fromMillis, toMillis) {
+        viewModel.weekdayTotals(fromMillis, toMillis)
+    }.collectAsState(initial = emptyList())
+    val hours by remember(fromMillis, toMillis) {
+        viewModel.hourTotals(fromMillis, toMillis)
+    }.collectAsState(initial = emptyList())
+    // 战报分享：截 Hero 区（总时长+本期报告+热力+时段）为 Bitmap 走系统分享
+    var shareRequest by remember { mutableStateOf(false) }
 
     LazyColumn(
         modifier = Modifier
@@ -138,7 +148,10 @@ fun StatsScreen(viewModel: FinchViewModel) {
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text("总结", style = MaterialTheme.typography.headlineSmall)
-                Row {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (total > 0) {
+                        TextButton(onClick = { shareRequest = true }) { Text("分享战报") }
+                    }
                     FilterChip(
                         selected = mode == StatsMode.MONTH,
                         onClick = { mode = StatsMode.MONTH },
@@ -176,10 +189,48 @@ fun StatsScreen(viewModel: FinchViewModel) {
         }
         item { HeroTotalCard(total, prevTotal, steamMin) }
         if (total > 0) item { MonthReportCard(total, distinctGames, daily, topGames, mode) }
+        if (daily.isNotEmpty()) {
+            item {
+                HeatmapCard(
+                    daily = daily,
+                    mode = mode,
+                    anchorMonth = anchorMonth,
+                )
+            }
+        }
+        if (weekday.isNotEmpty() || hours.isNotEmpty()) item { RhythmCard(weekday, hours) }
         if (platforms.isNotEmpty()) item { PlatformCard(platforms, total) }
         if (daily.isNotEmpty()) item { ActivityCard(daily, mode) }
         if (topGames.isNotEmpty()) {
             item { TopGamesCard(topGames) }
+        }
+    }
+
+    // 战报分享：把本期关键数字拼成文本走系统分享（v1 先文本，图片模板 v0.17 再做）
+    if (shareRequest) {
+        val context = androidx.compose.ui.platform.LocalContext.current
+        androidx.compose.runtime.LaunchedEffect(shareRequest) {
+            val top = topGames.firstOrNull()
+            val text = buildString {
+                append(if (mode == StatsMode.MONTH) TimeFormatter.monthTitle(anchorMonth) else TimeFormatter.yearTitle(anchorMonth.year))
+                append("游戏战报 · Finch\n")
+                append("总时长 ${TimeFormatter.hoursMinutes(Duration.ofMillis(total))}")
+                if (distinctGames > 0) append(" · $distinctGames 款")
+                append("\n")
+                if (top != null) {
+                    append("玩得最多「${top.name}」· ${TimeFormatter.hoursMinutes(Duration.ofMillis(top.totalMs))}\n")
+                }
+                val best = daily.maxByOrNull { it.totalMs }
+                if (best != null && best.totalMs > 0) {
+                    append("最高产 ${best.day} · ${TimeFormatter.hoursMinutes(Duration.ofMillis(best.totalMs))}")
+                }
+            }
+            val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                type = "text/plain"
+                putExtra(android.content.Intent.EXTRA_TEXT, text)
+            }
+            context.startActivity(android.content.Intent.createChooser(intent, "分享战报"))
+            shareRequest = false
         }
     }
 }
@@ -491,8 +542,7 @@ private fun BarChart(bars: List<Bar>, mode: StatsMode) {
     }
 }
 
-/** 游戏排行：封面 + 排名徽章 + 名字 + 时长（前 3 金银铜） */
-@Composable
+/** 游戏排行：封面 + 排名徽章 + 名字 + 时长（前 3 金银铜） */@Composable
 private fun TopGamesCard(topGames: List<TopGameRow>) {
     GlassCard(modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -559,6 +609,229 @@ private fun TopGamesCard(topGames: List<TopGameRow>) {
                             Text(
                                 "Steam ${TimeFormatter.hoursMinutes(Duration.ofMinutes(g.steamPlaytimeMin))}",
                                 fontSize = 10.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** 热力图：GitHub 式（月=当月每天一格，年=全年按周列排），峰值高亮 */
+@Composable
+private fun HeatmapCard(
+    daily: List<DailyTotal>,
+    mode: StatsMode,
+    anchorMonth: YearMonth,
+) {
+    GlassCard(modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text("热力", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+            val byDay = daily.associate { it.day to it.totalMs }
+            val maxMs = max(1L, daily.maxOfOrNull { it.totalMs } ?: 1L)
+            if (mode == StatsMode.MONTH) {
+                // 月视图：按周对齐（周一开头），每天一格
+                val first = anchorMonth.atDay(1)
+                val daysInMonth = anchorMonth.lengthOfMonth()
+                // 周一=0..周日=6
+                val leadBlanks = (first.dayOfWeek.value - 1).coerceIn(0, 6)
+                val cells = (List(leadBlanks) { null } + (1..daysInMonth).map { d ->
+                    val key = "%04d-%02d-%02d".format(anchorMonth.year, anchorMonth.monthValue, d)
+                    byDay[key] ?: 0L
+                })
+                val weeks = cells.chunked(7)
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    weeks.forEach { week ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            week.forEach { ms ->
+                                val frac = if (ms == null) -1f else ms.toFloat() / maxMs
+                                Box(
+                                    Modifier
+                                        .weight(1f)
+                                        .height(22.dp)
+                                        .clip(RoundedCornerShape(5.dp))
+                                        .background(heatColor(frac, ms == null)),
+                                )
+                            }
+                            // 补齐最后一周不满 7 格
+                            repeat(7 - week.size) { Spacer(Modifier.weight(1f)) }
+                        }
+                    }
+                }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    Text(
+                        "浅→深=玩得少→多",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            } else {
+                // 年视图：12 个月 × 当月天数，两行紧凑格（365 格太密，按月分组横滑更易读）
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(androidx.compose.foundation.rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    (1..12).forEach { m ->
+                        val ym = YearMonth.of(anchorMonth.year, m)
+                        Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                            Text(
+                                "${m}月",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            // 每月按周折行，最多 6 行
+                            val first = ym.atDay(1)
+                            val lead = (first.dayOfWeek.value - 1).coerceIn(0, 6)
+                            val cells = (List(lead) { null } + (1..ym.lengthOfMonth()).map { d ->
+                                val key = "%04d-%02d-%02d".format(ym.year, m, d)
+                                byDay[key] ?: 0L
+                            })
+                            cells.chunked(7).forEach { week ->
+                                Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                                    week.forEach { ms ->
+                                        val frac = if (ms == null) -1f else ms.toFloat() / maxMs
+                                        Box(
+                                            Modifier
+                                                .size(11.dp)
+                                                .clip(RoundedCornerShape(3.dp))
+                                                .background(heatColor(frac, ms == null)),
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun heatColor(frac: Float, blank: Boolean): Color {
+    if (blank) return Color.Transparent
+    val base = MaterialTheme.colorScheme.primary
+    return when {
+        frac <= 0f -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+        frac < 0.25f -> base.copy(alpha = 0.25f)
+        frac < 0.5f -> base.copy(alpha = 0.45f)
+        frac < 0.75f -> base.copy(alpha = 0.7f)
+        else -> MaterialTheme.colorScheme.tertiary
+    }
+}
+
+/** 作息：周几玩得最多 + 几点玩得最多（两排横向条形，峰值高亮） */
+@Composable
+private fun RhythmCard(
+    weekday: List<dev.cao.finch.data.BucketTotal>,
+    hours: List<dev.cao.finch.data.BucketTotal>,
+) {
+    GlassCard(modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("作息", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+            if (weekday.isNotEmpty()) {
+                val byBucket = weekday.associate { it.bucket to (it.totalMs ?: 0L) }
+                val maxMs = max(1L, byBucket.values.maxOrNull() ?: 1L)
+                // SQLite %w：0=周日..6=周六；展示按周一开头
+                val order = listOf(1, 2, 3, 4, 5, 6, 0)
+                val labels = listOf("一", "二", "三", "四", "五", "六", "日")
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    order.forEachIndexed { i, b ->
+                        val ms = byBucket[b] ?: 0L
+                        val frac = ms.toFloat() / maxMs
+                        val peak = ms >= maxMs && ms > 0
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                labels[i],
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.width(16.dp),
+                            )
+                            Box(
+                                Modifier
+                                    .weight(1f)
+                                    .height(10.dp)
+                                    .clip(CircleShape)
+                                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)),
+                            ) {
+                                if (frac > 0f) {
+                                    Box(
+                                        Modifier
+                                            .fillMaxWidth(frac.coerceIn(0.03f, 1f))
+                                            .fillMaxHeight()
+                                            .clip(CircleShape)
+                                            .background(
+                                                if (peak) MaterialTheme.colorScheme.tertiary
+                                                else MaterialTheme.colorScheme.primary.copy(alpha = 0.75f)
+                                            ),
+                                    )
+                                }
+                            }
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                TimeFormatter.hoursMinutes(Duration.ofMillis(ms)),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.width(64.dp),
+                                textAlign = androidx.compose.ui.text.style.TextAlign.End,
+                            )
+                        }
+                    }
+                }
+            }
+            if (hours.isNotEmpty()) {
+                val byHour = hours.associate { it.bucket to (it.totalMs ?: 0L) }
+                val maxMs = max(1L, byHour.values.maxOrNull() ?: 1L)
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(
+                        "高峰时段",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    // 24 小时柱：峰值高亮，其余渐变
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(64.dp),
+                        verticalAlignment = Alignment.Bottom,
+                        horizontalArrangement = Arrangement.spacedBy(2.dp),
+                    ) {
+                        (0..23).forEach { h ->
+                            val ms = byHour[h] ?: 0L
+                            val frac = ms.toFloat() / maxMs
+                            val peak = ms >= maxMs && ms > 0
+                            Box(
+                                Modifier
+                                    .weight(1f)
+                                    .fillMaxHeight()
+                                    .background(Color.Transparent),
+                                contentAlignment = Alignment.BottomCenter,
+                            ) {
+                                Box(
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .fillMaxHeight(frac.coerceIn(0.04f, 1f))
+                                        .clip(RoundedCornerShape(2.dp))
+                                        .background(
+                                            if (peak) MaterialTheme.colorScheme.tertiary
+                                            else MaterialTheme.colorScheme.primary.copy(alpha = 0.45f + 0.3f * frac)
+                                        ),
+                                )
+                            }
+                        }
+                    }
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        listOf("0", "6", "12", "18", "23").forEach {
+                            Text(
+                                "${it}点",
+                                style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }

@@ -39,6 +39,9 @@ data class Game(
     // 游戏状态（v0.13：想玩/在玩/搁置/通关/全成就）；null/未知 → 在玩
     val status: GameStatus? = null,
     val statusUpdatedAt: LocalDateTime? = null,
+    // 价格（v0.14 回本率）：人民币元；priceFetchedAt=抓取时间（null=未抓过）
+    val priceCny: Double? = null,
+    val priceFetchedAt: LocalDateTime? = null,
 ) {
     fun platformSet(): Set<Platform> =
         GameRepository.csvToPlatforms(platformsCsv).toSet().ifEmpty { setOf(platform) }
