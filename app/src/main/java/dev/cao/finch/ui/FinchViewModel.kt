@@ -135,6 +135,61 @@ class FinchViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** HLTB 三围写入（自动获取成功后；null 字段保持原值不覆盖） */
+    fun setHltbTimes(id: Long, mainMin: Long?, extraMin: Long?, completeMin: Long?) {
+        viewModelScope.launch {
+            updateGame(id) { g ->
+                g.copy(
+                    hltbMainMin = mainMin?.takeIf { it > 0 } ?: g.hltbMainMin,
+                    hltbExtraMin = extraMin?.takeIf { it > 0 } ?: g.hltbExtraMin,
+                    hltb100Min = completeMin?.takeIf { it > 0 } ?: g.hltb100Min,
+                )
+            }
+        }
+    }
+
+    /**
+     * HLTB 自动获取（三级 id 来源，失败静默返回 null）：
+     * 手动 id（用户贴的）> Steam 商店页外链 > 无则放弃。
+     * 成功写库（三围），返回 times；失败返回 null（UI 提示手动填）。
+     */
+    fun fetchHltbTimes(id: Long, manualInput: String?, onDone: (dev.cao.finch.data.HltbClient.Times?) -> Unit = {}) {
+        viewModelScope.launch {
+            val game = gameDao.byId(id)
+            if (game == null) {
+                onDone(null)
+                return@launch
+            }
+            // 1) 手动贴的 id/链接
+            var hltbId = manualInput?.let { dev.cao.finch.data.HltbClient.parseGameId(it) }
+            // 2) Steam 商店页顺手找外链
+            if (hltbId == null && game.steamAppId != null) {
+                hltbId = try {
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        dev.cao.finch.data.HltbClient.findIdFromSteamPage(game.steamAppId)
+                    }
+                } catch (_: Exception) {
+                    null
+                }
+            }
+            if (hltbId == null) {
+                onDone(null)
+                return@launch
+            }
+            val times = try {
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    dev.cao.finch.data.HltbClient.fetchTimes(hltbId)
+                }
+            } catch (_: Exception) {
+                null
+            }
+            if (times != null && times.any()) {
+                setHltbTimes(id, times.mainMin, times.extraMin, times.completeMin)
+            }
+            onDone(times?.takeIf { it.any() })
+        }
+    }
+
     // ---- 下拉刷新同步（Steam + Switch） ----
 
     /** 是否正在同步（下拉刷新的转圈显示） */

@@ -8,7 +8,7 @@ import org.json.JSONObject
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 
-/** Bangumi (bgm.tv) 客户端 —— okhttp 直连；client 同时供 Eshop / Gamersky / SteamStore / TGDB 复用 */
+/** Bangumi (bgm.tv) 客户端 —— okhttp 直连；client 同时供 Eshop / Gamersky / SteamStore / IGDB / HLTB 复用 */
 object BangumiClient {
 
     data class Result(val name: String, val nameCn: String?, val coverUrl: String?, val platforms: List<String>)

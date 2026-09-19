@@ -1,6 +1,13 @@
 # Changelog
 
-## 0.15.0 (2026-09-19)
+## 0.15.1 (2026-09-19)
+
+功能版（资料库换源 + HLTB 自动获取）：
+
+- **变更**：TheGamesDB 下线，换 IGDB——「添加游戏」搜索链 Bangumi → IGDB → Steam；封面/平台/首发日走 IGDB，需自填 Twitch App 凭证（导入页「游戏资料库」卡片保存并测活）
+- **新增**：HLTB 自动获取——详情页通关进度卡「从 HLTB 获取」（Steam 游戏先试商店页外链，否则贴 HLTB 链接/id），三围（主线/支线/全收集）一次写库；失败静默提示手动填
+- **变更**：DB 12→13（games 加 hltbExtraMin/hltb100Min/igdbId）；schema 13.json 入库
+- **测试**：新增 IgdbHltbTest（平台映射/结果映射/HLTB 解析/id 解析 9 个单测），共 41 个单测全部通过
 
 功能版（日程变有用）：
 

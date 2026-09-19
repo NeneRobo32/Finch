@@ -7,6 +7,8 @@ import androidx.lifecycle.viewModelScope
 import dev.cao.finch.FinchApp
 import dev.cao.finch.data.BackupManager
 import dev.cao.finch.data.Game
+import dev.cao.finch.data.IgdbAuth
+import dev.cao.finch.data.IgdbAuthException
 import dev.cao.finch.data.PlaySession
 import dev.cao.finch.data.PsnClient
 import dev.cao.finch.data.SessionSource
@@ -35,22 +37,46 @@ class ImportViewModel(app: Application) : AndroidViewModel(app) {
     val steamId = MutableStateFlow(settings.steamId)
     val steamBase = MutableStateFlow(settings.steamBaseUrl)
 
-    // ---- TheGamesDB 配置（游戏资料库搜索用） ----
-    val tgdbKey = MutableStateFlow(settings.tgdbApiKey)
-    private val _tgdbState = MutableStateFlow<SyncState>(SyncState.Idle)
-    val tgdbState: StateFlow<SyncState> = _tgdbState
+    // ---- IGDB 配置（游戏资料库搜索用，Twitch App 凭证） ----
+    val igdbId = MutableStateFlow(settings.igdbClientId)
+    val igdbSecret = MutableStateFlow(settings.igdbClientSecret)
+    private val _igdbState = MutableStateFlow<SyncState>(SyncState.Idle)
+    val igdbState: StateFlow<SyncState> = _igdbState
+
+    /** 保存 IGDB 凭证并测活（token 接口走一遍，失败直接提示） */
+    fun saveIgdb(id: String, secret: String) {
+        settings.igdbClientId = id
+        settings.igdbClientSecret = secret
+        igdbId.value = id.trim()
+        igdbSecret.value = secret.trim()
+        if (id.isBlank() || secret.isBlank()) {
+            settings.igdbToken = ""
+            settings.igdbTokenExpiresAtMillis = 0
+            _igdbState.value = SyncState.Done("已清除，将只用免 Key 源")
+            return
+        }
+        _igdbState.value = SyncState.Running
+        viewModelScope.launch {
+            try {
+                val t = withContext(Dispatchers.IO) {
+                    IgdbAuth.requestToken(id, secret)
+                }
+                settings.igdbToken = t.accessToken
+                settings.igdbTokenExpiresAtMillis = t.expiresAtMillis
+                _igdbState.value = SyncState.Done("凭证有效，添加游戏时生效")
+            } catch (e: Exception) {
+                _igdbState.value = SyncState.Failed(
+                    if (e is IgdbAuthException) e.message ?: "授权失败"
+                    else "测活失败：" + (e.message ?: e.toString())
+                )
+            }
+        }
+    }
 
     // ---- Switch 配置 ----
     val switchLoggedIn = MutableStateFlow(settings.switchSessionToken.isNotBlank())
     private val _switchState = MutableStateFlow<SyncState>(SyncState.Idle)
     val switchState: StateFlow<SyncState> = _switchState
-
-    fun saveTgdbKey(key: String) {
-        val k = key.trim()
-        settings.tgdbApiKey = k
-        tgdbKey.value = k
-        _tgdbState.value = SyncState.Done(if (k.isBlank()) "已清除，将只用免 Key 源" else "已保存，添加游戏时生效")
-    }
 
     // ---- 同步状态 ----
     private val _steamState = MutableStateFlow<SyncState>(SyncState.Idle)
@@ -255,6 +281,7 @@ class ImportViewModel(app: Application) : AndroidViewModel(app) {
         _manualState.value = SyncState.Idle
         _switchState.value = SyncState.Idle
         _psnState.value = SyncState.Idle
+        _igdbState.value = SyncState.Idle
     }
 
     // ---- 备份与恢复 ----

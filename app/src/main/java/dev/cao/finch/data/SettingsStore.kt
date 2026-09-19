@@ -18,9 +18,47 @@ class SettingsStore(context: Context) {
         get() = sp.getString(KEY_STEAM_BASE, DEFAULT_BASE) ?: DEFAULT_BASE
         set(value) = sp.edit().putString(KEY_STEAM_BASE, value.trim()).apply()
 
-    var tgdbApiKey: String
-        get() = sp.getString(KEY_TGDB_KEY, "") ?: ""
-        set(value) = sp.edit().putString(KEY_TGDB_KEY, value.trim()).apply()
+    /** IGDB（Twitch App 凭证，用户自填；token 本机缓存，过期前 1 天自动刷新） */
+    var igdbClientId: String
+        get() = sp.getString(KEY_IGDB_ID, "") ?: ""
+        set(value) = sp.edit().putString(KEY_IGDB_ID, value.trim()).apply()
+
+    var igdbClientSecret: String
+        get() = sp.getString(KEY_IGDB_SECRET, "") ?: ""
+        set(value) = sp.edit().putString(KEY_IGDB_SECRET, value.trim()).apply()
+
+    var igdbToken: String
+        get() = sp.getString(KEY_IGDB_TOKEN, "") ?: ""
+        set(value) = sp.edit().putString(KEY_IGDB_TOKEN, value).apply()
+
+    var igdbTokenExpiresAtMillis: Long
+        get() = sp.getLong(KEY_IGDB_TOKEN_EXP, 0L)
+        set(value) = sp.edit().putLong(KEY_IGDB_TOKEN_EXP, value).apply()
+
+    /**
+     * IGDB 搜索凭证（Client ID + 有效 token）：
+     * 未配置返回 null（搜索链跳过 IGDB）；token 快过期时自动刷新一次，失败返回 null。
+     * 敏感信息只存本机（backup_rules 已排除整个 finch_settings）。
+     */
+    fun igdbCred(): GameSearchClient.IgdbCred? {
+        if (igdbClientId.isBlank() || igdbToken.isBlank()) return null
+        if (IgdbAuth.needRefresh(igdbTokenExpiresAtMillis)) return null // 由 igdbCredOrRefresh 刷新
+        return GameSearchClient.IgdbCred(igdbClientId, igdbToken)
+    }
+
+    /** 带自动刷新的凭证（IO 线程调用；刷新失败返回 null，不抛） */
+    fun igdbCredOrRefresh(): GameSearchClient.IgdbCred? {
+        igdbCred()?.let { return it }
+        if (igdbClientId.isBlank() || igdbClientSecret.isBlank()) return null
+        return try {
+            val t = IgdbAuth.requestToken(igdbClientId, igdbClientSecret)
+            igdbToken = t.accessToken
+            igdbTokenExpiresAtMillis = t.expiresAtMillis
+            GameSearchClient.IgdbCred(igdbClientId, t.accessToken)
+        } catch (_: Exception) {
+            null
+        }
+    }
 
     /** Switch 家长监护 token（session_token，用于免登录换 access_token） */
     var switchSessionToken: String
@@ -65,7 +103,10 @@ class SettingsStore(context: Context) {
         private const val KEY_STEAM_KEY = "steam_api_key"
         private const val KEY_STEAM_ID = "steam_id"
         private const val KEY_STEAM_BASE = "steam_base_url"
-        private const val KEY_TGDB_KEY = "tgdb_api_key"
+        private const val KEY_IGDB_ID = "igdb_client_id"
+        private const val KEY_IGDB_SECRET = "igdb_client_secret"
+        private const val KEY_IGDB_TOKEN = "igdb_token"
+        private const val KEY_IGDB_TOKEN_EXP = "igdb_token_expires_at"
         private const val KEY_SWITCH_TOKEN = "switch_session_token"
         private const val KEY_SWITCH_NAID = "switch_na_id"
         private const val KEY_PSN_REFRESH = "psn_refresh_token"

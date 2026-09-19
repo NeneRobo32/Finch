@@ -342,7 +342,7 @@ fun GameDetailScreen(
                     StatBox("最近", stats.lastPlayedAt?.let { relativeTime(it) } ?: "—", Modifier.weight(1f))
                 }
 
-                // 通关进度（有参考时长才展示；无数据整卡隐藏，不打扰）
+                // 通关进度（三段：主线/支线/全收集；有任一段才展示，否则给小入口）
                 val playedMin = (stats.totalMs ?: 0L) / 60_000
                 val hltbMin = game.hltbMainMin
                 if (hltbMin != null && hltbMin > 0) {
@@ -350,12 +350,22 @@ fun GameDetailScreen(
                     HltbProgressCard(
                         playedMin = playedMin,
                         hltbMin = hltbMin,
+                        hltbExtraMin = game.hltbExtraMin,
+                        hltb100Min = game.hltb100Min,
+                        viewModel = viewModel,
+                        gameId = game.id,
+                        steamAppId = game.steamAppId,
                         onEdit = { viewModel.setHltb(game.id, it) },
                     )
                 } else {
-                    // 无参考时长：给个小入口手动填（折叠成一行，不占地方）
+                    // 无参考时长：给个小入口（自动获取 HLTB / 手动填，不占地方）
                     Spacer(Modifier.height(12.dp))
-                    HltbEmptyRow(onSave = { viewModel.setHltb(game.id, it) })
+                    HltbEmptyRow(
+                        viewModel = viewModel,
+                        gameId = game.id,
+                        steamAppId = game.steamAppId,
+                        onSave = { viewModel.setHltb(game.id, it) },
+                    )
                 }
 
                 Spacer(Modifier.height(12.dp))
@@ -636,11 +646,23 @@ private fun SessionEditDialog(
     )
 }
 
-/** 通关进度条：已玩 Xh / 主线 Yh（Z%）；点数字可改参考时长，清空则隐藏 */
+/** 通关进度条（三段）：已玩 Xh / 主线 Yh（Z%），支线/全收集参考行；可改参考，可自动从 HLTB 获取 */
 @Composable
-private fun HltbProgressCard(playedMin: Long, hltbMin: Long, onEdit: (Long?) -> Unit) {
+private fun HltbProgressCard(
+    playedMin: Long,
+    hltbMin: Long,
+    hltbExtraMin: Long?,
+    hltb100Min: Long?,
+    viewModel: FinchViewModel,
+    gameId: Long,
+    steamAppId: Long?,
+    onEdit: (Long?) -> Unit,
+) {
     var editing by remember { mutableStateOf(false) }
     var field by remember(hltbMin) { mutableStateOf((hltbMin / 60).toString()) }
+    var hltbInput by remember { mutableStateOf("") }
+    var fetching by remember { mutableStateOf(false) }
+    var fetchMsg by remember { mutableStateOf<String?>(null) }
     val frac = (playedMin.toFloat() / hltbMin).coerceIn(0f, 1f)
     val done = playedMin >= hltbMin
     GlassCard(modifier = Modifier.fillMaxWidth()) {
@@ -679,8 +701,25 @@ private fun HltbProgressCard(playedMin: Long, hltbMin: Long, onEdit: (Long?) -> 
                     if (done) " · 超了，加量不加价 ✓" else "",
                 style = MaterialTheme.typography.bodyMedium,
             )
+            // 支线/全收集参考行（有才显示）
+            if ((hltbExtraMin ?: 0) > 0 || (hltb100Min ?: 0) > 0) {
+                Text(
+                    buildString {
+                        hltbExtraMin?.takeIf { it > 0 }?.let {
+                            append("支线约 ${TimeFormatter.hoursMinutes(Duration.ofMinutes(it))}")
+                        }
+                        hltb100Min?.takeIf { it > 0 }?.let {
+                            if (isNotEmpty()) append(" · ")
+                            append("全收集约 ${TimeFormatter.hoursMinutes(Duration.ofMinutes(it))}")
+                        }
+                        append("（HLTB）")
+                    },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             Text(
-                "参考时长可手动填（查 HowLongToBeat 主线时间）；清空则隐藏本卡",
+                "参考时长可手动填，或从 HLTB 自动获取；清空则隐藏本卡",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -703,16 +742,60 @@ private fun HltbProgressCard(playedMin: Long, hltbMin: Long, onEdit: (Long?) -> 
                         editing = false
                     }) { Text("清除") }
                 }
+                // HLTB 自动获取：先试 Steam 商店页外链，找不到则用手动贴的 id/链接
+                OutlinedTextField(
+                    value = hltbInput,
+                    onValueChange = { hltbInput = it; fetchMsg = null },
+                    label = { Text("HLTB 链接或 id（可选，不填则试 Steam 页）") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextButton(
+                        enabled = !fetching,
+                        onClick = {
+                            fetching = true
+                            fetchMsg = null
+                            viewModel.fetchHltbTimes(gameId, hltbInput.ifBlank { null }) { times ->
+                                fetching = false
+                                fetchMsg = if (times != null) "已更新" else "没抓到，手动填或换个 id"
+                            }
+                        },
+                    ) { Text(if (fetching) "获取中…" else "从 HLTB 获取") }
+                    if (fetchMsg != null) {
+                        Text(
+                            fetchMsg!!,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (fetchMsg == "已更新") MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.error,
+                        )
+                    }
+                }
+                if (steamAppId == null && hltbInput.isBlank()) {
+                    Text(
+                        "非 Steam 游戏请手动贴 HLTB 链接（如 howlongtobeat.com/game/68151）",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
         }
     }
 }
 
-/** 无参考时长时的一行小入口：展开填主线小时数 */
+/** 无参考时长时的一行小入口：HLTB 自动获取 / 手动填 */
 @Composable
-private fun HltbEmptyRow(onSave: (Long?) -> Unit) {
+private fun HltbEmptyRow(
+    viewModel: FinchViewModel,
+    gameId: Long,
+    steamAppId: Long?,
+    onSave: (Long?) -> Unit,
+) {
     var editing by remember { mutableStateOf(false) }
     var field by remember { mutableStateOf("") }
+    var hltbInput by remember { mutableStateOf("") }
+    var fetching by remember { mutableStateOf(false) }
+    var fetchMsg by remember { mutableStateOf<String?>(null) }
     GlassCard(modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
             Row(
@@ -740,6 +823,46 @@ private fun HltbEmptyRow(onSave: (Long?) -> Unit) {
                         onSave(field.toLongOrNull()?.times(60))
                         editing = false
                     }) { Text("保存") }
+                }
+                OutlinedTextField(
+                    value = hltbInput,
+                    onValueChange = { hltbInput = it; fetchMsg = null },
+                    label = { Text("或贴 HLTB 链接自动填三围") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextButton(
+                        enabled = !fetching,
+                        onClick = {
+                            fetching = true
+                            fetchMsg = null
+                            viewModel.fetchHltbTimes(gameId, hltbInput.ifBlank { null }) { times ->
+                                fetching = false
+                                if (times != null) {
+                                    fetchMsg = "已更新"
+                                    editing = false
+                                } else {
+                                    fetchMsg = "没抓到，手动填或换个 id"
+                                }
+                            }
+                        },
+                    ) { Text(if (fetching) "获取中…" else "从 HLTB 获取") }
+                    if (fetchMsg != null) {
+                        Text(
+                            fetchMsg!!,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (fetchMsg == "已更新") MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.error,
+                        )
+                    }
+                }
+                if (steamAppId == null && hltbInput.isBlank()) {
+                    Text(
+                        "Steam 游戏不填也能试（从商店页找 HLTB 外链）",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
             }
         }

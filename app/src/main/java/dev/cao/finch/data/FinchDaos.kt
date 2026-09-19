@@ -56,6 +56,9 @@ interface GameDao {
     @Query("SELECT * FROM games WHERE steamAppId = :appid LIMIT 1")
     suspend fun bySteamAppId(appid: Long): Game?
 
+    @Query("SELECT * FROM games WHERE igdbId = :id LIMIT 1")
+    suspend fun byIgdbId(id: Long): Game?
+
     @Query("UPDATE games SET bangumiId = :bangumiId WHERE id = :id")
     suspend fun setBangumiId(id: Long, bangumiId: Long)
 

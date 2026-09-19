@@ -55,6 +55,7 @@ object GameRepository {
         coverUrl: String?,
         bangumiId: Long? = null,
         steamAppId: Long? = null,
+        igdbId: Long? = null,
     ): Long {
         val cleanName = name.trim()
         val existing = findMergeable(dao, cleanName, platforms)
@@ -68,6 +69,7 @@ object GameRepository {
                     platform = mainPlatform(merged, fallback = existing.platform),
                     bangumiId = existing.bangumiId ?: bangumiId,
                     steamAppId = existing.steamAppId ?: steamAppId,
+                    igdbId = existing.igdbId ?: igdbId,
                 )
             )
             return existing.id
@@ -81,6 +83,7 @@ object GameRepository {
                 coverUrl = coverUrl,
                 bangumiId = bangumiId,
                 steamAppId = steamAppId,
+                igdbId = igdbId,
             )
         )
     }

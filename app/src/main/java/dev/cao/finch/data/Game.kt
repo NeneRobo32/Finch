@@ -41,6 +41,11 @@ data class Game(
     val statusUpdatedAt: LocalDateTime? = null,
     // 通关参考时长（v0.15 进度条）：主线分钟数；null=未知（隐藏进度条）
     val hltbMainMin: Long? = null,
+    // HLTB 三围（v0.15.1 自动获取）：支线/全收集分钟数；null=未知
+    val hltbExtraMin: Long? = null,
+    val hltb100Min: Long? = null,
+    // IGDB 条目 ID（资料库搜索/入库的关联标记）
+    val igdbId: Long? = null,
 ) {
     fun platformSet(): Set<Platform> =
         GameRepository.csvToPlatforms(platformsCsv).toSet().ifEmpty { setOf(platform) }

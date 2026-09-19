@@ -74,8 +74,9 @@ fun ImportScreen(
     var startField by remember { mutableStateOf("") }
     var endField by remember { mutableStateOf("") }
 
-    val tgdbState by importViewModel.tgdbState.collectAsState()
-    var tgdbKeyField by remember { mutableStateOf(importViewModel.tgdbKey.value) }
+    val igdbState by importViewModel.igdbState.collectAsState()
+    var igdbIdField by remember { mutableStateOf(importViewModel.igdbId.value) }
+    var igdbSecretField by remember { mutableStateOf(importViewModel.igdbSecret.value) }
 
     Column(
         modifier = Modifier
@@ -192,23 +193,33 @@ fun ImportScreen(
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("游戏资料库", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                 Text(
-                    "「添加游戏」时在线搜索封面和平台：Bangumi（免Key）→ TheGamesDB（主机游戏全，需Key）→ Steam 商店（免Key），自动容错，全不通也能手输。",
+                    "「添加游戏」时在线搜索封面和平台：Bangumi（免Key）→ IGDB（主机游戏全，需 Twitch App 凭证）→ Steam 商店（免Key），自动容错，全不通也能手输。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 OutlinedTextField(
-                    value = tgdbKeyField,
-                    onValueChange = { tgdbKeyField = it },
-                    label = { Text("TheGamesDB API Key（可选）") },
+                    value = igdbIdField,
+                    onValueChange = { igdbIdField = it },
+                    label = { Text("Twitch Client ID") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
+                OutlinedTextField(
+                    value = igdbSecretField,
+                    onValueChange = { igdbSecretField = it },
+                    label = { Text("Twitch Client Secret") },
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    modifier = Modifier.fillMaxWidth(),
+                )
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(onClick = { importViewModel.saveTgdbKey(tgdbKeyField) }) { Text("保存") }
+                    Button(onClick = { importViewModel.saveIgdb(igdbIdField, igdbSecretField) }) {
+                        Text(if (igdbState is ImportViewModel.SyncState.Running) "测活中…" else "保存并测活")
+                    }
                 }
-                StateBanner(tgdbState)
+                StateBanner(igdbState)
                 Text(
-                    "Key 获取：thegamesdb.net 免费注册后在账号设置里生成。不填也能搜（Bangumi/Steam 无需 Key）。",
+                    "凭证获取：dev.twitch.tv 登录（需开两步验证）→ 注册应用 → 复制 Client ID 并生成 Client Secret。不填也能搜（Bangumi/Steam 无需 Key）。",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
