@@ -20,7 +20,7 @@ class Converters {
 }
 
 /** Room schema 版本（迁移与备份校验共用） */
-const val FINCH_DB_VERSION = 10
+const val FINCH_DB_VERSION = 11
 
 @Database(
     entities = [Game::class, PlaySession::class, PlaytimeSnapshot::class],
@@ -112,15 +112,45 @@ abstract class FinchDatabase : RoomDatabase() {
 
         val MIGRATION_9_10 = object : Migration(9, 10) {
             override fun migrate(db: SupportSQLiteDatabase) {
-                // 回本率价格（null=未抓过，不回填）
+                // 回本率价格（v0.14.0 引入，v0.14.1 移除；保留空迁移保证已升级用户能继续走）
                 db.execSQL("ALTER TABLE games ADD COLUMN priceCny REAL")
                 db.execSQL("ALTER TABLE games ADD COLUMN priceFetchedAt INTEGER")
             }
         }
 
+        val MIGRATION_10_11 = object : Migration(10, 11) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // 移除回本率价格列：SQLite 不支持 DROP COLUMN（旧版本），重建 games 表
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `games_new` (" +
+                        "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "`name` TEXT NOT NULL, `platform` TEXT NOT NULL, " +
+                        "`platformsCsv` TEXT, `coverUrl` TEXT, `bangumiId` INTEGER, " +
+                        "`createdAt` INTEGER NOT NULL, `steamAppId` INTEGER, " +
+                        "`steamPlaytimeMin` INTEGER, `steamSyncedAt` INTEGER, " +
+                        "`switchAppId` TEXT, `psnTitleId` TEXT, `psnPlaytimeMin` INTEGER, " +
+                        "`psnSyncedAt` INTEGER, `favorite` INTEGER NOT NULL DEFAULT 0, " +
+                        "`completed` INTEGER NOT NULL DEFAULT 0, `completedAt` INTEGER, " +
+                        "`rating` INTEGER, `thoughts` TEXT, `status` TEXT, `statusUpdatedAt` INTEGER)"
+                )
+                db.execSQL(
+                    "INSERT INTO games_new (id, name, platform, platformsCsv, coverUrl, bangumiId, " +
+                        "createdAt, steamAppId, steamPlaytimeMin, steamSyncedAt, switchAppId, " +
+                        "psnTitleId, psnPlaytimeMin, psnSyncedAt, favorite, completed, completedAt, " +
+                        "rating, thoughts, status, statusUpdatedAt) " +
+                        "SELECT id, name, platform, platformsCsv, coverUrl, bangumiId, " +
+                        "createdAt, steamAppId, steamPlaytimeMin, steamSyncedAt, switchAppId, " +
+                        "psnTitleId, psnPlaytimeMin, psnSyncedAt, favorite, completed, completedAt, " +
+                        "rating, thoughts, status, statusUpdatedAt FROM games"
+                )
+                db.execSQL("DROP TABLE games")
+                db.execSQL("ALTER TABLE games_new RENAME TO games")
+            }
+        }
+
         fun build(context: Context): FinchDatabase =
             Room.databaseBuilder(context, FinchDatabase::class.java, "finch.db")
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11)
                 .build()
     }
 }

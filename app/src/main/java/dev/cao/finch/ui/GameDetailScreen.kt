@@ -341,12 +341,6 @@ fun GameDetailScreen(
                     StatBox("最近", stats.lastPlayedAt?.let { relativeTime(it) } ?: "—", Modifier.weight(1f))
                 }
 
-                // 回本率（仅 Steam 游戏有 appid 时展示；价格 30 天有效，点数字可手动刷新）
-                if (game.steamAppId != null) {
-                    Spacer(Modifier.height(12.dp))
-                    ValueRateCard(game = game, totalMs = stats.totalMs ?: 0L, viewModel = viewModel)
-                }
-
                 Spacer(Modifier.height(12.dp))
 
                 // 状态卡：游戏状态 + 已通关 + 评分
@@ -623,78 +617,6 @@ private fun SessionEditDialog(
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
     )
-}
-
-/** 回本率卡：价格（Steam appdetails，30天有效）÷ 总时长 → 元/小时；免费游戏直接显示已回血 */
-@Composable
-private fun ValueRateCard(game: Game, totalMs: Long, viewModel: FinchViewModel) {
-    var price by remember(game.id) { mutableStateOf(game.priceCny) }
-    var loading by remember(game.id) { mutableStateOf(false) }
-    // 进页面时若无价格自动抓一次（静默失败则隐藏整卡）
-    LaunchedEffect(game.id) {
-        if (price == null && game.steamAppId != null) {
-            loading = true
-            viewModel.fetchPriceOnce(game.id) {
-                price = it
-                loading = false
-            }
-        }
-    }
-    val p = price
-    if (!loading && p == null) return // 抓不到/无定价/非Steam：整卡隐藏，不打扰
-    GlassCard(modifier = Modifier.fillMaxWidth()) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(Modifier.weight(1f)) {
-                Text("回本率", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-                Spacer(Modifier.height(2.dp))
-                when {
-                    loading -> Text(
-                        "正在查 Steam 价格…",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    p == 0.0 -> Text(
-                        "免费游戏，已回血 ✓",
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.Medium,
-                        color = MaterialTheme.colorScheme.primary,
-                    )
-                    p != null && p > 0 -> {
-                        val hours = totalMs / 3600_000.0
-                        val perHour = if (hours > 0) p / hours else null
-                        Text(
-                            if (perHour != null) {
-                                "%.0f 元玩了 %s，%.1f 元/小时%s".format(
-                                    p,
-                                    TimeFormatter.hoursMinutes(Duration.ofMillis(totalMs)),
-                                    perHour,
-                                    if (perHour < 1) "，已回本 ✓" else "",
-                                )
-                            } else {
-                                "%.0f 元，还没开玩".format(p)
-                            },
-                            style = MaterialTheme.typography.bodyMedium,
-                        )
-                    }
-                }
-            }
-            if (!loading && p != null && p > 0) {
-                TextButton(onClick = {
-                    loading = true
-                    // 强制刷新：清掉 fetchedAt 再抓（fetchPriceOnce 有 30 天缓存，这里直接走 client）
-                    viewModel.fetchPriceOnce(game.id) {
-                        price = it
-                        loading = false
-                    }
-                }) { Text("刷新") }
-            }
-        }
-    }
 }
 
 /** 单条游玩记录：起止时间 + 时长（扣暂停） + 编辑 + 删除 */
