@@ -1,10 +1,7 @@
 # Finch 路线图
 
-基线：`v0.15.1`（DB v13，versionCode 55）。三大源导入已齐，详情页/总结页/小组件已落地；
-v0.13 已交付游戏状态＋主页筛选、计时暂停/继续、会话可编辑；
-v0.14 已交付热力图＋作息＋战报分享 v1（回本率按需求移除）；
-v0.15 已交付发售关注＋推送、通关进度条、WorkManager 基建；
-v0.15.1 资料库 TGDB→IGDB、HLTB 三围自动获取。
+基线：`v0.15.4`（DB v14，versionCode 58）。
+v0.15.1–0.15.3 的 IGDB/HLTB 已整体移除（国内直连不通，不可用；通关进度退回纯手动）。
 下阶段主题：**让数据更安全 → 让留存更有趣**。
 
 ## 规划原则
@@ -20,8 +17,9 @@ v0.15.1 资料库 TGDB→IGDB、HLTB 三围自动获取。
 |------|------|----------|----|----------|
 | v0.13 ✅已交付 | 库管与计时可信 | 游戏状态＋主页筛选；计时暂停/继续；会话可编辑 | 8→9 | 无 |
 | v0.14 ✅已交付 | 总结可视化 | 热力图；作息（周几/几点）；战报分享 v1（回本率已移除） | 9→10→11 | 无 |
-| v0.15 ✅已交付 | 日程变有用 | 发售关注＋推送；通关进度条；WorkManager 基建 | 11→12 | `work-runtime-ktx` |
-| v0.15.1 ✅已交付 | 资料库换源 | TGDB→IGDB（搜索链/导入页卡片）；HLTB 三围自动获取（详情直抓+手动贴id） | 12→13 | 无 |
+| v0.15 ✅已交付 | 日程变有用 | 发售关注＋推送；通关进度条（手动）；WorkManager 基建 | 11→12 | `work-runtime-ktx` |
+| v0.15.1–0.15.3 ❌已移除 | 资料库换源 | TGDB→IGDB、HLTB 自动获取（国内直连不通，整体回滚） | 12→13 | 无 |
+| v0.15.4 ✅已交付 | 移除 | IGDB/HLTB 代码与 DB 列全删，搜索链退回 Bangumi→Steam | 13→14 | 无 |
 | v0.14 | 总结可视化 | 年度热力图；时段分布（周几/几点）；元/小时回本率；月度战报海报 v1 | 9→10 | 无（加 `share` 用系统 API） |
 | v0.15 | 日程变有用 | 发售关注＋发售前推送；通关进度条（HLTB 参考）；WorkManager 基建 | 10→11 | `androidx.work:work-runtime-ktx` |
 | v0.16 | 数据安全与分发 | 自动备份；CSV 导出；私有分发＋应用内版本检查 | 11（不变） | 无（复用 WorkManager） |
@@ -147,7 +145,8 @@ gantt
 | 10 | v0.14.0（过渡） | `games.priceCny + priceFetchedAt`（回本率引入；v0.14.1 移除，仅作迁移垫脚） |
 | 11 | v0.14.x（已交付） | 重建 games 表去掉价格列（与 v9 表结构一致） |
 | 12 | v0.15.0（已交付） | 新表 `release_follows`；`games.hltbMainMin` |
-| 13 | v0.15.1（现状） | `games.hltbExtraMin + hltb100Min + igdbId` |
+| 13 | v0.15.1–0.15.3（过渡，已移除） | `games.hltbExtraMin + hltb100Min + igdbId`（IGDB/HLTB 引入；v0.15.4 移除，仅作迁移垫脚） |
+| 14 | v0.15.4（现状） | 重建 games 表去掉 IGDB/HLTB 列（与 v12 表结构一致） |
 | 10 | v0.14 | `games.priceCny + priceFetchedAt` |
 | 11 | v0.15 | 新表 `release_follows`；`games.hltbMainMin` |
 | 11 | v0.16 / v0.17 | 不变（设置项走 `SettingsStore`，徽章纯算） |

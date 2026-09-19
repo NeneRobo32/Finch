@@ -20,7 +20,7 @@ class Converters {
 }
 
 /** Room schema 版本（迁移与备份校验共用） */
-const val FINCH_DB_VERSION = 13
+const val FINCH_DB_VERSION = 14
 
 @Database(
     entities = [Game::class, PlaySession::class, PlaytimeSnapshot::class, ReleaseFollow::class],
@@ -169,16 +169,47 @@ abstract class FinchDatabase : RoomDatabase() {
 
         val MIGRATION_12_13 = object : Migration(12, 13) {
             override fun migrate(db: SupportSQLiteDatabase) {
-                // IGDB 关联 + HLTB 三围（null=未知，不回填）
+                // IGDB 关联 + HLTB 三围（v0.15.1 引入，v0.15.4 移除；保留空转保证已升级用户能继续走）
                 db.execSQL("ALTER TABLE games ADD COLUMN hltbExtraMin INTEGER")
                 db.execSQL("ALTER TABLE games ADD COLUMN hltb100Min INTEGER")
                 db.execSQL("ALTER TABLE games ADD COLUMN igdbId INTEGER")
             }
         }
 
+        val MIGRATION_13_14 = object : Migration(13, 14) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // 移除 IGDB/HLTB 列：SQLite 不支持 DROP COLUMN（旧版本），重建 games 表
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `games_new` (" +
+                        "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "`name` TEXT NOT NULL, `platform` TEXT NOT NULL, " +
+                        "`platformsCsv` TEXT, `coverUrl` TEXT, `bangumiId` INTEGER, " +
+                        "`createdAt` INTEGER NOT NULL, `steamAppId` INTEGER, " +
+                        "`steamPlaytimeMin` INTEGER, `steamSyncedAt` INTEGER, " +
+                        "`switchAppId` TEXT, `psnTitleId` TEXT, `psnPlaytimeMin` INTEGER, " +
+                        "`psnSyncedAt` INTEGER, `favorite` INTEGER NOT NULL DEFAULT 0, " +
+                        "`completed` INTEGER NOT NULL DEFAULT 0, `completedAt` INTEGER, " +
+                        "`rating` INTEGER, `thoughts` TEXT, `status` TEXT, `statusUpdatedAt` INTEGER, " +
+                        "`hltbMainMin` INTEGER)"
+                )
+                db.execSQL(
+                    "INSERT INTO games_new (id, name, platform, platformsCsv, coverUrl, bangumiId, " +
+                        "createdAt, steamAppId, steamPlaytimeMin, steamSyncedAt, switchAppId, " +
+                        "psnTitleId, psnPlaytimeMin, psnSyncedAt, favorite, completed, completedAt, " +
+                        "rating, thoughts, status, statusUpdatedAt, hltbMainMin) " +
+                        "SELECT id, name, platform, platformsCsv, coverUrl, bangumiId, " +
+                        "createdAt, steamAppId, steamPlaytimeMin, steamSyncedAt, switchAppId, " +
+                        "psnTitleId, psnPlaytimeMin, psnSyncedAt, favorite, completed, completedAt, " +
+                        "rating, thoughts, status, statusUpdatedAt, hltbMainMin FROM games"
+                )
+                db.execSQL("DROP TABLE games")
+                db.execSQL("ALTER TABLE games_new RENAME TO games")
+            }
+        }
+
         fun build(context: Context): FinchDatabase =
             Room.databaseBuilder(context, FinchDatabase::class.java, "finch.db")
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14)
                 .build()
     }
 }

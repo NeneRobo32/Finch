@@ -62,14 +62,7 @@ class AddGameViewModel(app: Application) : AndroidViewModel(app) {
             // 在线补充
             val online = withContext(Dispatchers.IO) {
                 runCatching {
-                    val app = getApplication() as FinchApp
-                    GameSearchClient.searchOnline(
-                        query,
-                        igdb = app.settings.igdbCred(),
-                        igdbTokenRefresh = {
-                            runCatching { app.settings.igdbCredOrRefresh() }.getOrNull()
-                        },
-                    )
+                    GameSearchClient.searchOnline(query)
                 }.getOrDefault(GameSearchClient.OnlineResult(emptyList(), listOf("搜索异常")))
             }
             val merged = GameSearchClient.dedupe(local + online.items)
@@ -91,7 +84,7 @@ class AddGameViewModel(app: Application) : AndroidViewModel(app) {
         val plats = platforms.filter { it != Platform.Multi }.toSet().ifEmpty { setOf(Platform.PC) }
         viewModelScope.launch {
             val id = withContext(Dispatchers.IO) {
-                GameRepository.upsertGame(gameDao, name, plats, item?.coverUrl, igdbId = item?.igdbId)
+                GameRepository.upsertGame(gameDao, name, plats, item?.coverUrl)
             }
             // upsertGame 里已有 merge 逻辑；这里只为了回传给 UI 关闭弹窗
             val game = gameDao.byId(id) ?: Game(id = id, name = name, platform = GameRepository.mainPlatform(plats, Platform.PC))

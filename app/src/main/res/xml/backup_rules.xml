@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Android 8-11 自动备份规则（android:fullBackupContent） -->
 <full-backup-content>
-    <!-- Steam Key / Switch/PSN token / Twitch(IGDB) 凭证等敏感信息，禁止进备份 -->
+    <!-- Steam Key / Switch/PSN token 等敏感信息，禁止进备份 -->
     <exclude domain="sharedpref" path="finch_settings.xml" />
 </full-backup-content>

@@ -2,7 +2,7 @@
 <!-- Android 12+ 备份/迁移规则（android:dataExtractionRules） -->
 <data-extraction-rules>
     <cloud-backup>
-        <!-- Steam Key / Switch/PSN token / Twitch(IGDB) 凭证等敏感信息，禁止进云备份 -->
+        <!-- Steam Key / Switch/PSN token 等敏感信息，禁止进云备份 -->
         <exclude domain="sharedpref" path="finch_settings.xml" />
     </cloud-backup>
     <device-transfer>

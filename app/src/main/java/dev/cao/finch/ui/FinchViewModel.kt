@@ -16,7 +16,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import java.io.IOException
 import java.time.LocalDateTime
 
 class FinchViewModel(app: Application) : AndroidViewModel(app) {
@@ -127,105 +126,12 @@ class FinchViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { updateGame(id) { it.copy(thoughts = text.trim().ifEmpty { null }) } }
     }
 
-    /** 通关参考时长（分钟）：手动填/抓取写入；null/<=0 清除（隐藏进度条） */
+    /** 通关参考时长（分钟）：手动填；null/<=0 清除（隐藏进度条） */
     fun setHltb(id: Long, minutes: Long?) {
         viewModelScope.launch {
             updateGame(id) {
                 it.copy(hltbMainMin = minutes?.takeIf { m -> m > 0 })
             }
-        }
-    }
-
-    /** HLTB 三围写入（自动获取成功后；null 字段保持原值不覆盖） */
-    fun setHltbTimes(id: Long, mainMin: Long?, extraMin: Long?, completeMin: Long?) {
-        viewModelScope.launch {
-            updateGame(id) { g ->
-                g.copy(
-                    hltbMainMin = mainMin?.takeIf { it > 0 } ?: g.hltbMainMin,
-                    hltbExtraMin = extraMin?.takeIf { it > 0 } ?: g.hltbExtraMin,
-                    hltb100Min = completeMin?.takeIf { it > 0 } ?: g.hltb100Min,
-                )
-            }
-        }
-    }
-
-    /**
-     * HLTB 自动获取（v0.15.3：失败带原因，不再静默）：
-     * 手动 id（用户贴的）> IGDB 联动（按名搜→IGDB 网页外链）> Steam 商店页外链 > 无则放弃。
-     * 成功写库（三围），返回 Result.success(times)；失败返回 Result.failure(原因)，
-     * UI 原样展示原因 + 保留手动填入口。
-     */
-    fun fetchHltbTimes(
-        id: Long,
-        manualInput: String?,
-        onDone: (Result<dev.cao.finch.data.HltbClient.Times>) -> Unit = {},
-    ) {
-        viewModelScope.launch {
-            val game = gameDao.byId(id)
-            if (game == null) {
-                onDone(Result.failure(IllegalStateException("游戏不存在")))
-                return@launch
-            }
-            // 1) 手动贴的 id/链接
-            var hltbId = manualInput?.let { dev.cao.finch.data.HltbClient.parseGameId(it) }
-            var idSource = if (hltbId != null) "手动" else null
-            // 2) IGDB 联动（需配 Twitch 凭证；自动刷新一次）
-            if (hltbId == null) {
-                val cred = try {
-                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                        (getApplication() as dev.cao.finch.FinchApp).settings.igdbCredOrRefresh()
-                    }
-                } catch (_: Exception) {
-                    null
-                }
-                if (cred != null) {
-                    hltbId = try {
-                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                            dev.cao.finch.data.HltbClient.findIdViaIgdb(game.name, cred.clientId, cred.token)
-                        }
-                    } catch (_: Exception) {
-                        null
-                    }
-                    if (hltbId != null) idSource = "IGDB"
-                }
-            }
-            // 3) Steam 商店页顺手找外链
-            if (hltbId == null && game.steamAppId != null) {
-                hltbId = try {
-                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                        dev.cao.finch.data.HltbClient.findIdFromSteamPage(game.steamAppId)
-                    }
-                } catch (_: Exception) {
-                    null
-                }
-                if (hltbId != null) idSource = "Steam"
-            }
-            if (hltbId == null) {
-                onDone(
-                    Result.failure(
-                        IllegalStateException(
-                            "找不到 HLTB 条目（IGDB" +
-                                (if ((getApplication() as dev.cao.finch.FinchApp).settings.igdbClientId.isBlank()) "未配凭证" else "无匹配/无外链") +
-                                "，Steam 页无外链）——手动贴 HLTB 链接"
-                        )
-                    )
-                )
-                return@launch
-            }
-            val times = try {
-                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                    dev.cao.finch.data.HltbClient.fetchTimes(hltbId)
-                }
-            } catch (e: Exception) {
-                onDone(Result.failure(IOException("HLTB 抓取失败（${e.message ?: "网络或改版"}）——手动填", e)))
-                return@launch
-            }
-            if (!times.any()) {
-                onDone(Result.failure(IllegalStateException("HLTB 有条目但无时长数据——手动填")))
-                return@launch
-            }
-            setHltbTimes(id, times.mainMin, times.extraMin, times.completeMin)
-            onDone(Result.success(times))
         }
     }
 
