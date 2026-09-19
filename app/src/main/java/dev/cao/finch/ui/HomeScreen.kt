@@ -207,7 +207,7 @@ fun HomeScreen(
         snackbarHost = { androidx.compose.material3.SnackbarHost(snackbarHostState) },
         floatingActionButton = {
             // 抬高到悬浮底栏上方，避免被胶囊遮挡
-            Box(Modifier.padding(bottom = 130.dp)) {
+            Box(Modifier.padding(bottom = 150.dp)) {
                 androidx.compose.material3.FloatingActionButton(onClick = { showAddDialog = true }) {
                     Icon(Icons.Filled.Add, contentDescription = "添加游戏")
                 }
@@ -255,7 +255,7 @@ fun HomeScreen(
                     start = 16.dp,
                     end = 16.dp,
                     top = 16.dp,
-                    bottom = 120.dp, // 让最后一张卡能滚到胶囊上方完整露出
+                    bottom = 150.dp, // FAB 抬高后列表底部同步加深，最后一张卡完整露出
                 ),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
@@ -264,7 +264,7 @@ fun HomeScreen(
                     item { MonthHeroCard(games, runningGameId, topMonth.first(), thisMonthTotal) }
                 }
 
-                // 筛选 + 标题行
+                // 筛选 + 标题行：标题行挂排序（单行不换行），两排横滑筛选，搜索框兜底
                 item {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Row(
@@ -277,12 +277,52 @@ fun HomeScreen(
                                 else "搜索「$query」",
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.weight(1f),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
                             )
                             if (query.isNotBlank()) {
-                                TextButton(onClick = { query = "" }) { Text("清除") }
+                                TextButton(onClick = { query = "" }) { Text("清除", maxLines = 1, softWrap = false) }
+                            }
+                            // 排序挂标题行右边：单行、不换行、不被挤成两行
+                            Box {
+                                var sortMenu by remember { mutableStateOf(false) }
+                                TextButton(onClick = { sortMenu = true }) {
+                                    Text(
+                                        when (sortMode) {
+                                            HomeSort.RECENT -> "最近玩 ↓"
+                                            HomeSort.TOTAL -> "总时长 ↓"
+                                            HomeSort.RATING -> "评分 ↓"
+                                            HomeSort.NAME -> "名称 A-Z"
+                                        },
+                                        maxLines = 1,
+                                        softWrap = false,
+                                    )
+                                }
+                                androidx.compose.material3.DropdownMenu(
+                                    expanded = sortMenu,
+                                    onDismissRequest = { sortMenu = false },
+                                ) {
+                                    HomeSort.values().forEach { m ->
+                                        androidx.compose.material3.DropdownMenuItem(
+                                            text = {
+                                                Text(
+                                                    when (m) {
+                                                        HomeSort.RECENT -> "按最近游玩"
+                                                        HomeSort.TOTAL -> "按总时长"
+                                                        HomeSort.RATING -> "按评分"
+                                                        HomeSort.NAME -> "按名称"
+                                                    },
+                                                    maxLines = 1,
+                                                )
+                                            },
+                                            onClick = { sortMode = m; sortMenu = false },
+                                        )
+                                    }
+                                }
                             }
                         }
-                        // 状态筛选（横滑）
+                        // 状态筛选（横滑，尾部留白暗示可滑）
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -292,26 +332,28 @@ fun HomeScreen(
                             androidx.compose.material3.FilterChip(
                                 selected = statusFilter == null,
                                 onClick = { statusFilter = null },
-                                label = { Text("全部") },
+                                label = { Text("全部", maxLines = 1, softWrap = false) },
                             )
                             dev.cao.finch.data.GameStatus.values().forEach { s ->
                                 androidx.compose.material3.FilterChip(
                                     selected = statusFilter == s,
                                     onClick = { statusFilter = if (statusFilter == s) null else s },
-                                    label = { Text(s.label) },
+                                    label = { Text(s.label, maxLines = 1, softWrap = false) },
                                 )
                             }
                             androidx.compose.material3.FilterChip(
                                 selected = favOnly,
                                 onClick = { favOnly = !favOnly },
-                                label = { Text("★ 收藏") },
+                                label = { Text("★ 收藏", maxLines = 1, softWrap = false) },
                             )
+                            Spacer(Modifier.width(4.dp))
                         }
-                        // 平台 + 排序行
+                        // 平台筛选（横滑独立一行，不再和排序挤同一行）
                         Row(
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
                         ) {
                             listOf(
                                 null to "全平台",
@@ -322,41 +364,10 @@ fun HomeScreen(
                                 androidx.compose.material3.FilterChip(
                                     selected = platformFilter == p,
                                     onClick = { platformFilter = p },
-                                    label = { Text(label) },
+                                    label = { Text(label, maxLines = 1, softWrap = false) },
                                 )
                             }
-                            Spacer(Modifier.weight(1f))
-                            var sortMenu by remember { mutableStateOf(false) }
-                            TextButton(onClick = { sortMenu = true }) {
-                                Text(
-                                    when (sortMode) {
-                                        HomeSort.RECENT -> "最近玩 ↓"
-                                        HomeSort.TOTAL -> "总时长 ↓"
-                                        HomeSort.RATING -> "评分 ↓"
-                                        HomeSort.NAME -> "名称 A-Z"
-                                    }
-                                )
-                            }
-                            androidx.compose.material3.DropdownMenu(
-                                expanded = sortMenu,
-                                onDismissRequest = { sortMenu = false },
-                            ) {
-                                HomeSort.values().forEach { m ->
-                                    androidx.compose.material3.DropdownMenuItem(
-                                        text = {
-                                            Text(
-                                                when (m) {
-                                                    HomeSort.RECENT -> "按最近游玩"
-                                                    HomeSort.TOTAL -> "按总时长"
-                                                    HomeSort.RATING -> "按评分"
-                                                    HomeSort.NAME -> "按名称"
-                                                }
-                                            )
-                                        },
-                                        onClick = { sortMode = m; sortMenu = false },
-                                    )
-                                }
-                            }
+                            Spacer(Modifier.width(4.dp))
                         }
                         if (query.isNotBlank() || games.size > 8) {
                             OutlinedTextField(

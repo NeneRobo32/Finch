@@ -13,6 +13,7 @@ import androidx.compose.animation.scaleIn
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -345,10 +346,11 @@ fun GameDetailScreen(
                 // 状态卡：游戏状态 + 已通关 + 评分
                 GlassCard(modifier = Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
-                        // 状态选择（想玩/在玩/搁置/通关/全成就）
+                        // 状态选择（想玩/在玩/搁置/通关/全成就，横滑防挤爆）
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
+                                .horizontalScroll(androidx.compose.foundation.rememberScrollState())
                                 .padding(vertical = 4.dp),
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
@@ -357,9 +359,10 @@ fun GameDetailScreen(
                                 androidx.compose.material3.FilterChip(
                                     selected = cur == s,
                                     onClick = { viewModel.setStatus(game.id, s) },
-                                    label = { Text(s.label) },
+                                    label = { Text(s.label, maxLines = 1, softWrap = false) },
                                 )
                             }
+                            Spacer(Modifier.width(4.dp))
                         }
                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
                         Row(verticalAlignment = Alignment.CenterVertically) {
