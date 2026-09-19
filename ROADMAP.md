@@ -1,7 +1,7 @@
 # Finch 路线图
 
-基线：`v0.15.4`（DB v14，versionCode 58）。
-v0.15.1–0.15.3 的 IGDB/HLTB 已整体移除（国内直连不通，不可用；通关进度退回纯手动）。
+基线：`v0.15.5`（DB v15，versionCode 59）。
+IGDB 已整体移除（国内直连不通）；HLTB 已写回（详情直抓+Bangumi联动，免配置）。
 下阶段主题：**让数据更安全 → 让留存更有趣**。
 
 ## 规划原则
@@ -20,6 +20,7 @@ v0.15.1–0.15.3 的 IGDB/HLTB 已整体移除（国内直连不通，不可用�
 | v0.15 ✅已交付 | 日程变有用 | 发售关注＋推送；通关进度条（手动）；WorkManager 基建 | 11→12 | `work-runtime-ktx` |
 | v0.15.1–0.15.3 ❌已移除 | 资料库换源 | TGDB→IGDB、HLTB 自动获取（国内直连不通，整体回滚） | 12→13 | 无 |
 | v0.15.4 ✅已交付 | 移除 | IGDB/HLTB 代码与 DB 列全删，搜索链退回 Bangumi→Steam | 13→14 | 无 |
+| v0.15.5 ✅已交付 | HLTB 写回 | 详情直抓+Bangumi联动（免配置）；点开自动获取三围 | 14→15 | 无 |
 | v0.14 | 总结可视化 | 年度热力图；时段分布（周几/几点）；元/小时回本率；月度战报海报 v1 | 9→10 | 无（加 `share` 用系统 API） |
 | v0.15 | 日程变有用 | 发售关注＋发售前推送；通关进度条（HLTB 参考）；WorkManager 基建 | 10→11 | `androidx.work:work-runtime-ktx` |
 | v0.16 | 数据安全与分发 | 自动备份；CSV 导出；私有分发＋应用内版本检查 | 11（不变） | 无（复用 WorkManager） |
@@ -146,7 +147,8 @@ gantt
 | 11 | v0.14.x（已交付） | 重建 games 表去掉价格列（与 v9 表结构一致） |
 | 12 | v0.15.0（已交付） | 新表 `release_follows`；`games.hltbMainMin` |
 | 13 | v0.15.1–0.15.3（过渡，已移除） | `games.hltbExtraMin + hltb100Min + igdbId`（IGDB/HLTB 引入；v0.15.4 移除，仅作迁移垫脚） |
-| 14 | v0.15.4（现状） | 重建 games 表去掉 IGDB/HLTB 列（与 v12 表结构一致） |
+| 14 | v0.15.4（过渡） | 重建 games 表去掉 IGDB/HLTB 列（与 v12 表结构一致） |
+| 15 | v0.15.5（现状） | 加回 `games.hltbExtraMin + hltb100Min`（HLTB 写回，Bangumi 联动免配置） |
 | 10 | v0.14 | `games.priceCny + priceFetchedAt` |
 | 11 | v0.15 | 新表 `release_follows`；`games.hltbMainMin` |
 | 11 | v0.16 / v0.17 | 不变（设置项走 `SettingsStore`，徽章纯算） |

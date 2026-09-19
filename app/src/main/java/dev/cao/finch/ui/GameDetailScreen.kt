@@ -342,19 +342,45 @@ fun GameDetailScreen(
                     StatBox("最近", stats.lastPlayedAt?.let { relativeTime(it) } ?: "—", Modifier.weight(1f))
                 }
 
-                // 通关进度：手动填主线参考时长（无自动获取）
+                // 通关进度（三段：主线/支线/全收集；点开无数据时自动获取一次）
                 val playedMin = (stats.totalMs ?: 0L) / 60_000
                 val hltbMin = game.hltbMainMin
+                // 点开卡片自动获取：无三围时触发一次；已有任一段不再自动抓
+                var hltbAutoState by remember(game.id) { mutableStateOf(HltbAuto.IDLE) }
+                LaunchedEffect(game.id) {
+                    val g = game
+                    if ((g.hltbMainMin ?: 0) <= 0 && (g.hltbExtraMin ?: 0) <= 0 && (g.hltb100Min ?: 0) <= 0) {
+                        hltbAutoState = HltbAuto.LOADING
+                        viewModel.fetchHltbTimes(g.id, null) { r ->
+                            hltbAutoState = if (r.isSuccess) HltbAuto.DONE else HltbAuto.FAILED
+                        }
+                    } else {
+                        hltbAutoState = HltbAuto.DONE // 已有数据：不自动抓
+                    }
+                }
                 if (hltbMin != null && hltbMin > 0) {
                     Spacer(Modifier.height(12.dp))
                     HltbProgressCard(
                         playedMin = playedMin,
                         hltbMin = hltbMin,
+                        hltbExtraMin = game.hltbExtraMin,
+                        hltb100Min = game.hltb100Min,
+                        viewModel = viewModel,
+                        gameId = game.id,
                         onEdit = { viewModel.setHltb(game.id, it) },
                     )
                 } else {
                     Spacer(Modifier.height(12.dp))
                     HltbEmptyRow(
+                        viewModel = viewModel,
+                        gameId = game.id,
+                        autoState = hltbAutoState,
+                        onRetry = {
+                            hltbAutoState = HltbAuto.LOADING
+                            viewModel.fetchHltbTimes(game.id, null) { r ->
+                                hltbAutoState = if (r.isSuccess) HltbAuto.DONE else HltbAuto.FAILED
+                            }
+                        },
                         onSave = { viewModel.setHltb(game.id, it) },
                     )
                 }
@@ -637,15 +663,25 @@ private fun SessionEditDialog(
     )
 }
 
-/** 通关进度条：已玩 Xh / 主线 Yh（Z%）；手动填参考时长，清空则隐藏 */
+/** HLTB 点开自动获取的状态机：只在无三围时触发一次 */
+private enum class HltbAuto { IDLE, LOADING, DONE, FAILED }
+
+/** 通关进度条（三段）：已玩 Xh / 主线 Yh（Z%），支线/全收集参考行；可改参考，可自动从 HLTB 获取 */
 @Composable
 private fun HltbProgressCard(
     playedMin: Long,
     hltbMin: Long,
+    hltbExtraMin: Long?,
+    hltb100Min: Long?,
+    viewModel: FinchViewModel,
+    gameId: Long,
     onEdit: (Long?) -> Unit,
 ) {
     var editing by remember { mutableStateOf(false) }
     var field by remember(hltbMin) { mutableStateOf((hltbMin / 60).toString()) }
+    var hltbInput by remember { mutableStateOf("") }
+    var fetching by remember { mutableStateOf(false) }
+    var fetchMsg by remember { mutableStateOf<String?>(null) }
     val frac = (playedMin.toFloat() / hltbMin).coerceIn(0f, 1f)
     val done = playedMin >= hltbMin
     GlassCard(modifier = Modifier.fillMaxWidth()) {
@@ -684,8 +720,25 @@ private fun HltbProgressCard(
                     if (done) " · 超了，加量不加价 ✓" else "",
                 style = MaterialTheme.typography.bodyMedium,
             )
+            // 支线/全收集参考行（有才显示）
+            if ((hltbExtraMin ?: 0) > 0 || (hltb100Min ?: 0) > 0) {
+                Text(
+                    buildString {
+                        hltbExtraMin?.takeIf { it > 0 }?.let {
+                            append("支线约 ${TimeFormatter.hoursMinutes(Duration.ofMinutes(it))}")
+                        }
+                        hltb100Min?.takeIf { it > 0 }?.let {
+                            if (isNotEmpty()) append(" · ")
+                            append("全收集约 ${TimeFormatter.hoursMinutes(Duration.ofMinutes(it))}")
+                        }
+                        append("（HLTB）")
+                    },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             Text(
-                "参考时长手动填；清空则隐藏本卡",
+                "参考时长可手动填，或从 HLTB 自动获取；清空则隐藏本卡",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -708,18 +761,55 @@ private fun HltbProgressCard(
                         editing = false
                     }) { Text("清除") }
                 }
+                // HLTB 自动获取：Bangumi 联动找 id，找不到则用手动贴的 id/链接
+                OutlinedTextField(
+                    value = hltbInput,
+                    onValueChange = { hltbInput = it; fetchMsg = null },
+                    label = { Text("HLTB 链接或 id（可选，不填走 Bangumi 联动）") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextButton(
+                        enabled = !fetching,
+                        onClick = {
+                            fetching = true
+                            fetchMsg = null
+                            viewModel.fetchHltbTimes(gameId, hltbInput.ifBlank { null }) { r ->
+                                fetching = false
+                                fetchMsg = if (r.isSuccess) "已更新"
+                                else (r.exceptionOrNull()?.message ?: "没抓到")
+                            }
+                        },
+                    ) { Text(if (fetching) "获取中…" else "从 HLTB 获取") }
+                    if (fetchMsg != null) {
+                        Text(
+                            fetchMsg!!,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (fetchMsg == "已更新") MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.error,
+                        )
+                    }
+                }
             }
         }
     }
 }
 
-/** 无参考时长时的一行小入口：展开填主线小时数 */
+/** 无参考时长时的一行小入口：自动获取状态 + 手动贴 / 手动填 */
 @Composable
 private fun HltbEmptyRow(
+    viewModel: FinchViewModel,
+    gameId: Long,
+    autoState: HltbAuto,
+    onRetry: () -> Unit,
     onSave: (Long?) -> Unit,
 ) {
     var editing by remember { mutableStateOf(false) }
     var field by remember { mutableStateOf("") }
+    var hltbInput by remember { mutableStateOf("") }
+    var fetching by remember { mutableStateOf(false) }
+    var fetchMsg by remember { mutableStateOf<String?>(null) }
     GlassCard(modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
             Row(
@@ -728,11 +818,23 @@ private fun HltbEmptyRow(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    "通关进度（未设参考时长）",
+                    when (autoState) {
+                        HltbAuto.LOADING -> "通关进度（正在从 HLTB 获取…）"
+                        HltbAuto.FAILED -> "通关进度（自动获取失败）"
+                        else -> "通关进度（未设参考时长）"
+                    },
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                TextButton(onClick = { editing = !editing }) { Text(if (editing) "收起" else "设置") }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (autoState == HltbAuto.FAILED) {
+                        TextButton(onClick = {
+                            fetchMsg = null
+                            onRetry()
+                        }) { Text("重试") }
+                    }
+                    TextButton(onClick = { editing = !editing }) { Text(if (editing) "收起" else "设置") }
+                }
             }
             if (editing) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -747,6 +849,39 @@ private fun HltbEmptyRow(
                         onSave(field.toLongOrNull()?.times(60))
                         editing = false
                     }) { Text("保存") }
+                }
+                OutlinedTextField(
+                    value = hltbInput,
+                    onValueChange = { hltbInput = it; fetchMsg = null },
+                    label = { Text("或贴 HLTB 链接自动填三围") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextButton(
+                        enabled = !fetching,
+                        onClick = {
+                            fetching = true
+                            fetchMsg = null
+                            viewModel.fetchHltbTimes(gameId, hltbInput.ifBlank { null }) { r ->
+                                fetching = false
+                                if (r.isSuccess) {
+                                    fetchMsg = "已更新"
+                                    editing = false
+                                } else {
+                                    fetchMsg = r.exceptionOrNull()?.message ?: "没抓到"
+                                }
+                            }
+                        },
+                    ) { Text(if (fetching) "获取中…" else "从 HLTB 获取") }
+                    if (fetchMsg != null) {
+                        Text(
+                            fetchMsg!!,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (fetchMsg == "已更新") MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.error,
+                        )
+                    }
                 }
             }
         }
