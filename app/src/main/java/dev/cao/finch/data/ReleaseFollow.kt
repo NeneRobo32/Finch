@@ -2,6 +2,7 @@ package dev.cao.finch.data
 
 import androidx.room.Dao
 import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.PrimaryKey
@@ -10,11 +11,14 @@ import kotlinx.coroutines.flow.Flow
 
 /**
  * 发售关注（v0.15）：日程页 ☆ 关注的游戏，发售前 N 天本地推送提醒。
- * - key：去重键（bangumi:<id> / steam:<appid> / name:<小写去空格名>）
+ * - key：去重键（bangumi:<id> / steam:<appid> / name:<小写去空格名>），唯一索引
  * - dateIso：发售日 "yyyy-MM-dd"，null=无日期（只展示不提醒）
  * - notifiedFor：已提醒过的日期 ISO（避免同一天重复推；日期变更自动失效）
  */
-@Entity(tableName = "release_follows")
+@Entity(
+    tableName = "release_follows",
+    indices = [Index(value = ["key"], unique = true)],
+)
 data class ReleaseFollow(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val key: String,

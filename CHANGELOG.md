@@ -1,6 +1,13 @@
 # Changelog
 
-## 0.15.1 (2026-09-19)
+## 0.15.2 (2026-09-19)
+
+热修复版（无 DB 版本变更，无需迁移）：
+
+- **修复**：v0.15.0/0.15.1 启动闪退——`ReleaseFollow.key` 的唯一索引只在 `MIGRATION_11_12` 手写 SQL 里建了，
+  `@Entity` 上漏了 `indices` 声明，Room 校验 Expected（无索引）vs Found（有索引）直接抛
+  `Migration didn't properly handle`。补上 `@Entity(indices=[Index(key, unique)])` 后与迁移 SQL 一致
+- **注意**：已装 0.15.x 且闪退的用户，装本版直接恢复（DB 版本号不变，无需迁移，数据不丢）
 
 功能版（资料库换源 + HLTB 自动获取）：
 

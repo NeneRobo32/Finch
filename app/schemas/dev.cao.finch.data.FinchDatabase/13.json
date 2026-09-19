@@ -2,7 +2,7 @@
   "formatVersion": 1,
   "database": {
     "version": 13,
-    "identityHash": "5a3703bb9e93510d0994cb71cc088ce8",
+    "identityHash": "838cb80049ca34bf52f3b271b7e15851",
     "entities": [
       {
         "tableName": "games",
@@ -355,12 +355,23 @@
           "columnNames": [
             "id"
           ]
-        }
+        },
+        "indices": [
+          {
+            "name": "index_release_follows_key",
+            "unique": true,
+            "columnNames": [
+              "key"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_release_follows_key` ON `${TABLE_NAME}` (`key`)"
+          }
+        ]
       }
     ],
     "setupQueries": [
       "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
-      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '5a3703bb9e93510d0994cb71cc088ce8')"
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '838cb80049ca34bf52f3b271b7e15851')"
     ]
   }
 }
