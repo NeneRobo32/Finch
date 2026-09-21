@@ -738,7 +738,7 @@ private fun HltbProgressCard(
                 )
             }
             Text(
-                "参考时长可手动填，或从 HLTB 自动获取；清空则隐藏本卡",
+                "参考时长可手动填，或走 HLTB 中转自动获取（第三方服务，只发游戏名）；清空则隐藏本卡",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -761,11 +761,11 @@ private fun HltbProgressCard(
                         editing = false
                     }) { Text("清除") }
                 }
-                // HLTB 自动获取：Bangumi 联动找 id，找不到则用手动贴的 id/链接
+                // HLTB 自动获取（中转 API）：Steam 直查→按名搜；找不到则用手动贴的 id/链接
                 OutlinedTextField(
                     value = hltbInput,
                     onValueChange = { hltbInput = it; fetchMsg = null },
-                    label = { Text("HLTB 链接或 id（可选，不填走 Bangumi 联动）") },
+                    label = { Text("HLTB 链接或 id（可选，自动搜不到时贴）") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )

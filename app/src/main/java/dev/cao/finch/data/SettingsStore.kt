@@ -47,6 +47,15 @@ class SettingsStore(context: Context) {
         get() = sp.getBoolean(KEY_AUTO_SYNC_ENABLED, true)
         set(value) = sp.edit().putBoolean(KEY_AUTO_SYNC_ENABLED, value).apply()
 
+    /**
+     * 联网获取通关时长（默认开）：
+     * 开启后点开无三围的详情页会自动查一次 HLTB 中转服务（只发游戏名/appid，
+     * 不发游玩记录与密钥）；关闭则纯手动，一个包都不发。
+     */
+    var hltbOnlineEnabled: Boolean
+        get() = sp.getBoolean(KEY_HLTB_ONLINE, true)
+        set(value) = sp.edit().putBoolean(KEY_HLTB_ONLINE, value).apply()
+
     /** 主题：system / light / dark（默认跟随系统） */
     var themeMode: String
         get() = sp.getString(KEY_THEME_MODE, THEME_SYSTEM) ?: THEME_SYSTEM
@@ -67,6 +76,7 @@ class SettingsStore(context: Context) {
         private const val KEY_PSN_REFRESH_EXP = "psn_refresh_expires_at"
         private const val KEY_LAST_AUTO_SYNC = "last_auto_sync_at"
         private const val KEY_AUTO_SYNC_ENABLED = "auto_sync_enabled"
+        private const val KEY_HLTB_ONLINE = "hltb_online_enabled"
         private const val KEY_THEME_MODE = "theme_mode"
         private const val KEY_FINCH_THEME = "finch_theme"
         const val DEFAULT_BASE = "https://api.steampowered.com"

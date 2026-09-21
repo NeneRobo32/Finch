@@ -148,16 +148,23 @@ class FinchViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** 联网获取开关（导入页可关；关闭后自动获取直接走手动） */
+    fun setHltbOnline(enabled: Boolean) {
+        settings.hltbOnlineEnabled = enabled
+    }
+
     /**
-     * HLTB 自动获取（失败带原因，不再静默）：
-     * 手动 id（用户贴的）> Bangumi 联动（按名搜→bgm.tv 网页外链）> 无则放弃。
-     * 成功写库（三围），返回 Result.success(times)；失败返回 Result.failure(原因)，
-     * UI 原样展示原因 + 保留手动填入口。
+     * HLTB 自动获取（v0.15.6 起走中转 API，不再直连 HLTB/Bangumi）：
+     * 1) 手动贴的 HLTB id/链接（最准，永远优先）
+     * 2) Steam 游戏：`GET 中转/steam/<appid>` 直查（一次命中）
+     * 3) 按名搜：`POST 中转/hltb/search`（数字强制匹配，相似度 ≥0.4）
+     * 成功写库（三围），返回 Result.success(times)；失败返回 Result.failure(原因)。
+     * 开关关闭时直接失败（UI 引导手动填，不发任何包）。
      */
     fun fetchHltbTimes(
         id: Long,
         manualInput: String?,
-        onDone: (Result<dev.cao.finch.data.HltbClient.Times>) -> Unit = {},
+        onDone: (Result<dev.cao.finch.data.HltbProxyClient.Times>) -> Unit = {},
     ) {
         viewModelScope.launch {
             val game = gameDao.byId(id)
@@ -165,46 +172,71 @@ class FinchViewModel(app: Application) : AndroidViewModel(app) {
                 onDone(Result.failure(IllegalStateException("游戏不存在")))
                 return@launch
             }
-            // 游戏中英文名（Bangumi 联动用；库名可能含副标题，搜不到时降级整体搜）
-            val nameCn = game.name.takeIf { it.contains(Regex("[一-鿿]")) }
-            val nameEn = game.name.takeIf { nameCn == null }
-            // 1) 手动贴的 id/链接
-            var hltbId = manualInput?.let { dev.cao.finch.data.HltbClient.parseGameId(it) }
-            // 2) Bangumi 联动（免配置，国内直连）
-            if (hltbId == null) {
-                hltbId = try {
+            if (!settings.hltbOnlineEnabled && manualInput.isNullOrBlank()) {
+                onDone(Result.failure(IllegalStateException("联网获取已关闭——手动填，或去导入页打开开关")))
+                return@launch
+            }
+            // 1) 手动贴的 id/链接（走中转 /hltb/<id> 查，比直连 HLTB 稳）
+            val manualId = manualInput?.let { dev.cao.finch.data.HltbClient.parseGameId(it) }
+            if (manualId != null) {
+                val times = try {
                     kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                        dev.cao.finch.data.HltbClient.findIdViaBangumi(
-                            name = nameEn ?: game.name,
-                            nameCn = nameCn,
-                        )
+                        dev.cao.finch.data.HltbProxyClient.fetchByHltbId(manualId)
+                    }
+                } catch (e: Exception) {
+                    onDone(Result.failure(java.io.IOException("中转查无此条目（${e.message ?: "网络异常"}）——手动填", e)))
+                    return@launch
+                }
+                if (!times.any()) {
+                    onDone(Result.failure(IllegalStateException("中转条目无时长数据——手动填")))
+                    return@launch
+                }
+                setHltbTimes(id, times.mainMin, times.extraMin, times.completeMin)
+                onDone(Result.success(times))
+                return@launch
+            }
+            // 2) Steam 直查
+            if (game.steamAppId != null) {
+                val times = try {
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        dev.cao.finch.data.HltbProxyClient.fetchBySteam(game.steamAppId)
+                    }
+                } catch (_: Exception) {
+                    null // 无条目是正常情况，继续走按名搜
+                }
+                if (times != null && times.any()) {
+                    setHltbTimes(id, times.mainMin, times.extraMin, times.completeMin)
+                    onDone(Result.success(times))
+                    return@launch
+                }
+            }
+            // 3) 按名搜（中英名都试：库名含中文则整体搜一次，英文切词搜一次）
+            val queries = linkedSetOf(game.name)
+            // 副标题/版本号后缀去掉再试一次（如 "Xxx Nintendo Switch 2 Edition" → "Xxx"）
+            game.name.split(Regex("\\s+[\\(\\[]")).firstOrNull()?.trim()?.takeIf { it.length >= 3 }?.let {
+                queries += it
+            }
+            var best: dev.cao.finch.data.HltbProxyClient.Hit? = null
+            for (q in queries) {
+                best = try {
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        dev.cao.finch.data.HltbProxyClient.searchBest(q)
                     }
                 } catch (_: Exception) {
                     null
                 }
+                if (best != null) break
             }
-            if (hltbId == null) {
+            if (best == null) {
                 onDone(
                     Result.failure(
-                        IllegalStateException("找不到 HLTB 条目（Bangumi 无匹配/条目页无 HLTB 外链）——手动贴 HLTB 链接")
+                        IllegalStateException("中转搜不到「${game.name}」（换关键词手动贴 HLTB 链接，或手动填）")
                     )
                 )
                 return@launch
             }
-            val times = try {
-                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                    dev.cao.finch.data.HltbClient.fetchTimes(hltbId)
-                }
-            } catch (e: Exception) {
-                onDone(Result.failure(java.io.IOException("HLTB 抓取失败（${e.message ?: "网络或改版"}）——手动填", e)))
-                return@launch
-            }
-            if (!times.any()) {
-                onDone(Result.failure(IllegalStateException("HLTB 有条目但无时长数据——手动填")))
-                return@launch
-            }
-            setHltbTimes(id, times.mainMin, times.extraMin, times.completeMin)
-            onDone(Result.success(times))
+            setHltbTimes(id, best.times.mainMin, best.times.extraMin, best.times.completeMin)
+            onDone(Result.success(best.times))
         }
     }
 

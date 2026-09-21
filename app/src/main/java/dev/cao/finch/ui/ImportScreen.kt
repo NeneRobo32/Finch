@@ -193,6 +193,7 @@ fun ImportScreen(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                HltbOnlineRow()
             }
         }
 
@@ -339,6 +340,38 @@ private fun PsnImportCard(importViewModel: ImportViewModel) {
             }
             StateBanner(psnState)
         }
+    }
+}
+
+/** 联网获取通关时长开关（HLTB 中转服务；只发游戏名/appid，不发记录与密钥） */
+@Composable
+private fun HltbOnlineRow() {
+    val context = LocalContext.current
+    val store = remember { SettingsStore(context.applicationContext) }
+    var enabled by remember { mutableStateOf(store.hltbOnlineEnabled) }
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(
+                "联网获取通关时长",
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            Text(
+                "点开详情自动查 HLTB 中转服务（只发游戏名）；关了就纯手动",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        androidx.compose.material3.Switch(
+            checked = enabled,
+            onCheckedChange = {
+                enabled = it
+                store.hltbOnlineEnabled = it
+            },
+        )
     }
 }
 
