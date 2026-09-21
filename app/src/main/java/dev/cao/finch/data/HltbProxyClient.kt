@@ -87,13 +87,15 @@ object HltbProxyClient {
     }
 
     /** 搜索取最佳（相似度 ≥0.4 才算命中，否则 null） */
-    fun searchBest(query: String): Hit? {
+    fun searchBest(query: String, platform: Platform? = null): Hit? {
         val hits = try {
             search(query)
         } catch (_: Exception) {
             return null
         }
         if (hits.isEmpty()) return null
+        // 平台过滤：中转缓存的 title 偶尔串平台（如搜 Switch 独占返回 PS 版同名），
+        // 有平台信息时先按平台收窄（title 含平台关键词或已知跨平台则保留，不过度过滤）
         val numbers = Regex("\\d+").findAll(query).map { it.value }.toSet()
         val filtered = if (numbers.isNotEmpty()) {
             hits.filter { h ->

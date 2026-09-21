@@ -365,6 +365,7 @@ fun GameDetailScreen(
                         hltbMin = hltbMin,
                         hltbExtraMin = game.hltbExtraMin,
                         hltb100Min = game.hltb100Min,
+                        completed = game.completed,
                         viewModel = viewModel,
                         gameId = game.id,
                         onEdit = { viewModel.setHltb(game.id, it) },
@@ -673,6 +674,7 @@ private fun HltbProgressCard(
     hltbMin: Long,
     hltbExtraMin: Long?,
     hltb100Min: Long?,
+    completed: Boolean,
     viewModel: FinchViewModel,
     gameId: Long,
     onEdit: (Long?) -> Unit,
@@ -683,7 +685,8 @@ private fun HltbProgressCard(
     var fetching by remember { mutableStateOf(false) }
     var fetchMsg by remember { mutableStateOf<String?>(null) }
     val frac = (playedMin.toFloat() / hltbMin).coerceIn(0f, 1f)
-    val done = playedMin >= hltbMin
+    // 已通关的游戏进度强制封顶（VM 在勾选瞬间已把参考钳到已玩，这里 UI 再兜一层防旧数据）
+    val done = completed || playedMin >= hltbMin
     GlassCard(modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(
@@ -694,7 +697,7 @@ private fun HltbProgressCard(
                 Text("通关进度", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
                 TextButton(onClick = { editing = !editing }) { Text(if (editing) "收起" else "改参考") }
             }
-            // 进度条
+            // 进度条（通关后恒满）
             Box(
                 Modifier
                     .fillMaxWidth()
@@ -704,7 +707,7 @@ private fun HltbProgressCard(
             ) {
                 Box(
                     Modifier
-                        .fillMaxWidth(frac.coerceAtLeast(0.04f))
+                        .fillMaxWidth(if (done) 1f else frac.coerceAtLeast(0.04f))
                         .fillMaxHeight()
                         .clip(androidx.compose.foundation.shape.CircleShape)
                         .background(
@@ -714,10 +717,10 @@ private fun HltbProgressCard(
                 )
             }
             Text(
-                "已玩 ${TimeFormatter.hoursMinutes(Duration.ofMinutes(playedMin))} / " +
+                if (done) "已通关，本参考已封顶 ✓"
+                else "已玩 ${TimeFormatter.hoursMinutes(Duration.ofMinutes(playedMin))} / " +
                     "主线约 ${TimeFormatter.hoursMinutes(Duration.ofMinutes(hltbMin))}" +
-                    "（${(frac * 100).toInt()}%）" +
-                    if (done) " · 超了，加量不加价 ✓" else "",
+                    "（${(frac * 100).toInt()}%）",
                 style = MaterialTheme.typography.bodyMedium,
             )
             // 支线/全收集参考行（有才显示）

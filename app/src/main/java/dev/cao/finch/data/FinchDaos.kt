@@ -187,6 +187,15 @@ interface SessionDao {
     )
     fun observeStatsForGame(gameId: Long): Flow<GameStatsRow?>
 
+    /** 某游戏累计毫秒（通关联动封顶用，一次性 suspend 查询） */
+    @Query(
+        """
+        SELECT COALESCE(SUM(endTime - startTime - COALESCE(pauseAccumMs, 0)), 0) FROM play_sessions
+        WHERE gameId = :gameId AND endTime IS NOT NULL
+        """
+    )
+    suspend fun totalMsForGame(gameId: Long): Long
+
     /** 时段分布：按周几聚合（0=周日..6=周六，SQLite %w 口径），时长扣暂停 */
     @Query(
         """

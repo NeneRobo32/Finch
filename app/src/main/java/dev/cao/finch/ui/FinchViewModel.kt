@@ -4,6 +4,7 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import dev.cao.finch.FinchApp
+import dev.cao.finch.data.BangumiClient
 import dev.cao.finch.data.Game
 import dev.cao.finch.data.GameStatsRow
 import dev.cao.finch.data.GameStatus
@@ -65,8 +66,8 @@ class FinchViewModel(app: Application) : AndroidViewModel(app) {
     /** 单游戏会话历史（最近 50 条已完成） */
     fun sessionsFor(gameId: Long) = sessionDao.observeSessionsForGame(gameId)
 
-    /** 按当前库里的值做字段级更新（四个 setter 共用的读写样板） */
-    private suspend fun updateGame(id: Long, transform: (Game) -> Game) {
+    /** 按当前库里的值做字段级更新（setter 共用的读写样板；transform 允许 suspend 以便联动查库） */
+    private suspend fun updateGame(id: Long, transform: suspend (Game) -> Game) {
         gameDao.byId(id)?.let { gameDao.update(transform(it)) }
     }
 
@@ -74,16 +75,20 @@ class FinchViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { updateGame(id) { it.copy(favorite = !it.favorite) } }
     }
 
-    /** 勾选通关时自动记录通关日期；取消勾选清空（同步 status 双写） */
+    /** 勾选通关时自动记录通关日期；取消勾选清空（同步 status 双写 + 通关联动进度） */
     fun setCompleted(id: Long, completed: Boolean) {
         viewModelScope.launch {
             updateGame(id) {
-                it.copy(
+                val now = LocalDateTime.now()
+                var g = it.copy(
                     completed = completed,
-                    completedAt = if (completed) (it.completedAt ?: LocalDateTime.now()) else null,
+                    completedAt = if (completed) (it.completedAt ?: now) else null,
                     status = if (completed) GameStatus.COMPLETED else GameStatus.PLAYING,
-                    statusUpdatedAt = LocalDateTime.now(),
+                    statusUpdatedAt = now,
                 )
+                // 通关联动：勾通关时若已玩时长 ≥ 主线参考，进度直接封顶（playedMin 按刷新后的库重算，UI 下一帧即对上）
+                if (completed) g = snapProgressToCompleted(g)
+                g
             }
         }
     }
@@ -97,14 +102,72 @@ class FinchViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             updateGame(id) {
                 val done = status.isCompleted()
-                it.copy(
+                val now = LocalDateTime.now()
+                var g = it.copy(
                     status = status,
-                    statusUpdatedAt = LocalDateTime.now(),
+                    statusUpdatedAt = now,
                     completed = done,
-                    completedAt = if (done) (it.completedAt ?: LocalDateTime.now()) else null,
+                    completedAt = if (done) (it.completedAt ?: now) else null,
                 )
+                // 通关联动：同 setCompleted，勾通关瞬间进度封顶
+                if (done) g = snapProgressToCompleted(g)
+                g
             }
         }
+    }
+
+    /**
+     * 通关联动：勾通关时，若库内已玩时长（会话聚合，扣暂停）≥ 主线参考，
+     * 进度条本来就会满；若还没玩到（比如云同步时长没记进来、刚通关没开计时），
+     * 把 hltbMainMin 钳到已玩时长，保证进度瞬间 100%（done 文案即现），
+     * 而不是“通了但条还在那”。纯 suspend 查询，可单测口径。
+     */
+    internal suspend fun snapProgressToCompleted(game: Game): Game {
+        val ref = game.hltbMainMin ?: return game
+        if (ref <= 0) return game
+        val playedMin = sessionDao.totalMsForGame(game.id) / 60_000
+        return if (playedMin < ref) game.copy(hltbMainMin = playedMin.coerceAtLeast(1L)) else game
+    }
+
+    /** 通关联动的纯口径（单测用）：已玩 < 参考 → 参考钳到已玩；否则不动 */
+    internal fun snapRefForCompleted(playedMin: Long, refMin: Long?): Long? {
+        if (refMin == null || refMin <= 0) return refMin
+        return if (playedMin < refMin) playedMin.coerceAtLeast(1L) else refMin
+    }
+
+    /** 库名 → HLTB 搜索词变体：去平台后缀/版本号/副标题尾巴，逐级降级 */
+    internal fun buildNameVariants(name: String): List<String> {
+        val out = mutableListOf<String>()
+        var cur = name.trim()
+        // 尾巴词（大小写不敏感）：平台 + 版本 + 合集后缀
+        val tails = listOf(
+            "Nintendo Switch 2 Edition", "Nintendo Switch Edition", "Nintendo Switch",
+            "Switch 2 Edition", "Switch Edition",
+            "PS5 Edition", "PS4 Edition", "PS5", "PS4",
+            "PC Edition", "PC",
+            "Remastered", "Remake", "Remix", "Definitive Edition", "Complete Edition",
+            "Game of the Year Edition", "GOTY Edition", "Deluxe Edition", "Ultimate Edition",
+            "Standard Edition", "Special Edition", "Anniversary Edition", "Collector's Edition",
+            "HD", "4K",
+        )
+        var changed = true
+        while (changed) {
+            changed = false
+            for (t in tails) {
+                if (cur.endsWith(t, ignoreCase = true) && cur.length - t.length >= 3) {
+                    cur = cur.dropLast(t.length).trim().trimEnd('-', ':', '·', '—', '–')
+                    changed = true
+                    break
+                }
+            }
+        }
+        if (cur.isNotBlank() && cur != name.trim()) out += cur
+        // 纯数字版本号尾巴（如 "Xxx 2" 保留——数字是 HLTB 匹配关键，不砍；只砍 "Ver.1.2" 类）
+        Regex("\\s+[Vv]er\\.?\\s*\\d[\\d.]*$").find(cur)?.let {
+            val cut = cur.dropLast(it.value.length).trim()
+            if (cut.length >= 3) out += cut
+        }
+        return out.distinct()
     }
 
     /** 主页排序：每游戏累计（扣暂停） */
@@ -210,13 +273,25 @@ class FinchViewModel(app: Application) : AndroidViewModel(app) {
                     return@launch
                 }
             }
-            // 3) 按名搜（中英名都试：库名含中文则整体搜一次，英文切词搜一次）
+            // 3) 按名搜（多查询词轮询：原名 → 去副标题 → 英文切词 → Bangumi 中文名）
+            // Switch 游戏库名常带副标题/版本号后缀（如 "Xxx Nintendo Switch 2 Edition"），
+            // HLTB 侧只有短名，必须逐级降级搜，否则永远搜不到
             val queries = linkedSetOf(game.name)
-            // 副标题/版本号后缀去掉再试一次（如 "Xxx Nintendo Switch 2 Edition" → "Xxx"）
+            // 去括号副标题
             game.name.split(Regex("\\s+[\\(\\[]")).firstOrNull()?.trim()?.takeIf { it.length >= 3 }?.let {
                 queries += it
             }
+            // 去平台后缀词（Switch/PS5/Edition/Version/Remaster 等尾巴）
+            queries += buildNameVariants(game.name)
+            // Bangumi 中文名兜底（HLTB 是英文库，中文名一般搜不到；但别名偶尔命中，多一次不亏）
+            try {
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    BangumiClient.search(game.name).firstOrNull()?.name
+                }?.takeIf { it.isNotBlank() && it != game.name }?.let { queries += it }
+            } catch (_: Exception) {
+            }
             var best: dev.cao.finch.data.HltbProxyClient.Hit? = null
+            var bestQuery = game.name
             for (q in queries) {
                 best = try {
                     kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
@@ -225,12 +300,15 @@ class FinchViewModel(app: Application) : AndroidViewModel(app) {
                 } catch (_: Exception) {
                     null
                 }
-                if (best != null) break
+                if (best != null) {
+                    bestQuery = q
+                    break
+                }
             }
             if (best == null) {
                 onDone(
                     Result.failure(
-                        IllegalStateException("中转搜不到「${game.name}」（换关键词手动贴 HLTB 链接，或手动填）")
+                        IllegalStateException("中转搜不到「${game.name}」（试了 ${queries.size} 个关键词；换关键词手动贴 HLTB 链接，或手动填）")
                     )
                 )
                 return@launch

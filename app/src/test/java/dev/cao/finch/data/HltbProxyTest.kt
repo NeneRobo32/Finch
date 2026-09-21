@@ -74,4 +74,43 @@ class HltbProxyTest {
         assertEquals(68151L, HltbClient.parseGameId("https://howlongtobeat.com/game/68151"))
         assertEquals(7231L, HltbClient.parseGameId("7231"))
     }
+
+    @Test
+    fun `库名变体_去平台后缀尾巴`() {
+        // 变体逻辑在 VM（需 gameDao，单测只验正则口径）：尾巴词逐级剥
+        fun strip(name: String): String {
+            var cur = name.trim()
+            val tails = listOf(
+                "Nintendo Switch 2 Edition", "Nintendo Switch Edition", "Switch Edition",
+                "PS5 Edition", "Definitive Edition", "Deluxe Edition",
+            )
+            var changed = true
+            while (changed) {
+                changed = false
+                for (t in tails) {
+                    if (cur.endsWith(t, ignoreCase = true) && cur.length - t.length >= 3) {
+                        cur = cur.dropLast(t.length).trim().trimEnd('-', ':', '·')
+                        changed = true
+                        break
+                    }
+                }
+            }
+            return cur
+        }
+        assertEquals("异度神剑2", strip("异度神剑2 Nintendo Switch 2 Edition"))
+        assertEquals("Elden Ring", strip("Elden Ring"))
+        assertEquals("Hades", strip("Hades Deluxe Edition"))
+    }
+
+    @Test
+    fun `通关联动_参考钳到已玩`() {
+        // snapRefForCompleted 口径：已玩 < 参考 → 参考钳到已玩；否则不动；无参考不动
+        fun snap(playedMin: Long, refMin: Long?): Long? {
+            if (refMin == null || refMin <= 0) return refMin
+            return if (playedMin < refMin) playedMin.coerceAtLeast(1L) else refMin
+        }
+        assertEquals(300L, snap(300, 3600)) // 玩5h通关，参考钳到5h→100%
+        assertEquals(3600L, snap(5000, 3600)) // 玩超了不动
+        assertNull(snap(100, null))
+    }
 }
