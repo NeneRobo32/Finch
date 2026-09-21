@@ -5,6 +5,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import dev.cao.finch.FinchApp
 import dev.cao.finch.data.BangumiClient
+import dev.cao.finch.data.EshopClient
 import dev.cao.finch.data.Game
 import dev.cao.finch.data.GameStatsRow
 import dev.cao.finch.data.GameStatus
@@ -273,9 +274,11 @@ class FinchViewModel(app: Application) : AndroidViewModel(app) {
                     return@launch
                 }
             }
-            // 3) 按名搜（多查询词轮询：原名 → 去副标题 → 英文切词 → Bangumi 中文名）
-            // Switch 游戏库名常带副标题/版本号后缀（如 "Xxx Nintendo Switch 2 Edition"），
-            // HLTB 侧只有短名，必须逐级降级搜，否则永远搜不到
+            // 3) 按名搜（多查询词轮询，Switch 专用链路在前）：
+            // 库名常带平台后缀（"Xxx Nintendo Switch 2 Edition"），HLTB 侧只有短名；
+            // 且库名可能是纯中文（家长监护 title 按机器语言），HLTB 是英文库，中文直搜必 404。
+            // 顺序：原名 → 剥尾巴变体 → eShop 英文名联动（日区 search.json 括号前英文段）
+            //       → Bangumi 中文名兜底（别名偶尔命中）
             val queries = linkedSetOf(game.name)
             // 去括号副标题
             game.name.split(Regex("\\s+[\\(\\[]")).firstOrNull()?.trim()?.takeIf { it.length >= 3 }?.let {
@@ -283,6 +286,18 @@ class FinchViewModel(app: Application) : AndroidViewModel(app) {
             }
             // 去平台后缀词（Switch/PS5/Edition/Version/Remaster 等尾巴）
             queries += buildNameVariants(game.name)
+            // eShop 英文名联动：拿库名去日区搜，取英文段（如 "Xenoblade2" / "Hollow Knight"）
+            // HLTB 侧短名多为 "Xenoblade Chronicles 2"，英文段再经中转模糊匹配即可命中
+            try {
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    EshopClient.searchTitles(game.name)
+                }.take(3).forEach { en ->
+                    val short = en.split(Regex("\\s+[\\(\\[]")).firstOrNull()?.trim().orEmpty()
+                    if (short.length >= 3) queries += short
+                    if (en.length >= 3) queries += en
+                }
+            } catch (_: Exception) {
+            }
             // Bangumi 中文名兜底（HLTB 是英文库，中文名一般搜不到；但别名偶尔命中，多一次不亏）
             try {
                 kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {

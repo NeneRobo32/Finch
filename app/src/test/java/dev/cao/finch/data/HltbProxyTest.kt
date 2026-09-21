@@ -103,6 +103,16 @@ class HltbProxyTest {
     }
 
     @Test
+    fun `eShop英文段_括号前英文`() {
+        // EshopClient.searchTitles 取括号前英文段：纯逻辑冒烟（真网络由联调覆盖）
+        fun enOf(title: String): String =
+            title.split("（", "(").firstOrNull()?.trim().orEmpty()
+        assertEquals("Xenoblade2", enOf("Xenoblade2 (ゼノブレイド2) Nintendo Switch 2 Edition"))
+        assertEquals("Hollow Knight", enOf("Hollow Knight（ホロウナイト） Switch 2 Edition"))
+        assertEquals("Hades", enOf("Hades"))
+    }
+
+    @Test
     fun `通关联动_参考钳到已玩`() {
         // snapRefForCompleted 口径：已玩 < 参考 → 参考钳到已玩；否则不动；无参考不动
         fun snap(playedMin: Long, refMin: Long?): Long? {

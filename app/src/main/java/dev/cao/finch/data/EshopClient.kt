@@ -70,4 +70,30 @@ object EshopClient {
     }.getOrNull()
 
     private fun LocalDate.isoDate(): String = format(DateTimeFormatter.ISO_LOCAL_DATE)
+
+    /**
+     * 按名搜 eShop（HLTB 英文名联动用，v0.15.7）：
+     * 日区 search.json 的 title 常是「英文名（日文名）后缀」格式，
+     * 取括号前的英文段返回。失败抛 IOException，调用方吞掉继续下一级。
+     */
+    fun searchTitles(keyword: String, limit: Int = 10): List<String> {
+        val lim = limit.coerceIn(1, 30)
+        val url = "https://search.nintendo.jp/nintendo_soft/search.json?q=" +
+            java.net.URLEncoder.encode(keyword, "UTF-8") +
+            "&limit=$lim&sort=suggest&dir=desc&u=9001"
+        val json = get(url)
+        val items = JSONObject(json).optJSONObject("result")?.optJSONArray("items")
+            ?: return emptyList()
+        val out = mutableListOf<String>()
+        for (i in 0 until items.length()) {
+            val title = items.optJSONObject(i)?.optString("title").orEmpty()
+            if (title.isBlank()) continue
+            // 「Hollow Knight（ホロウナイト） Switch 2 Edition」→ 取括号前英文段
+            val en = title.split("（", "(").firstOrNull()?.trim().orEmpty()
+            if (en.length >= 2) out += en
+            if (title.length >= 2) out += title
+            if (out.size >= lim) break
+        }
+        return out.distinct()
+    }
 }
