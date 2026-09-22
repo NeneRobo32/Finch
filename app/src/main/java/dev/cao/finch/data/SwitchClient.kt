@@ -172,8 +172,13 @@ object SwitchClient {
         "X-Moon-Os-Version" to "34",
         "X-Moon-Model" to "Pixel 4 XL",
         "X-Moon-TimeZone" to "Asia/Shanghai",
-        "X-Moon-Os-Language" to "zh-CN",
-        "X-Moon-App-Language" to "zh-CN",
+        // 标题语言：Moon 的 meta.title 按这两个 header 在服务端本地化（不是账号语言）。
+        // 必须发英文——库名要送 HLTB（纯英文库）按名搜；发 zh-CN 会拿回中文名，
+        // 展示看着没事，但 HLTB 侧永远匹配不上，Switch 通关时长自动获取必失败
+        // （Steam 走 appid 直查所以不受影响）。改这里只影响接口返回的标题语言，
+        // App 自己的 UI 文案仍是中文。
+        "X-Moon-Os-Language" to "en-GB",
+        "X-Moon-App-Language" to "en-GB",
         "X-Moon-App-Display-Version" to "2.4.0",
         "X-Moon-App-Internal-Version" to "660",
         "User-Agent" to "moon_ANDROID/2.4.0 (com.nintendo.znma; build:660; ANDROID 34)",

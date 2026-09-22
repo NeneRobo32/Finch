@@ -121,8 +121,14 @@ object SyncEngine {
                 val existing = gameDao.byName(g.name)
                 if (existing != null) {
                     if (existing.platform == Platform.PC) {
+                        // Steam 改名兜底（v0.15.9）：Steam 侧改名（如去副标题）后按 appid 认领回同一行，
+                        // 避免改名即建新游戏导致统计分裂。name 跟随 Steam 官方名，只动 name/cover。
+                        val rename = existing.steamAppId != null &&
+                            !existing.name.equals(g.name, ignoreCase = true) &&
+                            g.name.isNotBlank()
                         gameDao.update(
                             existing.copy(
+                                name = if (rename) g.name.trim() else existing.name,
                                 steamAppId = g.appid,
                                 steamPlaytimeMin = g.playtimeMinutes,
                                 steamSyncedAt = now,
@@ -205,6 +211,22 @@ object SyncEngine {
                 // 找既有游戏（switchAppId 或 同名）
                 var g = gameDao.bySwitchAppId(r.applicationId)
                     ?: gameDao.byName(r.title)
+                // 英文名回填（v0.15.9）：Moon 现已发 en-GB，拿回的是英文 title；
+                // 老库是 zh-CN 同步进来的中文名，bySwitchAppId 命中后必须把 name 刷成英文，
+                // 否则 HLTB（纯英文库）按名搜永远匹配不上。只动 name/cover，不碰会话与统计。
+                // 判断条件：同 appId 且标题不同（忽略大小写）→ 视为同一游戏的语言差异，直接改名。
+                if (g != null && !g.switchAppId.isNullOrBlank() &&
+                    !g.name.equals(r.title, ignoreCase = true) &&
+                    r.title.isNotBlank()
+                ) {
+                    gameDao.update(
+                        g.copy(
+                            name = r.title.trim(),
+                            coverUrl = g.coverUrl ?: r.coverUrl,
+                        )
+                    )
+                    g = gameDao.byId(g.id) ?: g
+                }
                 if (g == null) {
                     val createdId = gameDao.insert(
                         Game(
