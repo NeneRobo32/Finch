@@ -279,13 +279,24 @@ class FinchViewModel(app: Application) : AndroidViewModel(app) {
             // 且库名可能是纯中文（家长监护 title 按机器语言），HLTB 是英文库，中文直搜必 404。
             // 顺序：原名 → 剥尾巴变体 → eShop 英文名联动（日区 search.json 括号前英文段）
             //       → Bangumi 中文名兜底（别名偶尔命中）
-            val queries = linkedSetOf(game.name)
+            val queries = linkedSetOf<String>()
+            // 纯中文名直接跳过（中转必 404，还浪费一次请求；eShop 联动会产出英文词）
+            // 判定：去掉数字空格后全是 CJK/假名/韩文 → 纯 CJK 名
+            fun isCjkOnly(s: String): Boolean {
+                val t = s.replace(Regex("[0-9\\s\\p{Punct}]"), "")
+                return t.isNotEmpty() && t.all { c ->
+                    c in '\u4e00'..'\u9fff' || c in '\u3400'..'\u4dbf' ||
+                        c in '\u3040'..'\u309f' || c in '\u30a0'..'\u30ff' ||
+                        c in '\uac00'..'\ud7af'
+                }
+            }
+            if (!isCjkOnly(game.name)) queries += game.name
             // 去括号副标题
             game.name.split(Regex("\\s+[\\(\\[]")).firstOrNull()?.trim()?.takeIf { it.length >= 3 }?.let {
-                queries += it
+                if (!isCjkOnly(it)) queries += it
             }
             // 去平台后缀词（Switch/PS5/Edition/Version/Remaster 等尾巴）
-            queries += buildNameVariants(game.name)
+            queries += buildNameVariants(game.name).filter { !isCjkOnly(it) }
             // eShop 英文名联动：拿库名去日区搜，取英文段（如 "Xenoblade2" / "Hollow Knight"）
             // HLTB 侧短名多为 "Xenoblade Chronicles 2"，英文段再经中转模糊匹配即可命中
             try {
@@ -307,7 +318,9 @@ class FinchViewModel(app: Application) : AndroidViewModel(app) {
             }
             var best: dev.cao.finch.data.HltbProxyClient.Hit? = null
             var bestQuery = game.name
+            val tried = mutableListOf<String>()
             for (q in queries) {
+                tried += q
                 best = try {
                     kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                         dev.cao.finch.data.HltbProxyClient.searchBest(q)
@@ -320,10 +333,14 @@ class FinchViewModel(app: Application) : AndroidViewModel(app) {
                     break
                 }
             }
+            // 失败上报：把试过的关键词拼进日志与文案（用户反馈时直接定位死在哪一级）
+            if (tried.isNotEmpty()) {
+                android.util.Log.d("HltbAuto", "game=${game.name} tried=${tried.joinToString(" | ")} hit=${best?.title}")
+            }
             if (best == null) {
                 onDone(
                     Result.failure(
-                        IllegalStateException("中转搜不到「${game.name}」（试了 ${queries.size} 个关键词；换关键词手动贴 HLTB 链接，或手动填）")
+                        IllegalStateException("中转搜不到「${game.name}」（试了：${tried.joinToString(" / ")}；换关键词手动贴 HLTB 链接，或手动填）")
                     )
                 )
                 return@launch

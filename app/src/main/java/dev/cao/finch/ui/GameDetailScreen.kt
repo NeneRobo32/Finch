@@ -347,12 +347,14 @@ fun GameDetailScreen(
                 val hltbMin = game.hltbMainMin
                 // 点开卡片自动获取：无三围时触发一次；已有任一段不再自动抓
                 var hltbAutoState by remember(game.id) { mutableStateOf(HltbAuto.IDLE) }
+                var hltbFailReason by remember(game.id) { mutableStateOf<String?>(null) }
                 LaunchedEffect(game.id) {
                     val g = game
                     if ((g.hltbMainMin ?: 0) <= 0 && (g.hltbExtraMin ?: 0) <= 0 && (g.hltb100Min ?: 0) <= 0) {
                         hltbAutoState = HltbAuto.LOADING
                         viewModel.fetchHltbTimes(g.id, null) { r ->
                             hltbAutoState = if (r.isSuccess) HltbAuto.DONE else HltbAuto.FAILED
+                            hltbFailReason = r.exceptionOrNull()?.message
                         }
                     } else {
                         hltbAutoState = HltbAuto.DONE // 已有数据：不自动抓
@@ -376,10 +378,13 @@ fun GameDetailScreen(
                         viewModel = viewModel,
                         gameId = game.id,
                         autoState = hltbAutoState,
+                        failReason = hltbFailReason,
                         onRetry = {
                             hltbAutoState = HltbAuto.LOADING
+                            hltbFailReason = null
                             viewModel.fetchHltbTimes(game.id, null) { r ->
                                 hltbAutoState = if (r.isSuccess) HltbAuto.DONE else HltbAuto.FAILED
+                                hltbFailReason = r.exceptionOrNull()?.message
                             }
                         },
                         onSave = { viewModel.setHltb(game.id, it) },
@@ -805,6 +810,7 @@ private fun HltbEmptyRow(
     viewModel: FinchViewModel,
     gameId: Long,
     autoState: HltbAuto,
+    failReason: String?,
     onRetry: () -> Unit,
     onSave: (Long?) -> Unit,
 ) {
@@ -838,6 +844,14 @@ private fun HltbEmptyRow(
                     }
                     TextButton(onClick = { editing = !editing }) { Text(if (editing) "收起" else "设置") }
                 }
+            }
+            // 失败原因直显（自动获取失败时，点开即见，不用进设置翻）
+            if (autoState == HltbAuto.FAILED && fetchMsg == null) {
+                Text(
+                    failReason ?: "自动获取失败（点设置手动贴 HLTB 链接，或手动填小时数）",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
             }
             if (editing) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
