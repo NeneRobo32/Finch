@@ -72,9 +72,10 @@ object EshopClient {
     private fun LocalDate.isoDate(): String = format(DateTimeFormatter.ISO_LOCAL_DATE)
 
     /**
-     * 按名搜 eShop（HLTB 英文名联动用，v0.15.7）：
+     * 按名搜 eShop 取英文段（HLTB 英文名联动用）：
      * 日区 search.json 的 title 常是「英文名（日文名）后缀」格式，
-     * 取括号前的英文段返回。失败抛 IOException，调用方吞掉继续下一级。
+     * 只返回拉丁字母段（HLTB 是纯英文库，日文/中文段送过去必 404，还污染失败文案）。
+     * 失败抛 IOException，调用方吞掉继续下一级。
      */
     fun searchTitles(keyword: String, limit: Int = 10): List<String> {
         val lim = limit.coerceIn(1, 30)
@@ -88,12 +89,41 @@ object EshopClient {
         for (i in 0 until items.length()) {
             val title = items.optJSONObject(i)?.optString("title").orEmpty()
             if (title.isBlank()) continue
-            // 「Hollow Knight（ホロウナイト） Switch 2 Edition」→ 取括号前英文段
-            val en = title.split("（", "(").firstOrNull()?.trim().orEmpty()
-            if (en.length >= 2) out += en
-            if (title.length >= 2) out += title
+            // 「Hollow Knight（ホロウナイト） Switch 2 Edition」→ "Hollow Knight"；
+            // 纯日文/中文标题（如「ゼルダの伝説」）直接丢弃，不返回
+            latinSegment(title)?.takeIf { it.length >= 3 }?.let { out += it }
             if (out.size >= lim) break
         }
         return out.distinct()
+    }
+
+    /**
+     * 从 eShop 标题抠拉丁英文段：
+     * 括号前段含拉丁字母 → 取之并剥平台后缀；否则整标题无拉丁字母 → null（丢弃）。
+     * 例："Xenoblade2 (ゼノブレイド2) Nintendo Switch 2 Edition" → "Xenoblade2"；
+     *     "ゼルダの伝説" → null；"Hollow Knight（ホロウナイト）" → "Hollow Knight"。
+     */
+    internal fun latinSegment(title: String): String? {
+        val head = title.split("（", "(", "「").firstOrNull()?.trim().orEmpty()
+        // 括号前段必须含拉丁字母，否则是纯日文/中文标题
+        if (!head.any { it in 'A'..'Z' || it in 'a'..'z' }) return null
+        // 剥尾巴平台后缀（与 VM 的 buildNameVariants 同口径，保持一致）
+        var cur = head
+        val tails = listOf(
+            "Nintendo Switch 2 Edition", "Nintendo Switch Edition", "Nintendo Switch",
+            "Switch 2 Edition", "Switch Edition",
+        )
+        var changed = true
+        while (changed) {
+            changed = false
+            for (t in tails) {
+                if (cur.endsWith(t, ignoreCase = true) && cur.length - t.length >= 2) {
+                    cur = cur.dropLast(t.length).trim().trimEnd('-', ':', '·')
+                    changed = true
+                    break
+                }
+            }
+        }
+        return cur.takeIf { it.length >= 3 && it.any { c -> c in 'A'..'Z' || c in 'a'..'z' } }
     }
 }

@@ -103,13 +103,35 @@ class HltbProxyTest {
     }
 
     @Test
-    fun `eShop英文段_括号前英文`() {
-        // EshopClient.searchTitles 取括号前英文段：纯逻辑冒烟（真网络由联调覆盖）
-        fun enOf(title: String): String =
-            title.split("（", "(").firstOrNull()?.trim().orEmpty()
-        assertEquals("Xenoblade2", enOf("Xenoblade2 (ゼノブレイド2) Nintendo Switch 2 Edition"))
-        assertEquals("Hollow Knight", enOf("Hollow Knight（ホロウナイト） Switch 2 Edition"))
-        assertEquals("Hades", enOf("Hades"))
+    fun `eShop英文段_括号前拉丁_纯日文丢弃`() {
+        // 与 EshopClient.latinSegment 同口径（纯逻辑复刻，不联网）
+        fun latinSegment(title: String): String? {
+            val head = title.split("（", "(", "「").firstOrNull()?.trim().orEmpty()
+            if (!head.any { it in 'A'..'Z' || it in 'a'..'z' }) return null
+            var cur = head
+            val tails = listOf(
+                "Nintendo Switch 2 Edition", "Nintendo Switch Edition", "Nintendo Switch",
+                "Switch 2 Edition", "Switch Edition",
+            )
+            var changed = true
+            while (changed) {
+                changed = false
+                for (t in tails) {
+                    if (cur.endsWith(t, ignoreCase = true) && cur.length - t.length >= 2) {
+                        cur = cur.dropLast(t.length).trim().trimEnd('-', ':', '·')
+                        changed = true
+                        break
+                    }
+                }
+            }
+            return cur.takeIf { it.length >= 3 && it.any { c -> c in 'A'..'Z' || c in 'a'..'z' } }
+        }
+        assertEquals("Xenoblade2", latinSegment("Xenoblade2 (ゼノブレイド2) Nintendo Switch 2 Edition"))
+        assertEquals("Hollow Knight", latinSegment("Hollow Knight（ホロウナイト） Switch 2 Edition"))
+        assertEquals("Hades", latinSegment("Hades"))
+        assertNull(latinSegment("ゼルダの伝説"))
+        assertNull(latinSegment("异度神剑2"))
+        assertNull(latinSegment(""))
     }
 
     @Test

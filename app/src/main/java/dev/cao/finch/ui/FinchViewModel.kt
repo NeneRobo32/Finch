@@ -4,7 +4,6 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import dev.cao.finch.FinchApp
-import dev.cao.finch.data.BangumiClient
 import dev.cao.finch.data.EshopClient
 import dev.cao.finch.data.Game
 import dev.cao.finch.data.GameStatsRow
@@ -297,25 +296,18 @@ class FinchViewModel(app: Application) : AndroidViewModel(app) {
             }
             // 去平台后缀词（Switch/PS5/Edition/Version/Remaster 等尾巴）
             queries += buildNameVariants(game.name).filter { !isCjkOnly(it) }
-            // eShop 英文名联动：拿库名去日区搜，取英文段（如 "Xenoblade2" / "Hollow Knight"）
-            // HLTB 侧短名多为 "Xenoblade Chronicles 2"，英文段再经中转模糊匹配即可命中
+            // eShop 英文名联动：拿库名去日区搜，只取拉丁英文段
+            // （searchTitles 已过滤纯日文/中文标题；英文段再经中转模糊匹配即可命中）
             try {
                 kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                     EshopClient.searchTitles(game.name)
                 }.take(3).forEach { en ->
-                    val short = en.split(Regex("\\s+[\\(\\[]")).firstOrNull()?.trim().orEmpty()
-                    if (short.length >= 3) queries += short
                     if (en.length >= 3) queries += en
                 }
             } catch (_: Exception) {
             }
-            // Bangumi 中文名兜底（HLTB 是英文库，中文名一般搜不到；但别名偶尔命中，多一次不亏）
-            try {
-                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                    BangumiClient.search(game.name).firstOrNull()?.name
-                }?.takeIf { it.isNotBlank() && it != game.name }?.let { queries += it }
-            } catch (_: Exception) {
-            }
+            // Bangumi 中文名兜底已删除（v0.15.11）：手机直连 api.bgm.tv/bgm.tv 超时，
+            // 且 HLTB 纯英文库中文别名命中率≈0，留着只浪费两次请求。
             var best: dev.cao.finch.data.HltbProxyClient.Hit? = null
             var bestQuery = game.name
             val tried = mutableListOf<String>()
@@ -338,11 +330,13 @@ class FinchViewModel(app: Application) : AndroidViewModel(app) {
                 android.util.Log.d("HltbAuto", "game=${game.name} tried=${tried.joinToString(" | ")} hit=${best?.title}")
             }
             if (best == null) {
-                onDone(
-                    Result.failure(
-                        IllegalStateException("中转搜不到「${game.name}」（试了：${tried.joinToString(" / ")}；换关键词手动贴 HLTB 链接，或手动填）")
-                    )
-                )
+                // 失败文案：无英文词（纯中文库名 + eShop 无英文段）直说，别让用户对着中文关键词干瞪眼
+                val msg = if (tried.isEmpty()) {
+                    "「${game.name}」无英文关键词（eShop 未返回英文名；手动贴 HLTB 链接如 howlongtobeat.com/game/42835，或手动填）"
+                } else {
+                    "中转搜不到「${game.name}」（试了：${tried.joinToString(" / ")}；手动贴 HLTB 链接，或手动填）"
+                }
+                onDone(Result.failure(IllegalStateException(msg)))
                 return@launch
             }
             setHltbTimes(id, best.times.mainMin, best.times.extraMin, best.times.completeMin)
