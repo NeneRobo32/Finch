@@ -9,6 +9,7 @@ import dev.cao.finch.data.Game
 import dev.cao.finch.data.GameStatsRow
 import dev.cao.finch.data.GameStatus
 import dev.cao.finch.data.SessionWithGame
+import dev.cao.finch.data.SwitchTitleClient
 import dev.cao.finch.data.SyncEngine
 import dev.cao.finch.timer.TimerServiceBridge
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -273,12 +274,38 @@ class FinchViewModel(app: Application) : AndroidViewModel(app) {
                     return@launch
                 }
             }
-            // 3) 按名搜（多查询词轮询，Switch 专用链路在前）：
-            // 库名常带平台后缀（"Xxx Nintendo Switch 2 Edition"），HLTB 侧只有短名；
-            // 且库名可能是纯中文（家长监护 title 按机器语言），HLTB 是英文库，中文直搜必 404。
-            // 顺序：原名 → 剥尾巴变体 → eShop 英文名联动（日区 search.json 括号前英文段）
-            //       → Bangumi 中文名兜底（别名偶尔命中）
+            // 3) 按名搜（多查询词轮询，Switch TitleID 联动在前）：
+            // Switch 库名可能是纯中文（家长监护 title 按机器语言），HLTB 是英文库，中文直搜必 404。
+            // 顺序：Nlib 英文名（TitleID 精确翻译，免配置）→ 原名 → 剥尾巴变体 →
+            //       eShop 英文名联动 → 中转搜英文词。
+            // Nlib 直查（Switch 专用）：switchAppId 是 16 位 TitleID 时，一次 GET 拿官方英文名；
+            // 非法格式/未知/超时全部返回 null，静默回退按名搜。
+            val nlibName: String? = if (game.platform == dev.cao.finch.data.Platform.SWITCH) {
+                try {
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        SwitchTitleClient.fetchEnglishName(game.switchAppId)
+                    }
+                } catch (_: Exception) {
+                    null
+                }
+            } else null
+            if (nlibName != null) {
+                val hit = try {
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        dev.cao.finch.data.HltbProxyClient.searchBest(nlibName)
+                    }
+                } catch (_: Exception) {
+                    null
+                }
+                if (hit != null && hit.times.any()) {
+                    setHltbTimes(id, hit.times.mainMin, hit.times.extraMin, hit.times.completeMin)
+                    onDone(Result.success(hit.times))
+                    return@launch
+                }
+                // Nlib 有名但中转搜不到：把英文名也加入后续轮询（剥尾巴可能再救一次）
+            }
             val queries = linkedSetOf<String>()
+            if (nlibName != null && nlibName.length >= 3) queries += nlibName
             // 纯中文名直接跳过（中转必 404，还浪费一次请求；eShop 联动会产出英文词）
             // 判定：去掉数字空格后全是 CJK/假名/韩文 → 纯 CJK 名
             fun isCjkOnly(s: String): Boolean {

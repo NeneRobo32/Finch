@@ -145,4 +145,32 @@ class HltbProxyTest {
         assertEquals(3600L, snap(5000, 3600)) // 玩超了不动
         assertNull(snap(100, null))
     }
+
+    @Test
+    fun `Nlib_TitleID校验_16位十六进制`() {
+        assertTrue(SwitchTitleClient.isTitleId("0100E95004038000"))
+        assertTrue(SwitchTitleClient.isTitleId("01007EF00011E000"))
+        assertTrue(SwitchTitleClient.isTitleId("  0100e95004038000  ")) // 大小写+空白容忍
+        assertEquals(false, SwitchTitleClient.isTitleId(null))
+        assertEquals(false, SwitchTitleClient.isTitleId(""))
+        assertEquals(false, SwitchTitleClient.isTitleId("app123")) // 短 id
+        assertEquals(false, SwitchTitleClient.isTitleId("0100E9500403800G")) // 非十六进制
+        assertEquals(false, SwitchTitleClient.isTitleId("0100E950040380000")) // 17 位
+    }
+
+    @Test
+    fun `Nlib_响应解析_取name_缺字段null`() {
+        // pickName 纯逻辑（parseName 碰 org.json，JVM stub 跑不了，只测 pickName）
+        assertEquals("Xenoblade Chronicles 2", SwitchTitleClient.pickName("Xenoblade Chronicles 2"))
+        assertNull(SwitchTitleClient.pickName(""))
+        assertNull(SwitchTitleClient.pickName(null))
+    }
+
+    @Test
+    fun `Nlib_非法id不发请求_直接null`() {
+        // fetchEnglishName 非法格式直接返回 null（纯逻辑路径，不联网）
+        assertNull(SwitchTitleClient.fetchEnglishName(null))
+        assertNull(SwitchTitleClient.fetchEnglishName(""))
+        assertNull(SwitchTitleClient.fetchEnglishName("app123"))
+    }
 }
