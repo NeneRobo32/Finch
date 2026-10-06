@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.15.14 (2026-10-05)
+
+重构版（无行为变化，接 v0.15.13 之后的清理节奏）：
+
+- **重构**：GameDetailScreen 拆包——通关彩带（ConfettiOverlay）、HLTB 进度卡组（HltbSection：
+  进度卡/空态行/获取块/状态机）移入 `ui/gamedetail/` 子包，主文件从 928 行瘦身至 ~590 行
+- **重构**：会话编辑弹窗双份副本合并为共用 `SessionEditDialog`；SessionRow 归入同一组件文件
+- **重构**：网络异常分类收敛为 `data/NetworkMessages.kt`（4 处类型判断样板 → 1 个纯函数，
+  各处用户文案保持不变）；HLTB 获取块、会话时间输入框收敛为共享组件
+- **测试**：全部单测零回归（纯 JVM 64 + Robolectric 解析 16 全绿）
+
 ## 0.15.13 (2026-10-05)
 
 数据安全与测试加固版（DB 15→16）：
