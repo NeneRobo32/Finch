@@ -28,7 +28,7 @@ class HltbProxyTest {
     @Test
     fun `中转条目映射_缺id返回null_NaN被清`() {
         assertNull(HltbProxyClient.parseEntryFields(0, "x", 1.0, 1.0, 1.0))
-        val e = entry(1, "x", Double.NaN, 1.0, 1.0)!!
+        val e = entry(1, "x", Double.NaN, 1.0, 1.0)
         assertNull(e.toTimes()?.mainMin)
         assertEquals(60L, e.toTimes()?.extraMin)
     }
@@ -77,73 +77,30 @@ class HltbProxyTest {
 
     @Test
     fun `库名变体_去平台后缀尾巴`() {
-        // 变体逻辑在 VM（需 gameDao，单测只验正则口径）：尾巴词逐级剥
-        fun strip(name: String): String {
-            var cur = name.trim()
-            val tails = listOf(
-                "Nintendo Switch 2 Edition", "Nintendo Switch Edition", "Switch Edition",
-                "PS5 Edition", "Definitive Edition", "Deluxe Edition",
-            )
-            var changed = true
-            while (changed) {
-                changed = false
-                for (t in tails) {
-                    if (cur.endsWith(t, ignoreCase = true) && cur.length - t.length >= 3) {
-                        cur = cur.dropLast(t.length).trim().trimEnd('-', ':', '·')
-                        changed = true
-                        break
-                    }
-                }
-            }
-            return cur
-        }
-        assertEquals("异度神剑2", strip("异度神剑2 Nintendo Switch 2 Edition"))
-        assertEquals("Elden Ring", strip("Elden Ring"))
-        assertEquals("Hades", strip("Hades Deluxe Edition"))
+        // 生产口径：data/NameVariants.kt 的 stripPlatformTails（buildNameVariants 的剥尾巴一环，逐级剥）
+        assertEquals("异度神剑2", stripPlatformTails("异度神剑2 Nintendo Switch 2 Edition"))
+        assertEquals("Elden Ring", stripPlatformTails("Elden Ring"))
+        assertEquals("Hades", stripPlatformTails("Hades Deluxe Edition"))
     }
 
     @Test
     fun `eShop英文段_括号前拉丁_纯日文丢弃`() {
-        // 与 EshopClient.latinSegment 同口径（纯逻辑复刻，不联网）
-        fun latinSegment(title: String): String? {
-            val head = title.split("（", "(", "「").firstOrNull()?.trim().orEmpty()
-            if (!head.any { it in 'A'..'Z' || it in 'a'..'z' }) return null
-            var cur = head
-            val tails = listOf(
-                "Nintendo Switch 2 Edition", "Nintendo Switch Edition", "Nintendo Switch",
-                "Switch 2 Edition", "Switch Edition",
-            )
-            var changed = true
-            while (changed) {
-                changed = false
-                for (t in tails) {
-                    if (cur.endsWith(t, ignoreCase = true) && cur.length - t.length >= 2) {
-                        cur = cur.dropLast(t.length).trim().trimEnd('-', ':', '·')
-                        changed = true
-                        break
-                    }
-                }
-            }
-            return cur.takeIf { it.length >= 3 && it.any { c -> c in 'A'..'Z' || c in 'a'..'z' } }
-        }
-        assertEquals("Xenoblade2", latinSegment("Xenoblade2 (ゼノブレイド2) Nintendo Switch 2 Edition"))
-        assertEquals("Hollow Knight", latinSegment("Hollow Knight（ホロウナイト） Switch 2 Edition"))
-        assertEquals("Hades", latinSegment("Hades"))
-        assertNull(latinSegment("ゼルダの伝説"))
-        assertNull(latinSegment("异度神剑2"))
-        assertNull(latinSegment(""))
+        // 生产口径：EshopClient.latinSegment（internal 纯函数，不联网，直接调用）
+        assertEquals("Xenoblade2", EshopClient.latinSegment("Xenoblade2 (ゼノブレイド2) Nintendo Switch 2 Edition"))
+        assertEquals("Hollow Knight", EshopClient.latinSegment("Hollow Knight（ホロウナイト） Switch 2 Edition"))
+        assertEquals("Hades", EshopClient.latinSegment("Hades"))
+        assertNull(EshopClient.latinSegment("ゼルダの伝説"))
+        assertNull(EshopClient.latinSegment("异度神剑2"))
+        assertNull(EshopClient.latinSegment(""))
     }
 
     @Test
     fun `通关联动_参考钳到已玩`() {
-        // snapRefForCompleted 口径：已玩 < 参考 → 参考钳到已玩；否则不动；无参考不动
-        fun snap(playedMin: Long, refMin: Long?): Long? {
-            if (refMin == null || refMin <= 0) return refMin
-            return if (playedMin < refMin) playedMin.coerceAtLeast(1L) else refMin
-        }
-        assertEquals(300L, snap(300, 3600)) // 玩5h通关，参考钳到5h→100%
-        assertEquals(3600L, snap(5000, 3600)) // 玩超了不动
-        assertNull(snap(100, null))
+        // 生产口径：data/GameProgress.kt 的 snapRefForCompleted（FinchViewModel.snapProgressToCompleted 调用）：
+        // 已玩 < 参考 → 参考钳到已玩；否则不动；无参考不动
+        assertEquals(300L, snapRefForCompleted(300, 3600)) // 玩5h通关，参考钳到5h→100%
+        assertEquals(3600L, snapRefForCompleted(5000, 3600)) // 玩超了不动
+        assertNull(snapRefForCompleted(100, null))
     }
 
     @Test

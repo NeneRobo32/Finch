@@ -20,7 +20,7 @@ class Converters {
 }
 
 /** Room schema 版本（迁移与备份校验共用） */
-const val FINCH_DB_VERSION = 15
+const val FINCH_DB_VERSION = 16
 
 @Database(
     entities = [Game::class, PlaySession::class, PlaytimeSnapshot::class, ReleaseFollow::class],
@@ -215,9 +215,35 @@ abstract class FinchDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_15_16 = object : Migration(15, 16) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // 统一 pauseAccumMs 的 DDL：v8 升级用户经 ALTER 带 DEFAULT 0，新装建表没有，
+                // 实体补 defaultValue="0" 后重建 play_sessions，升级装/新装结构一致（Room 校验口径统一）
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `play_sessions_new` (" +
+                        "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "`gameId` INTEGER NOT NULL, " +
+                        "`startTime` INTEGER NOT NULL, " +
+                        "`endTime` INTEGER, " +
+                        "`source` TEXT NOT NULL, " +
+                        "`pauseAccumMs` INTEGER NOT NULL DEFAULT 0, " +
+                        "`pauseStartedAt` INTEGER, " +
+                        "FOREIGN KEY(`gameId`) REFERENCES `games`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE)"
+                )
+                db.execSQL(
+                    "INSERT INTO play_sessions_new (id, gameId, startTime, endTime, source, pauseAccumMs, pauseStartedAt) " +
+                        "SELECT id, gameId, startTime, endTime, source, pauseAccumMs, pauseStartedAt FROM play_sessions"
+                )
+                db.execSQL("DROP TABLE play_sessions")
+                db.execSQL("ALTER TABLE play_sessions_new RENAME TO play_sessions")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_play_sessions_gameId` ON `play_sessions` (`gameId`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_play_sessions_startTime` ON `play_sessions` (`startTime`)")
+            }
+        }
+
         fun build(context: Context): FinchDatabase =
             Room.databaseBuilder(context, FinchDatabase::class.java, "finch.db")
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16)
                 .build()
     }
 }

@@ -1,5 +1,7 @@
 package dev.cao.finch.data
 
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.runInterruptible
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -30,18 +32,18 @@ object HltbClient {
         fun any(): Boolean = mainMin != null || extraMin != null || completeMin != null
     }
 
-    private val client by lazy { BangumiClient.client } // 复用共享直连客户端
+    private val client get() = HttpClients.shared // 共享客户端（connect 5s / read 10s / call 30s）
     private const val UA = "Mozilla/5.0 (Linux; Android 14) finch/0.15"
 
     /** 按 HLTB game id 抓三围（分钟）；抓不到/无数据抛 IOException，调用方转原因文案 */
-    fun fetchTimes(gameId: Long): Times {
+    suspend fun fetchTimes(gameId: Long): Times {
         if (gameId <= 0) throw IOException("HLTB id 非法")
         val req = Request.Builder().url("https://howlongtobeat.com/game/$gameId")
             .header("User-Agent", UA)
             .header("Referer", "https://howlongtobeat.com/")
             .build()
-        val html = client.newCall(req).execute().use { resp ->
-            if (!resp.isSuccessful) throw IOException("HLTB HTTP ${resp.code}")
+        val html = runInterruptible { client.newCall(req).execute() }.use { resp ->
+            if (!resp.isSuccessful) throw HttpStatusException(resp.code, "HLTB HTTP ${resp.code}")
             resp.body?.string() ?: throw IOException("空响应")
         }
         return parseTimes(html) ?: throw IOException("HLTB 页面无时长数据（可能改版）")
@@ -85,10 +87,18 @@ object HltbClient {
         return base + if (half) 0.5 else 0.0
     }
 
-    /** 从用户输入抠 HLTB id：纯数字 / 完整 URL / game?id= 形式 */
+    /** 从用户输入抠 HLTB id：纯数字 / 完整 URL / game?id= 形式。
+     *  优先取 URL path 末段数字——`/game/68151?foo=999` 必须取 68151 而不是 query 里的 999
+     *  （旧版取「全文最后一段数字」带 query 会取错）；再看 id= 参数；最后才全文兜底。 */
     internal fun parseGameId(input: String): Long? {
         val t = input.trim()
         if (t.isBlank()) return null
+        // ① URL path 末段（剥掉 query/fragment）
+        val path = t.substringBefore('?').substringBefore('#').trimEnd('/')
+        Regex("(\\d{3,})/?$").find(path)?.groupValues?.get(1)?.toLongOrNull()?.let { return it }
+        // ② query 的 id= 参数（`game?id=7231`）
+        Regex("[?&]id=(\\d{3,})").find(t)?.groupValues?.get(1)?.toLongOrNull()?.let { return it }
+        // ③ 兜底：全文最后一段数字
         Regex("(\\d{3,})").findAll(t).lastOrNull()?.groupValues?.get(1)?.toLongOrNull()?.let { return it }
         return null
     }
@@ -99,12 +109,14 @@ object HltbClient {
      *  - 对每个候选抓 `bgm.tv/subject/<bangumiId>` 网页，正则找 HLTB 外链
      * 返回首个命中的 HLTB id；都没有返回 null。
      */
-    fun findIdViaBangumi(name: String, nameCn: String? = null): Long? {
+    suspend fun findIdViaBangumi(name: String, nameCn: String? = null): Long? {
         val queries = listOfNotNull(name.takeIf { it.isNotBlank() }, nameCn?.takeIf { it.isNotBlank() })
         val ids = LinkedHashSet<Long>()
         for (q in queries) {
             val got = try {
                 searchBangumiIds(q)
+            } catch (e: CancellationException) {
+                throw e // 取消不吞
             } catch (_: Exception) {
                 emptyList()
             }
@@ -118,15 +130,15 @@ object HltbClient {
     }
 
     /** Bangumi 按名搜索拿条目 id（前 3，游戏 type=4 优先，不限 type 兜底） */
-    internal fun searchBangumiIds(query: String): List<Long> {
+    internal suspend fun searchBangumiIds(query: String): List<Long> {
         val body = org.json.JSONObject().put("keyword", query).put("limit", 10).toString()
             .toRequestBody("application/json; charset=utf-8".toMediaType())
         val req = Request.Builder().url("https://api.bgm.tv/v0/search/games?limit=10")
             .header("User-Agent", "finch-app/0.10.8 (Android; game time tracker)")
             .post(body)
             .build()
-        val json = client.newCall(req).execute().use { resp ->
-            if (!resp.isSuccessful) throw IOException("Bangumi HTTP ${resp.code}")
+        val json = runInterruptible { client.newCall(req).execute() }.use { resp ->
+            if (!resp.isSuccessful) throw HttpStatusException(resp.code, "Bangumi HTTP ${resp.code}")
             resp.body?.string() ?: throw IOException("空响应")
         }
         val data = org.json.JSONObject(json).optJSONArray("data") ?: return emptyList()
@@ -146,15 +158,17 @@ object HltbClient {
      * 抓 bgm.tv 条目页找 HLTB 外链（api.bgm.tv 的 JSON 不含外链，必须抓网页）。
      * 条目页“官方网站/参考资料”区常挂 https://howlongtobeat.com/game/<id>。
      */
-    internal fun fetchBgmPageHltbId(bangumiId: Long): Long? {
+    internal suspend fun fetchBgmPageHltbId(bangumiId: Long): Long? {
         val req = Request.Builder().url("https://bgm.tv/subject/$bangumiId")
             .header("User-Agent", UA)
             .build()
         val html = try {
-            client.newCall(req).execute().use { resp ->
+            runInterruptible { client.newCall(req).execute() }.use { resp ->
                 if (!resp.isSuccessful) return null
                 resp.body?.string().orEmpty()
             }
+        } catch (e: CancellationException) {
+            throw e // 取消不吞
         } catch (_: Exception) {
             return null
         }

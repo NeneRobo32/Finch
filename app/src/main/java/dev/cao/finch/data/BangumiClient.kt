@@ -6,9 +6,9 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import java.io.IOException
-import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.runInterruptible
 
-/** Bangumi (bgm.tv) 客户端 —— okhttp 直连；client 同时供 Eshop / Gamersky / SteamStore 复用 */
+/** Bangumi (bgm.tv) 客户端 —— okhttp 直连；client 同时供 Eshop / Gamersky / SteamStore 等复用 */
 object BangumiClient {
 
     data class Result(val name: String, val nameCn: String?, val coverUrl: String?, val platforms: List<String>)
@@ -24,29 +24,32 @@ object BangumiClient {
 
     private const val UA = "finch-app/0.10.8 (Android; game time tracker)"
 
-    /** 直连（不用 DoH——手机上 DoH 的 IP 反而连不通） */
-    internal val client: OkHttpClient by lazy {
-        OkHttpClient.Builder()
-            .connectTimeout(5, TimeUnit.SECONDS)
-            .readTimeout(8, TimeUnit.SECONDS)
-            .build()
-    }
+    /** 共享 okhttp 客户端别名（统一定义在 HttpClients，connect 5s / read 10s / call 30s） */
+    internal val client: OkHttpClient get() = HttpClients.shared
 
-    private fun get(url: String, method: String = "GET", body: String? = null): String {
+    /**
+     * 网络 GET/POST（G.1 取消安全口径）：suspend + runInterruptible——协程取消即中断阻塞调用；
+     * 退避用 delay()（取消即抛）；4xx/解析类错误不重试，仅 5xx/429/IO 重试一次。
+     */
+    private suspend fun get(url: String, method: String = "GET", body: String? = null): String {
         var lastErr: Exception? = null
         repeat(2) { attempt ->
             try {
-                val b = okhttp3.Request.Builder().url(url).header("User-Agent", UA)
+                val b = Request.Builder().url(url).header("User-Agent", UA)
                 if (body != null) {
                     b.post(body.toRequestBody("application/json; charset=utf-8".toMediaType()))
                 }
-                client.newCall(b.build()).execute().use { resp ->
-                    if (!resp.isSuccessful) throw IOException("HTTP ${resp.code}")
-                    return resp.body?.string() ?: throw IOException("空响应")
+                return runInterruptible {
+                    HttpClients.shared.newCall(b.build()).execute().use { resp ->
+                        if (!resp.isSuccessful) throw HttpStatusException(resp.code, "HTTP ${resp.code}")
+                        resp.body?.string() ?: throw IOException("空响应")
+                    }
                 }
             } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e // 取消不是失败，照常上抛
                 lastErr = e
-                if (attempt < 1) Thread.sleep(800L * (attempt + 1))
+                if (!isRetryable(e)) throw e // 4xx/解析类错误不重试
+                if (attempt < 1) kotlinx.coroutines.delay(800L * (attempt + 1))
             }
         }
         throw lastErr ?: IOException("未知网络错误")
@@ -76,7 +79,7 @@ object BangumiClient {
         )
     }
 
-    fun search(keyword: String): List<Result> {
+    suspend fun search(keyword: String): List<Result> {
         val body = JSONObject().put("keyword", keyword).put("limit", 20)
         val json = get("https://api.bgm.tv/v0/search/games?limit=20", "POST", body.toString())
         val data = JSONObject(json).optJSONArray("data") ?: return emptyList()
@@ -88,7 +91,7 @@ object BangumiClient {
     }
 
     /** 每日发售日历，返回原始 JSON 供离线缓存；base 可传镜像域名 */
-    fun fetchCalendarRaw(base: String = "https://api.bgm.tv"): String = get("$base/v0/calendar")
+    suspend fun fetchCalendarRaw(base: String = "https://api.bgm.tv"): String = get("$base/v0/calendar")
 
     /** 解析日历 JSON → 即将发售的游戏（按日期升序）。防御式：兼容裸数组和 {data:[...]} 两种包裹 */
     fun parseCalendar(json: String): List<CalendarEntry> {

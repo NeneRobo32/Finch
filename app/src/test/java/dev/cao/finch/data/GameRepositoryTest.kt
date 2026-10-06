@@ -7,20 +7,11 @@ import org.junit.Test
 class GameRepositoryTest {
 
     /**
-     * v0.15.9 改名口径（纯逻辑版，与 SyncEngine.runSwitch/runSteam 内联条件一致）：
+     * v0.15.9 改名口径：直接调用 SyncEngine.kt 的生产纯函数 shouldRenameSwitch/shouldRenameSteam
+     * （runSwitch/runSteam 与本测试同一出处，生产改口径测试立即失效）：
      *  - Switch：同 switchAppId + 标题不同（忽略大小写）+ 新标题非空 → 改名（语言回填场景）
      *  - Steam：已有 steamAppId + 官方名不同（忽略大小写）+ 新名非空 → 改名（官方改名认领）
      */
-    private fun shouldRenameSwitch(storedAppId: String?, storedName: String, incomingTitle: String): Boolean =
-        !storedAppId.isNullOrBlank() &&
-            !storedName.equals(incomingTitle, ignoreCase = true) &&
-            incomingTitle.isNotBlank()
-
-    private fun shouldRenameSteam(storedSteamId: Long?, storedName: String, steamName: String): Boolean =
-        storedSteamId != null &&
-            !storedName.equals(steamName, ignoreCase = true) &&
-            steamName.isNotBlank()
-
     @Test
     fun `改名口径_Switch中英切换命中_Steam官方改名命中`() {
         // 中文老库名 + 英文新 title → 回填

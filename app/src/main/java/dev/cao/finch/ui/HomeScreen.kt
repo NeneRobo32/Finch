@@ -56,6 +56,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -67,14 +68,13 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.rememberScrollState
 import dev.cao.finch.ui.theme.pressScale
-import androidx.compose.ui.layout.ContentScale
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
-import coil3.compose.AsyncImage
 import dev.cao.finch.TimeFormatter
 import dev.cao.finch.data.Game
 import dev.cao.finch.data.GameRepository
@@ -117,6 +117,7 @@ fun HomeScreen(
     viewModel: FinchViewModel,
     addViewModel: AddGameViewModel,
     backdrop: com.kyant.backdrop.Backdrop? = null,
+    initialGameId: Long? = null,
 ) {
     val context = LocalContext.current
     val games by viewModel.games.collectAsState()
@@ -131,14 +132,22 @@ fun HomeScreen(
             snackbarHostState.showSnackbar(msg)
         }
     }
-    var showAddDialog by remember { mutableStateOf(false) }
-    var selectedGameId by remember { mutableStateOf<Long?>(null) } // 进入游戏详情页
-    var query by remember { mutableStateOf("") } // 搜索我的游戏
+    // rememberSaveable：旋转/进程重建后搜索、筛选、详情页位置都不丢（remember 全部会回默认值）
+    var showAddDialog by rememberSaveable { mutableStateOf(false) }
+    var selectedGameId by rememberSaveable { mutableStateOf<Long?>(null) } // 进入游戏详情页
+    var query by rememberSaveable { mutableStateOf("") } // 搜索我的游戏
     // 主页筛选：状态 / 收藏 / 平台 + 排序
-    var statusFilter by remember { mutableStateOf<dev.cao.finch.data.GameStatus?>(null) }
-    var favOnly by remember { mutableStateOf(false) }
-    var platformFilter by remember { mutableStateOf<dev.cao.finch.data.Platform?>(null) }
-    var sortMode by remember { mutableStateOf(HomeSort.RECENT) }
+    var statusFilter by rememberSaveable { mutableStateOf<dev.cao.finch.data.GameStatus?>(null) }
+    var favOnly by rememberSaveable { mutableStateOf(false) }
+    var platformFilter by rememberSaveable { mutableStateOf<dev.cao.finch.data.Platform?>(null) }
+    var sortMode by rememberSaveable { mutableStateOf(HomeSort.RECENT) }
+    // widget 直达：带 initialGameId 进来时一次性打开对应游戏详情；只在当前不在详情页时生效，
+    // 且 extra 已被 MainActivity 消费（处理后为 null），进程重建/重组不会反复跳转
+    LaunchedEffect(initialGameId) {
+        if (initialGameId != null && selectedGameId == null) {
+            selectedGameId = initialGameId
+        }
+    }
     // 列表滚动位置必须 hoist 到 AnimatedContent 外部：进详情页时列表组合会被销毁，
     // state 放在里面会导致返回时重建并回到顶部
     val listState = androidx.compose.foundation.lazy.rememberLazyListState()
@@ -147,14 +156,20 @@ fun HomeScreen(
         listState.scrollToItem(0)
     }
 
-    // 本月数据：顶部大卡「玩得最多」
-    val now = LocalDateTime.now()
-    val monthStart = now.withDayOfMonth(1).toLocalDate().atStartOfDay()
-    val nextMonthStart = monthStart.plusMonths(1)
-    val monthStartMillis = monthStart.atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
-    val nextMonthMillis = nextMonthStart.atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
-    val thisMonthTotal by viewModel.totalBetween(monthStartMillis, nextMonthMillis).collectAsState(0L)
-    val topMonth by viewModel.topGamesWithCover(monthStartMillis, nextMonthMillis).collectAsState(initial = emptyList())
+    // 本月数据：顶部大卡「玩得最多」（月份区间与 Flow 都 remember 住：
+    // 否则每次重组都新建 Flow、collectAsState 重启收集，本月卡反复闪 0）
+    val (monthStartMillis, nextMonthMillis) = remember {
+        val monthStart = LocalDateTime.now().withDayOfMonth(1).toLocalDate().atStartOfDay()
+        val zone = java.time.ZoneId.systemDefault()
+        monthStart.atZone(zone).toInstant().toEpochMilli() to
+            monthStart.plusMonths(1).atZone(zone).toInstant().toEpochMilli()
+    }
+    val thisMonthTotal by remember(monthStartMillis, nextMonthMillis) {
+        viewModel.totalBetween(monthStartMillis, nextMonthMillis)
+    }.collectAsState(0L)
+    val topMonth by remember(monthStartMillis, nextMonthMillis) {
+        viewModel.topGamesWithCover(monthStartMillis, nextMonthMillis)
+    }.collectAsState(initial = emptyList())
 
     val selectedGame = games.firstOrNull { it.id == selectedGameId }
 
@@ -212,7 +227,7 @@ fun HomeScreen(
         snackbarHost = { androidx.compose.material3.SnackbarHost(snackbarHostState) },
         floatingActionButton = {
             // 抬高到悬浮底栏上方，避免被胶囊遮挡
-            Box(Modifier.padding(bottom = 150.dp)) {
+            Box(Modifier.padding(bottom = Dimens.BottomBarOverlap)) {
                 androidx.compose.material3.FloatingActionButton(onClick = { showAddDialog = true }) {
                     Icon(Icons.Filled.Add, contentDescription = "添加游戏")
                 }
@@ -230,7 +245,6 @@ fun HomeScreen(
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(padding)
                     .padding(24.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center,
@@ -252,22 +266,40 @@ fun HomeScreen(
                 )
             }
         } else {
+            val q = query.trim().lowercase()
+            // 过滤+排序结果缓存：输入不变则复用，避免每次重组 O(n log n) 重算。
+            // 必须在 LazyColumn content 外计算：content lambda 不是 Composable 上下文，不能调 remember
+            val shown = remember(games, q, statusFilter, favOnly, platformFilter, sortMode, totalsMap) {
+                val shownBase = games.filter { g ->
+                    (statusFilter == null || g.statusResolved() == statusFilter) &&
+                        (!favOnly || g.favorite) &&
+                        (platformFilter == null || dev.cao.finch.data.GameRepository.supportsPlatform(g, platformFilter!!)) &&
+                        (q.isEmpty() || g.name.lowercase().contains(q))
+                }
+                when (sortMode) {
+                    HomeSort.RECENT -> shownBase // DAO 已按最近游玩排好
+                    HomeSort.TOTAL -> shownBase.sortedByDescending { totalsMap[it.id] ?: 0L }
+                    HomeSort.RATING -> shownBase.sortedWith(
+                        compareByDescending<dev.cao.finch.data.Game> { it.rating ?: -1 }
+                            .thenBy { it.name.lowercase() }
+                    )
+                    HomeSort.NAME -> shownBase.sortedBy { it.name.lowercase() }
+                }
+            }
             LazyColumn(
                 state = listState,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(padding),
+                modifier = Modifier.fillMaxSize().imePadding(),
                 contentPadding = PaddingValues(
                     start = 16.dp,
                     end = 16.dp,
                     top = 16.dp,
-                    bottom = 150.dp, // FAB 抬高后列表底部同步加深，最后一张卡完整露出
+                    bottom = Dimens.BottomBarOverlap, // FAB 抬高后列表底部同步加深，最后一张卡完整露出
                 ),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 // 本月概览大卡
                 if (topMonth.isNotEmpty()) {
-                    item { MonthHeroCard(games, runningGameId, topMonth.first(), thisMonthTotal) }
+                    item { MonthHeroCard(topMonth.first(), thisMonthTotal) }
                 }
 
                 // 筛选 + 标题行：标题行挂排序（单行不换行），两排横滑筛选，搜索框兜底
@@ -395,22 +427,6 @@ fun HomeScreen(
                     }
                 }
 
-                val q = query.trim().lowercase()
-                val shownBase = games.filter { g ->
-                    (statusFilter == null || g.statusResolved() == statusFilter) &&
-                        (!favOnly || g.favorite) &&
-                        (platformFilter == null || dev.cao.finch.data.GameRepository.supportsPlatform(g, platformFilter!!)) &&
-                        (q.isEmpty() || g.name.lowercase().contains(q))
-                }
-                val shown = when (sortMode) {
-                    HomeSort.RECENT -> shownBase // DAO 已按最近游玩排好
-                    HomeSort.TOTAL -> shownBase.sortedByDescending { totalsMap[it.id] ?: 0L }
-                    HomeSort.RATING -> shownBase.sortedWith(
-                        compareByDescending<dev.cao.finch.data.Game> { it.rating ?: -1 }
-                            .thenBy { it.name.lowercase() }
-                    )
-                    HomeSort.NAME -> shownBase.sortedBy { it.name.lowercase() }
-                }
                 if ((q.isNotEmpty() || statusFilter != null || favOnly || platformFilter != null) && shown.isEmpty()) {
                     item {
                         Text(
@@ -434,8 +450,6 @@ fun HomeScreen(
                         paused = game.id == runningGameId && runningPaused,
                         backdrop = backdrop,
                         onClick = { selectedGameId = game.id },
-                        onStart = { selectedGameId = game.id },
-                        onStop = { startTimerService(context, TimerNotifications.ACTION_STOP) },
                         onDelete = { viewModel.deleteGame(game.id) },
                     )
                 }
@@ -459,21 +473,20 @@ fun HomeScreen(
 
 /** 本月「玩得最多」大卡：封面横图 + 渐变遮罩 + 时长 */
 @Composable
-private fun MonthHeroCard(allGames: List<Game>, runningGameId: Long, top: TopGameRow, monthTotal: Long) {
+private fun MonthHeroCard(top: TopGameRow, monthTotal: Long) {
     val title = top.name
-    // 渐入 + 轻微缩放（hero 进入更有存在感）
-    val heroIn by androidx.compose.animation.core.animateFloatAsState(
-        targetValue = 1f,
-        animationSpec = spring(Spring.DampingRatioNoBouncy, Spring.StiffnessMediumLow),
-        label = "heroIn",
-    )
+    // 渐入 + 轻微缩放（hero 进入更有存在感；初值 0.96，否则动画 1→1 永不播放）
+    val heroIn = remember { androidx.compose.animation.core.Animatable(0.96f) }
+    LaunchedEffect(Unit) {
+        heroIn.animateTo(1f, spring(Spring.DampingRatioNoBouncy, Spring.StiffnessMediumLow))
+    }
     GlassCard(
         modifier = Modifier
             .fillMaxWidth()
             .height(180.dp)
             .graphicsLayer {
-                alpha = heroIn
-                val s = 0.96f + 0.04f * heroIn
+                alpha = heroIn.value
+                val s = 0.96f + 0.04f * heroIn.value
                 scaleX = s
                 scaleY = s
             }
@@ -486,23 +499,21 @@ private fun MonthHeroCard(allGames: List<Game>, runningGameId: Long, top: TopGam
         shape = RoundedCornerShape(20.dp),
     ) {
         Box(Modifier.fillMaxSize()) {
-            if (top.coverUrl != null) {
-                AsyncImage(
-                    model = top.coverUrl,
-                    contentDescription = null,
-                    modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Crop,
-                )
-            } else {
-                Box(
-                    Modifier
-                        .fillMaxSize()
-                        .background(MaterialTheme.colorScheme.primaryContainer),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(Icons.Filled.VideogameAsset, contentDescription = null, modifier = Modifier.size(64.dp), tint = MaterialTheme.colorScheme.primary)
-                }
-            }
+            GameCover(
+                url = top.coverUrl,
+                contentDescription = null,
+                modifier = Modifier.fillMaxSize(),
+                placeholder = {
+                    Box(
+                        Modifier
+                            .fillMaxSize()
+                            .background(MaterialTheme.colorScheme.primaryContainer),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(Icons.Filled.VideogameAsset, contentDescription = null, modifier = Modifier.size(64.dp), tint = MaterialTheme.colorScheme.primary)
+                    }
+                },
+            )
             Box(
                 Modifier
                     .fillMaxSize()
@@ -546,8 +557,6 @@ private fun GameGridCard(
     paused: Boolean = false,
     backdrop: com.kyant.backdrop.Backdrop?,
     onClick: () -> Unit,
-    onStart: () -> Unit,
-    onStop: () -> Unit,
     onDelete: () -> Unit,
 ) {
     var confirmDelete by remember { mutableStateOf(false) }
@@ -571,23 +580,21 @@ private fun GameGridCard(
                     .fillMaxWidth()
                     .aspectRatio(2f / 1f),
             ) {
-                if (game.coverUrl != null) {
-                    AsyncImage(
-                        model = game.coverUrl,
-                        contentDescription = null,
-                        modifier = Modifier.fillMaxSize(),
-                        contentScale = ContentScale.Crop,
-                    )
-                } else {
-                    Box(
-                        Modifier
-                            .fillMaxSize()
-                            .background(MaterialTheme.colorScheme.surfaceVariant),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Icon(platformIcon(game.platform), contentDescription = null, modifier = Modifier.size(40.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                }
+                GameCover(
+                    url = game.coverUrl,
+                    contentDescription = null,
+                    modifier = Modifier.fillMaxSize(),
+                    placeholder = {
+                        Box(
+                            Modifier
+                                .fillMaxSize()
+                                .background(MaterialTheme.colorScheme.surfaceVariant),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(platformIcon(game.platform), contentDescription = null, modifier = Modifier.size(40.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    },
+                )
                 if (running) {
                     Box(
                         Modifier
@@ -669,7 +676,7 @@ private fun GameGridCard(
                 }
                 androidx.compose.material3.Icon(
                     Icons.Filled.PlayArrow,
-                    contentDescription = "查看详情",
+                    contentDescription = null, // 点击区是整卡，播放图标纯装饰
                     tint = MaterialTheme.colorScheme.primary,
                 )
             }

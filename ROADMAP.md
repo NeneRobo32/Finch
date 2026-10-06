@@ -28,10 +28,8 @@ IGDB 已整体移除（国内直连不通）；HLTB 改走 Crashdummy 中转 API
 | v0.15.10 ✅已交付 | 体验修复 | 中文库名跳过直搜（必 404），失败文案列实际关键词 | 15（不变） | 无 |
 | v0.15.11 ✅已交付 | 体验修复 | eShop 只取拉丁英文段（日文词不再污染查询）；删 Bangumi 兜底；无英文词直说文案 | 15（不变） | 无 |
 | v0.15.12 ✅已交付 | 体验修复 | Switch TitleID→英文名联动（Nlib 免配置，命中写回库名） | 15（不变） | 无 |
-| v0.14 | 总结可视化 | 年度热力图；时段分布（周几/几点）；元/小时回本率；月度战报海报 v1 | 9→10 | 无（加 `share` 用系统 API） |
-| v0.15 | 日程变有用 | 发售关注＋发售前推送；通关进度条（HLTB 参考）；WorkManager 基建 | 10→11 | `androidx.work:work-runtime-ktx` |
-| v0.16 | 数据安全与分发 | 自动备份；CSV 导出；私有分发＋应用内版本检查 | 11（不变） | 无（复用 WorkManager） |
-| v0.17 | 留存与趣味 | 成就/连击徽章；游玩预算提醒；小组件扩展 | 11（不变，徽章纯算） | 无 |
+| v0.16 | 数据安全与分发 | 自动备份；CSV 导出；私有分发＋应用内版本检查 | 16（不变） | 无（复用 WorkManager） |
+| v0.17 | 留存与趣味 | 成就/连击徽章；游玩预算提醒；小组件扩展 | 16（不变，徽章纯算） | 无 |
 | 远期 / 明确不做 | — | WebDAV 同步（可选）；前台自动识别、账号云同步、国际化明确不做 | — | — |
 
 ```mermaid
@@ -155,10 +153,8 @@ gantt
 | 12 | v0.15.0（已交付） | 新表 `release_follows`；`games.hltbMainMin` |
 | 13 | v0.15.1–0.15.3（过渡，已移除） | `games.hltbExtraMin + hltb100Min + igdbId`（IGDB/HLTB 引入；v0.15.4 移除，仅作迁移垫脚） |
 | 14 | v0.15.4（过渡） | 重建 games 表去掉 IGDB/HLTB 列（与 v12 表结构一致） |
-| 15 | v0.15.5–0.15.6（现状） | 加回 `games.hltbExtraMin + hltb100Min`（HLTB 写回；v0.15.6 改走中转 API，DB 不变） |
-| 10 | v0.14 | `games.priceCny + priceFetchedAt` |
-| 11 | v0.15 | 新表 `release_follows`；`games.hltbMainMin` |
-| 11 | v0.16 / v0.17 | 不变（设置项走 `SettingsStore`，徽章纯算） |
+| 15 | v0.15.5–0.15.12（已交付） | 加回 `games.hltbExtraMin + hltb100Min`（HLTB 写回；v0.15.6 改走中转 API，DB 不变） |
+| 16 | v0.15.13+（现状） | 重建 `play_sessions` 统一 `pauseAccumMs` DDL（实体补 `defaultValue="0"`，升级装/新装一致） |
 
 备份恢复逻辑（`BackupManager.validate()`）按 `FINCH_DB_VERSION` 校验，跨版恢复走 Room 自动迁移，老备份可读。
 

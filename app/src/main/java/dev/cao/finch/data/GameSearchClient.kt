@@ -28,8 +28,12 @@ object GameSearchClient {
         else -> null
     }
 
+    /** LIKE 通配符转义（用户输入的 %/_ 按普通字符匹配），配合 searchByName 的 ESCAPE '\' */
+    private fun escapeLike(s: String): String =
+        s.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
     suspend fun searchLocal(query: String, dao: GameDao): List<Item> =
-        dao.searchByName("%${query.trim()}%").map {
+        dao.searchByName("%${escapeLike(query.trim())}%").map {
             Item(
                 name = it.name, nameCn = null, coverUrl = it.coverUrl,
                 platforms = it.platformSet(), source = "local", localId = it.id,
@@ -38,7 +42,8 @@ object GameSearchClient {
 
     data class OnlineResult(val items: List<Item>, val notes: List<String>)
 
-    fun searchOnline(query: String): OnlineResult {
+    /** 在线双源搜索（suspend：Bangumi/Steam 商店网络路径可随协程取消中断） */
+    suspend fun searchOnline(query: String): OnlineResult {
         val out = mutableListOf<Item>()
         val notes = mutableListOf<String>()
         // 源1：Bangumi

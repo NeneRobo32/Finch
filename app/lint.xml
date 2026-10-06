@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<lint>
+    <!-- 项目既定决策：App UI 文案不做国际化、内联中文硬编码（README「明确不做国际化」），
+         HardcodedText 不作为检查项；系统可见文本（通知/小组件/分享面板）另行人工把关入 strings.xml。 -->
+    <issue id="HardcodedText" severity="ignore" />
+
+    <!-- 无障碍描述缺失先按警告提示，逐步补齐 -->
+    <issue id="ContentDescription" severity="warning" />
+
+    <!-- API 兼容性按默认（error）严格执行 -->
+    <issue id="NewApi" severity="error" />
+    <issue id="InlinedApi" severity="warning" />
+</lint>

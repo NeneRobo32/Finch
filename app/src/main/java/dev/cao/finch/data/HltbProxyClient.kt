@@ -1,5 +1,7 @@
 package dev.cao.finch.data
 
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.runInterruptible
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -33,18 +35,18 @@ object HltbProxyClient {
         "https://hltbapi1.azurewebsites.net",
         "https://hltbapi.codepotatoes.de",
     )
-    private val client by lazy { BangumiClient.client } // 复用共享直连客户端
+    private val client get() = HttpClients.shared // 共享客户端（connect 5s / read 10s / call 30s）
     private const val UA = "finch/0.15 (Android; game time tracker)"
 
     /** Steam 游戏直查（最准）：appid → 三围（分钟）；无条目/失败抛 IOException */
-    fun fetchBySteam(appid: Long): Times {
+    suspend fun fetchBySteam(appid: Long): Times {
         if (appid <= 0) throw IOException("Steam appid 非法")
         val entry = getOnBases("/steam/$appid") ?: throw IOException("中转无此 Steam 游戏")
         return entry.toTimes() ?: throw IOException("中转条目无时长数据")
     }
 
     /** 按 HLTB id 查（手动贴 id 的兜底） */
-    fun fetchByHltbId(hltbId: Long): Times {
+    suspend fun fetchByHltbId(hltbId: Long): Times {
         if (hltbId <= 0) throw IOException("HLTB id 非法")
         val entry = getOnBases("/hltb/$hltbId") ?: throw IOException("中转无此 HLTB 条目")
         return entry.toTimes() ?: throw IOException("中转条目无时长数据")
@@ -54,7 +56,7 @@ object HltbProxyClient {
      * 按名搜：返回候选（相似度排序，含三围）。
      * 数字强制匹配：名里带数字的必须对上（如 2 代不认 1 代），全不过滤则回退全量。
      */
-    fun search(query: String): List<Hit> {
+    suspend fun search(query: String): List<Hit> {
         val q = query.trim()
         if (q.isBlank()) return emptyList()
         var lastErr: Exception? = null
@@ -70,14 +72,16 @@ object HltbProxyClient {
                     .header("User-Agent", UA)
                     .post(body)
                     .build()
-                val json = client.newCall(req).execute().use { resp ->
+                val json = runInterruptible { client.newCall(req).execute() }.use { resp ->
                     if (resp.code == 404) return@use null // 该 base 无匹配，换下一个
-                    if (!resp.isSuccessful) throw IOException("中转 HTTP ${resp.code}")
+                    if (!resp.isSuccessful) throw HttpStatusException(resp.code, "中转 HTTP ${resp.code}")
                     resp.body?.string()
                 } ?: continue
                 val hits = parseSearchResult(json, q)
                 if (hits.isNotEmpty()) return hits
                 // 该 base 空结果：继续试下一个 base（缓存覆盖不同）
+            } catch (e: CancellationException) {
+                throw e // 取消不吞
             } catch (e: Exception) {
                 lastErr = e
             }
@@ -87,9 +91,11 @@ object HltbProxyClient {
     }
 
     /** 搜索取最佳（相似度 ≥0.4 才算命中，否则 null） */
-    fun searchBest(query: String, platform: Platform? = null): Hit? {
+    suspend fun searchBest(query: String, platform: Platform? = null): Hit? {
         val hits = try {
             search(query)
+        } catch (e: CancellationException) {
+            throw e // 取消不吞
         } catch (_: Exception) {
             return null
         }
@@ -137,19 +143,22 @@ object HltbProxyClient {
         return Entry(hltbId, title, clean(main), clean(extra), clean(complete))
     }
 
-    private fun getOnBases(path: String): Entry? {
+    private suspend fun getOnBases(path: String): Entry? {
         var lastErr: Exception? = null
         for (base in bases) {
             try {
                 val req = Request.Builder().url("$base$path")
                     .header("User-Agent", UA)
                     .build()
-                client.newCall(req).execute().use { resp ->
-                    if (resp.code == 404) return@use null // 无条目：换 base 再试
-                    if (!resp.isSuccessful) throw IOException("中转 HTTP ${resp.code}")
-                    val body = resp.body?.string() ?: throw IOException("空响应")
+                val resp = runInterruptible { client.newCall(req).execute() }
+                resp.use {
+                    if (it.code == 404) return@use null // 无条目：换 base 再试
+                    if (!it.isSuccessful) throw HttpStatusException(it.code, "中转 HTTP ${it.code}")
+                    val body = it.body?.string() ?: throw IOException("空响应")
                     return parseEntry(body)
                 }
+            } catch (e: CancellationException) {
+                throw e // 取消不吞
             } catch (e: Exception) {
                 lastErr = e
             }

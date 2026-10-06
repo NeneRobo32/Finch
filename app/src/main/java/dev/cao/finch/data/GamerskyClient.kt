@@ -1,5 +1,12 @@
 package dev.cao.finch.data
 
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.runInterruptible
+import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.Request
 import org.json.JSONObject
 import java.io.IOException
@@ -36,18 +43,18 @@ object GamerskyClient {
         val expectation: Int,        // 期待值
     )
 
-    private val client by lazy { BangumiClient.client } // 复用直连客户端
+    private val client get() = HttpClients.shared // 共享客户端（connect 5s / read 10s / call 30s）
 
-    private fun get(url: String): String {
+    private suspend fun get(url: String): String {
         // 必须用完整 Chrome UA——游民 CDN 对自定义 UA（含 app 标记）返回 15KB 拦截页
         val req = Request.Builder().url(url)
             .header("User-Agent", "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36")
             .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")
             .header("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
             .build()
-        client.newCall(req).execute().use { resp ->
-            if (!resp.isSuccessful) throw IOException("HTTP ${resp.code}")
-            return resp.body?.string() ?: throw IOException("空响应")
+        return runInterruptible { client.newCall(req).execute() }.use { resp ->
+            if (!resp.isSuccessful) throw HttpStatusException(resp.code, "HTTP ${resp.code}")
+            resp.body?.string() ?: throw IOException("空响应")
         }
     }
 
@@ -55,7 +62,7 @@ object GamerskyClient {
      * 拉指定月份某个平台的发售表。
      * months 含 0（当月）、负数（往前=已发售）、正数（往后=待发售）。
      */
-    fun fetch(platform: String, monthOffset: Int): List<Item> {
+    suspend fun fetch(platform: String, monthOffset: Int): List<Item> {
         val ym = YearMonth.now().plusMonths(monthOffset.toLong())
         val url = "https://ku.gamersky.com/release/release/${platform}_${ym.format(DateTimeFormatter.ofPattern("yyyyMM"))}/"
         val html = get(url)
@@ -124,37 +131,35 @@ object GamerskyClient {
     }
 
     /**
-     * 拉当前月往前 1 个月 + 往后 6 个月的发售（两平台并行 4 线程）。
+     * 拉当前月往前 1 个月 + 往后 6 个月的发售（两平台并行协程）。
      * pc_=PC；hgc_=主机综合（覆盖 PS5/NS2 大作；switch_/ps5_ 等路径实际回退 pc 页，勿用）。
      * 期待值 < 300 的直接丢弃（小作/边缘内容，减小内存与卡顿）；任一月失败跳过。
+     * G.1：旧实现是「每次调用新建 4 线程池 + Future.get(10s) 超时后 shutdown() 不取消」——
+     * 超时任务泄漏继续跑。现改为协程并行 + 每页 10s 预算，超时即取消（OkHttp 调用随 runInterruptible 中断）。
      */
-    fun fetchRestOfYear(): List<Item> {
+    suspend fun fetchRestOfYear(): List<Item> {
         val out = java.util.concurrent.ConcurrentHashMap<String, Item>()
         val tasks = mutableListOf<Pair<String, Int>>()
         for (pfx in listOf("hgc", "pc")) {
             for (off in -1..6) tasks += pfx to off
         }
-        // 4 线程并行，任务池
-        val pool = java.util.concurrent.Executors.newFixedThreadPool(4)
-        try {
-            val futures = tasks.map { (pfx, off) ->
-                pool.submit<Unit> {
-                    try {
-                        fetch(pfx, off)
-                            .filter { it.expectation >= 300 }
-                            .forEach { out["$pfx:${it.name}"] = it }
-                    } catch (_: Exception) {
-                        // 单月失败跳过（可能网络波动/无数据）
+        coroutineScope {
+            tasks.map { (pfx, off) ->
+                async(Dispatchers.IO) {
+                    // 单页 10s 预算：超时 withTimeoutOrNull 返回 null 并取消本任务，不再泄漏
+                    withTimeoutOrNull(10_000) {
+                        try {
+                            fetch(pfx, off)
+                                .filter { it.expectation >= 300 }
+                                .forEach { out["$pfx:${it.name}"] = it }
+                        } catch (e: CancellationException) {
+                            throw e // 超时/外部取消上抛（withTimeoutOrNull 吞自身超时）
+                        } catch (_: Exception) {
+                            // 单月失败跳过（可能网络波动/无数据）
+                        }
                     }
                 }
-            }
-            futures.forEach { 
-                try {
-                    it.get(10, java.util.concurrent.TimeUnit.SECONDS)
-                } catch (_: Exception) { /* 单页超时跳过 */ }
-            }
-        } finally {
-            pool.shutdown()
+            }.awaitAll()
         }
         return out.values.toList()
     }

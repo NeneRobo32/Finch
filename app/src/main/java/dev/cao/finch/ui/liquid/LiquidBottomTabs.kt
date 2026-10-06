@@ -85,7 +85,8 @@ fun LiquidBottomTabs(
         }
 
         val offsetAnimation = remember { Animatable(0f) }
-        val panelOffset by remember(density) {
+        // key 带上 constraints.maxWidth：否则旋转/分屏后闭包仍按旧宽度算偏移
+        val panelOffset by remember(density, constraints.maxWidth) {
             derivedStateOf {
                 val fraction = (offsetAnimation.value / constraints.maxWidth).fastCoerceIn(-1f, 1f)
                 with(density) {

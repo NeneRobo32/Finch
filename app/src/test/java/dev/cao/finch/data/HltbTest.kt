@@ -48,4 +48,16 @@ class HltbTest {
         assertNull(HltbClient.parseGameId(""))
         assertNull(HltbClient.parseGameId("abc"))
     }
+
+    @Test
+    fun `HLTBid_带尾部query的详情URL取path数字`() {
+        // 旧版取「全文最后一段数字」会拿 query 里的 999
+        assertEquals(68151L, HltbClient.parseGameId("https://howlongtobeat.com/game/68151?foo=999"))
+        assertEquals(68151L, HltbClient.parseGameId("https://howlongtobeat.com/game/68151#comments"))
+    }
+
+    @Test
+    fun `HLTBid_id参数带杂参仍取id`() {
+        assertEquals(7231L, HltbClient.parseGameId("https://howlongtobeat.com/game?id=7231&track=999"))
+    }
 }

@@ -1,6 +1,9 @@
 # Build outputs
 build/
 captures/
+*.apk
+*.aab
+*.hprof
 
 # Gradle
 .gradle/

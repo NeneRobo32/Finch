@@ -1,9 +1,10 @@
 package dev.cao.finch.data
 
+import android.util.Log
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
@@ -12,7 +13,6 @@ import java.security.MessageDigest
 import java.security.SecureRandom
 import java.time.LocalDate
 import java.util.Base64
-import java.util.concurrent.TimeUnit
 
 /**
  * Switch 游玩记录导入（家长监护 App「みまもりSwitch」= Moon API）。
@@ -39,11 +39,8 @@ object SwitchClient {
         "moonParentalControlSettingState moonPairingState moonSmartDevice:administration " +
         "moonDailySummary moonMonthlySummary"
 
-    // Moon API 需要与官方一致的头
-    private val client = OkHttpClient.Builder()
-        .connectTimeout(10, TimeUnit.SECONDS)
-        .readTimeout(20, TimeUnit.SECONDS)
-        .build()
+    // Moon API 需要与官方一致的头；client 统一走共享实例（connect 5s / read 10s / call 30s）
+    private val client get() = HttpClients.shared
 
     // ---- PKCE 状态 ----
 
@@ -85,16 +82,17 @@ object SwitchClient {
             .header("User-Agent", "NASDKAPI; Android")
             .post(form.toRequestBody("application/x-www-form-urlencoded".toMediaType()))
             .build()
-        client.newCall(req).execute().use { resp ->
+        val sessionToken = runInterruptible { client.newCall(req).execute() }.use { resp ->
             val bodyText = resp.body?.string().orEmpty()
-            if (!resp.isSuccessful) throw java.io.IOException("session_token HTTP ${resp.code} body=$bodyText")
+            if (!resp.isSuccessful) throw HttpStatusException(resp.code, "session_token HTTP ${resp.code} body=$bodyText")
             val json = JSONObject(bodyText)
-            val sessionToken = json.optString("session_token").ifBlank { throw java.io.IOException("无 session_token") }
-            // 用 session_token 换 access_token（实际取 id_token，Moon v2 认证用）
-            val accessToken = exchangeForAccessToken(sessionToken)
-            val naId = fetchNaId(accessToken)
-            AuthResult(sessionToken, naId)
+            json.optString("session_token").ifBlank { throw java.io.IOException("无 session_token") }
         }
+        // 嵌套网络调用移出上一个连接的 use 块（G.1：不占用着连接做内嵌请求）
+        // 用 session_token 换 access_token（实际取 id_token，Moon v2 认证用）
+        val accessToken = exchangeForAccessToken(sessionToken)
+        val naId = fetchNaId(accessToken)
+        AuthResult(sessionToken, naId)
     }
 
     /** session_token → nintendoAccountToken（access_token） */
@@ -111,9 +109,9 @@ object SwitchClient {
             .header("User-Agent", "Dalvik/2.1.0 (Linux; U; Android 8.0.0)")
             .post(jsonBody.toRequestBody("application/json; charset=utf-8".toMediaType()))
             .build()
-        client.newCall(req).execute().use { resp ->
+        runInterruptible { client.newCall(req).execute() }.use { resp ->
             val bodyText = resp.body?.string().orEmpty()
-            if (!resp.isSuccessful) throw java.io.IOException("token HTTP ${resp.code} body=$bodyText")
+            if (!resp.isSuccessful) throw HttpStatusException(resp.code, "token HTTP ${resp.code} body=$bodyText")
             val json = JSONObject(bodyText)
             // Moon API (v2) 的 Authorization 要求 Bearer <id_token>，不是 access_token。
             // pynintendoauth 官方实现：access_token 属性返回 "Bearer ${id_token}"
@@ -132,19 +130,23 @@ object SwitchClient {
                 val sub = JSONObject(payload).optString("sub")
                 if (sub.isNotBlank()) return@withContext sub
             }
-        } catch (_: Exception) {}
+        } catch (e: Exception) {
+            Log.w("SwitchClient", "JWT 解出 naId 失败，走 /api/me 兜底", e)
+        }
         // 兜底：调 /v1/users/me
         try {
             val req = Request.Builder()
                 .url("$ACCOUNTS_BASE/api/me")
                 .header("Authorization", "Bearer $accessToken")
                 .build()
-            client.newCall(req).execute().use { resp ->
+            runInterruptible { client.newCall(req).execute() }.use { resp ->
                 if (resp.isSuccessful) {
                     JSONObject(resp.body?.string().orEmpty()).optString("id").also { if (!it.isBlank()) return@withContext it }
                 }
             }
-        } catch (_: Exception) {}
+        } catch (e: Exception) {
+            Log.w("SwitchClient", "/api/me 兜底取 naId 失败", e)
+        }
         throw java.io.IOException("无法获取任天堂账号 ID")
     }
 
@@ -170,8 +172,10 @@ object SwitchClient {
         "X-Moon-App-Id" to "com.nintendo.znma",
         "X-Moon-Os" to "ANDROID",
         "X-Moon-Os-Version" to "34",
+        // 设备型号沿用 Moon 常见机型（改型号有被服务端校验的风险，不动）；
+        // 时区必须取系统时区：写死 Asia/Shanghai 会让非东八区用户的「日」边界差一天
         "X-Moon-Model" to "Pixel 4 XL",
-        "X-Moon-TimeZone" to "Asia/Shanghai",
+        "X-Moon-TimeZone" to java.time.ZoneId.systemDefault().id,
         // 标题语言：Moon 的 meta.title 按这两个 header 在服务端本地化（不是账号语言）。
         // 必须发英文——库名要送 HLTB（纯英文库）按名搜；发 zh-CN 会拿回中文名，
         // 展示看着没事，但 HLTB 侧永远匹配不上，Switch 通关时长自动获取必失败
@@ -187,9 +191,9 @@ object SwitchClient {
     private suspend fun moonGet(path: String, accessToken: String): JSONObject = withContext(Dispatchers.IO) {
         val b = Request.Builder().url(MOON_BASE + path)
         moonHeaders(accessToken).forEach { (k, v) -> b.header(k, v) }
-        client.newCall(b.build()).execute().use { resp ->
+        runInterruptible { client.newCall(b.build()).execute() }.use { resp ->
             val body = resp.body?.string().orEmpty()
-            if (!resp.isSuccessful) throw java.io.IOException("Moon HTTP ${resp.code}: $body")
+            if (!resp.isSuccessful) throw HttpStatusException(resp.code, "Moon HTTP ${resp.code}: $body")
             JSONObject(body)
         }
     }
@@ -273,7 +277,8 @@ object SwitchClient {
             }
             }
         } catch (e: Exception) {
-            // 月摘要不可用时静默放弃（走空数据路径）
+            // 月摘要不可用时放弃明细（走空数据路径），但记录原因便于排查
+            Log.w("SwitchClient", "fetchLatestMonthlySummary 兜底失败", e)
         }
         return out
     }

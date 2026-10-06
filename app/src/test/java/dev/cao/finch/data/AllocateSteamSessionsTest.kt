@@ -7,7 +7,8 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** Steam 差分摊日逻辑（allocateSteamSessions）的纯函数单测：20:00 占位、跨天均摊、余数、未来时刻防御 */
+/** Steam 差分摊日逻辑（allocateSteamSessions）的纯函数单测：
+ *  20:00 占位、跨天均摊、分钟级余数、快照当天份额不早于快照（不撞旧占位）、未来时刻防御 */
 class AllocateSteamSessionsTest {
 
     private val zone = ZoneId.of("Asia/Shanghai")
@@ -24,15 +25,17 @@ class AllocateSteamSessionsTest {
     }
 
     @Test
-    fun `跨4天均摊_每天20点起_总量守恒`() {
+    fun `跨4天均摊_每天45分钟_总量守恒`() {
         val now = LocalDateTime.parse("2026-09-13T22:00:00")      // 已过 20:00，当天可分配
         val prev = LocalDateTime.parse("2026-09-10T21:00:00")
         val sessions = allocateSteamSessions(180, prev, now, zone, null)
-        // prev 09-10 与 now 09-13 之间 4 个分配日（10/11/12/13）
+        // prev 09-10 与 now 09-13 之间 4 个分配日（10/11/12/13），180 / 4 = 45 分钟整
         assertEquals(4, sessions.size)
-        sessions.forEach { assertEquals(20, it.start.hour) }
-        assertEquals(180 * 60L, totalSeconds(sessions))
+        // 快照当天（09-10）份额起点收到快照时刻 21:00 之后；其余天 20:00 占位
+        assertEquals(prev, sessions.first().start)
+        sessions.drop(1).forEach { assertEquals(20, it.start.hour) }
         assertEquals(2700L, Duration.between(sessions[0].start, sessions[0].end).seconds)
+        assertEquals(180 * 60L, totalSeconds(sessions))
     }
 
     @Test
@@ -48,13 +51,15 @@ class AllocateSteamSessionsTest {
     }
 
     @Test
-    fun `快照晚于可分配日_天数控平到1`() {
-        // 上次快照在今天早上，现在还是早上 → lastAllocDate=昨天，between 为负 → 至少摊 1 天
+    fun `快照晚于可分配日_天数控平到1_起点钳到快照之后`() {
+        // 上次快照在今天早上，现在还是早上 → lastAllocDate=昨天，between 为负 → 至少摊 1 天；
+        // 但份额只可能是快照（今天 09:00）之后产生的，起点钳到 prevAt，不许落在快照之前
         val now = LocalDateTime.parse("2026-09-13T10:00:00")
         val prev = LocalDateTime.parse("2026-09-13T09:00:00")
         val sessions = allocateSteamSessions(30, prev, now, zone, null)
         assertEquals(1, sessions.size)
-        assertEquals(LocalDateTime.parse("2026-09-12T20:00:00"), sessions[0].start)
+        assertEquals(prev, sessions[0].start)
+        assertEquals(LocalDateTime.parse("2026-09-13T09:30:00"), sessions[0].end)
         assertEquals(30 * 60L, totalSeconds(sessions))
     }
 
@@ -79,7 +84,9 @@ class AllocateSteamSessionsTest {
         val stale = LocalDateTime.parse("2026-09-01T23:00:00")
             .atZone(zone).toEpochSecond()
         val sessions = allocateSteamSessions(180, prev, now, zone, stale)
-        sessions.forEach { assertEquals(20, it.start.hour) }
+        // 过期的 lastPlayed 被忽略：快照当天份额从快照时刻起，其余天 20:00 占位
+        assertEquals(prev, sessions.first().start)
+        sessions.drop(1).forEach { assertEquals(20, it.start.hour) }
     }
 
     @Test
@@ -88,10 +95,23 @@ class AllocateSteamSessionsTest {
         val prev = LocalDateTime.parse("2026-09-07T21:00:00")     // 7 个分配日
         val sessions = allocateSteamSessions(10, prev, now, zone, null)
         assertEquals(7, sessions.size)
-        // 600s / 7 = 85 余 10 → 前 6 天 85s，最后一天 90s
-        assertEquals(85L, Duration.between(sessions[0].start, sessions[0].end).seconds)
-        assertEquals(90L, Duration.between(sessions.last().start, sessions.last().end).seconds)
+        // 10 分钟 / 7 天 = 1 分钟余 3 → 前 6 天各 1 分钟，最后一天 4 分钟
+        assertEquals(60L, Duration.between(sessions[0].start, sessions[0].end).seconds)
+        assertEquals(240L, Duration.between(sessions.last().start, sessions.last().end).seconds)
         assertEquals(600L, totalSeconds(sessions))
+    }
+
+    @Test
+    fun `同日二次同步_起点不早于上次快照_不撞旧占位窗口`() {
+        // 当天 21:00 二次同步（上次快照 21:00，旧占位 [20:00, 20:20] 已写入）：
+        // 份额起点收到 21:00，不再产生与旧占位同起点的会话（撞上会被去重跳过 → 旧版丢增量）
+        val now = LocalDateTime.parse("2026-09-13T22:00:00")
+        val prev = LocalDateTime.parse("2026-09-13T21:00:00")
+        val sessions = allocateSteamSessions(10, prev, now, zone, null)
+        assertEquals(1, sessions.size)
+        assertEquals(prev, sessions[0].start)
+        assertEquals(LocalDateTime.parse("2026-09-13T21:10:00"), sessions[0].end)
+        assertEquals(10 * 60L, totalSeconds(sessions))
     }
 
     @Test
@@ -99,6 +119,7 @@ class AllocateSteamSessionsTest {
         val now = LocalDateTime.parse("2026-09-13T22:00:00")
         val prev = LocalDateTime.parse("2026-09-10T21:00:00")
         // lastPlayed 在今天 21:59:30，最后一份 45 分钟会越过 now → 该条被防御性丢弃
+        //（丢弃份额由 diffWriteSessions 留待下次差分补写，不在本纯函数职责内）
         val lastPlayed = now.toLocalDate().atTime(21, 59, 30)
             .atZone(zone).toEpochSecond()
         val sessions = allocateSteamSessions(180, prev, now, zone, lastPlayed)

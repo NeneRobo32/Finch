@@ -1,5 +1,6 @@
 package dev.cao.finch.data
 
+import kotlinx.coroutines.runInterruptible
 import okhttp3.Request
 import org.json.JSONArray
 import org.json.JSONObject
@@ -21,26 +22,26 @@ object EshopClient {
         val maker: String?,
     )
 
-    private val client by lazy { BangumiClient.client } // 复用直连客户端
+    private val client get() = HttpClients.shared // 共享客户端（connect 5s / read 10s / call 30s）
 
-    private fun get(url: String): String {
+    private suspend fun get(url: String): String {
         val req = Request.Builder().url(url)
             .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) finch/0.6")
             .build()
-        client.newCall(req).execute().use { resp ->
-            if (!resp.isSuccessful) throw IOException("HTTP ${resp.code}")
-            return resp.body?.string() ?: throw IOException("空响应")
+        return runInterruptible { client.newCall(req).execute() }.use { resp ->
+            if (!resp.isSuccessful) throw HttpStatusException(resp.code, "HTTP ${resp.code}")
+            resp.body?.string() ?: throw IOException("空响应")
         }
     }
 
     /** 发售后 60 天内的日本 eShop 游戏（含已发售，Switch 优先） */
-    fun fetchRecent(): List<Item> {
+    suspend fun fetchRecent(): List<Item> {
         val now = LocalDate.now()
         return fetchRange(now.minusDays(60), now.plusDays(60))
     }
 
     /** 按发售日范围拉日本 eShop 游戏（Switch 优先；sort=suggest 热门在前，量可控） */
-    fun fetchRange(from: LocalDate, to: LocalDate): List<Item> {
+    suspend fun fetchRange(from: LocalDate, to: LocalDate): List<Item> {
         val url = "https://search.nintendo.jp/nintendo_soft/search.json?q=&limit=100" +
             "&sort=suggest&dir=desc&f_pub_date_from=${from.isoDate()}&f_pub_date_to=${to.isoDate()}&u=9001"
         val json = get(url)
@@ -77,7 +78,7 @@ object EshopClient {
      * 只返回拉丁字母段（HLTB 是纯英文库，日文/中文段送过去必 404，还污染失败文案）。
      * 失败抛 IOException，调用方吞掉继续下一级。
      */
-    fun searchTitles(keyword: String, limit: Int = 10): List<String> {
+    suspend fun searchTitles(keyword: String, limit: Int = 10): List<String> {
         val lim = limit.coerceIn(1, 30)
         val url = "https://search.nintendo.jp/nintendo_soft/search.json?q=" +
             java.net.URLEncoder.encode(keyword, "UTF-8") +
@@ -107,7 +108,7 @@ object EshopClient {
         val head = title.split("（", "(", "「").firstOrNull()?.trim().orEmpty()
         // 括号前段必须含拉丁字母，否则是纯日文/中文标题
         if (!head.any { it in 'A'..'Z' || it in 'a'..'z' }) return null
-        // 剥尾巴平台后缀（与 VM 的 buildNameVariants 同口径，保持一致）
+        // 剥尾巴平台后缀（与 NameVariants.stripPlatformTails 同思路；此处仅 Switch 平台后缀、阈值更松）
         var cur = head
         val tails = listOf(
             "Nintendo Switch 2 Edition", "Nintendo Switch Edition", "Nintendo Switch",

@@ -1,5 +1,6 @@
 package dev.cao.finch.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.togetherWith
@@ -26,6 +27,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -55,8 +57,12 @@ fun FinchAppScaffold(
     addViewModel: AddGameViewModel = viewModel(),
     themeState: ThemeState? = null,
     finchThemeState: FinchThemeState? = null,
+    initialGameId: Long? = null,
 ) {
-    var tab by remember { mutableStateOf(Tab.Home) }
+    // rememberSaveable：旋转/进程重建后仍停留在原 tab（remember 会退回 Home 并丢掉各屏状态）
+    var tab by rememberSaveable { mutableStateOf(Tab.Home) }
+    // 返回键/侧滑返回：非 Home tab 先回 Home tab（而不是直接退出 App）
+    BackHandler(enabled = tab != Tab.Home) { tab = Tab.Home }
     // 采样静态背景的 Backdrop（官方语义：玻璃只折射不动层，避免滚动/动画内容让玻璃闪烁）
     val backgroundBackdrop = rememberLayerBackdrop()
 
@@ -91,7 +97,7 @@ fun FinchAppScaffold(
             ) { t ->
                 Box(Modifier.fillMaxSize()) {
                     when (t) {
-                        Tab.Home -> HomeScreen(viewModel, addViewModel, backgroundBackdrop)
+                        Tab.Home -> HomeScreen(viewModel, addViewModel, backgroundBackdrop, initialGameId)
                         Tab.Upcoming -> UpcomingScreen(backdrop = backgroundBackdrop)
                         Tab.History -> HistoryScreen(viewModel, backgroundBackdrop)
                         Tab.Stats -> StatsScreen(viewModel)
@@ -128,7 +134,7 @@ fun FinchAppScaffold(
                                 Tab.Stats -> Icons.Filled.BarChart
                                 Tab.Import -> Icons.Filled.CloudDownload
                             },
-                            contentDescription = t.label,
+                            contentDescription = null, // 下方 Text 提供语义，避免双份朗读
                             modifier = Modifier.size(26.dp),
                             tint = MaterialTheme.colorScheme.onSurface,
                         )

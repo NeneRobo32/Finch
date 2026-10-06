@@ -11,6 +11,8 @@ import dev.cao.finch.data.GameStatus
 import dev.cao.finch.data.SessionWithGame
 import dev.cao.finch.data.SwitchTitleClient
 import dev.cao.finch.data.SyncEngine
+import dev.cao.finch.data.buildNameVariants
+import dev.cao.finch.data.snapRefForCompleted
 import dev.cao.finch.timer.TimerServiceBridge
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -44,7 +46,7 @@ class FinchViewModel(app: Application) : AndroidViewModel(app) {
     fun weekdayTotals(fromMillis: Long, toMillis: Long) = sessionDao.observeWeekdayTotals(fromMillis, toMillis)
     fun hourTotals(fromMillis: Long, toMillis: Long) = sessionDao.observeHourTotals(fromMillis, toMillis)
     fun distinctGamesInRange(fromMillis: Long, toMillis: Long) =
-        sessionDao.observeDistinctGamesInRange(fromMillis, toMillis).map { it ?: 0 }
+        sessionDao.observeDistinctGamesInRange(fromMillis, toMillis)
     fun dailyTotals(fromMillis: Long, toMillis: Long) = sessionDao.observeDailyTotals(fromMillis, toMillis)
     fun platformTotals(fromMillis: Long, toMillis: Long) = sessionDao.observePlatformTotals(fromMillis, toMillis)
     fun topGamesWithCover(fromMillis: Long, toMillis: Long) = sessionDao.observeTopGamesWithCover(fromMillis, toMillis)
@@ -121,54 +123,13 @@ class FinchViewModel(app: Application) : AndroidViewModel(app) {
      * 通关联动：勾通关时，若库内已玩时长（会话聚合，扣暂停）≥ 主线参考，
      * 进度条本来就会满；若还没玩到（比如云同步时长没记进来、刚通关没开计时），
      * 把 hltbMainMin 钳到已玩时长，保证进度瞬间 100%（done 文案即现），
-     * 而不是“通了但条还在那”。纯 suspend 查询，可单测口径。
+     * 而不是“通了但条还在那”。封顶口径走 snapRefForCompleted（生产与单测同一函数）。
      */
     internal suspend fun snapProgressToCompleted(game: Game): Game {
         val ref = game.hltbMainMin ?: return game
         if (ref <= 0) return game
         val playedMin = sessionDao.totalMsForGame(game.id) / 60_000
-        return if (playedMin < ref) game.copy(hltbMainMin = playedMin.coerceAtLeast(1L)) else game
-    }
-
-    /** 通关联动的纯口径（单测用）：已玩 < 参考 → 参考钳到已玩；否则不动 */
-    internal fun snapRefForCompleted(playedMin: Long, refMin: Long?): Long? {
-        if (refMin == null || refMin <= 0) return refMin
-        return if (playedMin < refMin) playedMin.coerceAtLeast(1L) else refMin
-    }
-
-    /** 库名 → HLTB 搜索词变体：去平台后缀/版本号/副标题尾巴，逐级降级 */
-    internal fun buildNameVariants(name: String): List<String> {
-        val out = mutableListOf<String>()
-        var cur = name.trim()
-        // 尾巴词（大小写不敏感）：平台 + 版本 + 合集后缀
-        val tails = listOf(
-            "Nintendo Switch 2 Edition", "Nintendo Switch Edition", "Nintendo Switch",
-            "Switch 2 Edition", "Switch Edition",
-            "PS5 Edition", "PS4 Edition", "PS5", "PS4",
-            "PC Edition", "PC",
-            "Remastered", "Remake", "Remix", "Definitive Edition", "Complete Edition",
-            "Game of the Year Edition", "GOTY Edition", "Deluxe Edition", "Ultimate Edition",
-            "Standard Edition", "Special Edition", "Anniversary Edition", "Collector's Edition",
-            "HD", "4K",
-        )
-        var changed = true
-        while (changed) {
-            changed = false
-            for (t in tails) {
-                if (cur.endsWith(t, ignoreCase = true) && cur.length - t.length >= 3) {
-                    cur = cur.dropLast(t.length).trim().trimEnd('-', ':', '·', '—', '–')
-                    changed = true
-                    break
-                }
-            }
-        }
-        if (cur.isNotBlank() && cur != name.trim()) out += cur
-        // 纯数字版本号尾巴（如 "Xxx 2" 保留——数字是 HLTB 匹配关键，不砍；只砍 "Ver.1.2" 类）
-        Regex("\\s+[Vv]er\\.?\\s*\\d[\\d.]*$").find(cur)?.let {
-            val cut = cur.dropLast(it.value.length).trim()
-            if (cut.length >= 3) out += cut
-        }
-        return out.distinct()
+        return game.copy(hltbMainMin = snapRefForCompleted(playedMin, game.hltbMainMin))
     }
 
     /** 主页排序：每游戏累计（扣暂停） */
@@ -411,7 +372,11 @@ class FinchViewModel(app: Application) : AndroidViewModel(app) {
                 }
                 if (hasPsn) {
                     try {
-                        val r = SyncEngine.runPSN(db, settings.psnRefreshToken)
+                        val r = SyncEngine.runPSN(db, settings.psnRefreshToken) { t ->
+                            // 轮换后的 token 立即落盘：后续拉取失败也不掉登录
+                            settings.psnRefreshToken = t.refreshToken.ifBlank { settings.psnRefreshToken }
+                            settings.psnRefreshExpiresAtMillis = t.refreshExpiresAtMillis
+                        }
                         settings.psnRefreshToken = r.refreshTokenOut
                         settings.psnRefreshExpiresAtMillis = r.refreshExpiresAtMillis
                         parts += "PSN +${r.sessionsAdded}条"

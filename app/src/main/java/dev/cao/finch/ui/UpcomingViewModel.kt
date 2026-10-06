@@ -16,6 +16,7 @@ import dev.cao.finch.data.SteamStoreClient
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
+import dev.cao.finch.data.networkErrorKind
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -41,12 +42,9 @@ class UpcomingViewModel(app: Application) : AndroidViewModel(app) {
     val follows: StateFlow<List<dev.cao.finch.data.ReleaseFollow>> = followDao.observeAll()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    /** 关注去重键：bangumi / steam 优先，否则归一化名字 */
-    fun followKeyOf(entry: UpcomingEntry): String = when {
-        entry.bangumiId != null -> "bangumi:${entry.bangumiId}"
-        entry.steamAppId != null -> "steam:${entry.steamAppId}"
-        else -> "name:" + entry.name.lowercase().replace(" ", "")
-    }
+    /** 关注去重键：bangumi / steam 优先，否则归一化名字（口径统一在 ReleaseCheckWorker.followKey，单测直测生产口径） */
+    fun followKeyOf(entry: UpcomingEntry): String =
+        dev.cao.finch.notify.ReleaseCheckWorker.followKey(entry.bangumiId, entry.steamAppId, entry.name)
 
     /** 切换关注（关注默认提前 3 天提醒；取消直接删） */
     fun toggleFollow(entry: UpcomingEntry) {
@@ -123,12 +121,13 @@ class UpcomingViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    private fun friendMsg(e: Exception): String = when (e) {
-        is java.net.SocketTimeoutException -> "连接超时"
-        is java.net.UnknownHostException -> "域名解析失败"
-        is javax.net.ssl.SSLException -> "SSL中断/响应不完整"
-        is java.io.IOException -> "网络错误：" + (e.message ?: e.javaClass.simpleName)
-        else -> (e.message ?: e.javaClass.simpleName)
+    private fun friendMsg(e: Exception): String = when (e.networkErrorKind()) {
+        dev.cao.finch.data.NetworkErrorKind.TIMEOUT -> "连接超时"
+        dev.cao.finch.data.NetworkErrorKind.DNS -> "域名解析失败"
+        dev.cao.finch.data.NetworkErrorKind.SSL -> "SSL中断/响应不完整"
+        dev.cao.finch.data.NetworkErrorKind.CONNECT,
+        dev.cao.finch.data.NetworkErrorKind.IO -> "网络错误：" + (e.message ?: e.javaClass.simpleName)
+        dev.cao.finch.data.NetworkErrorKind.OTHER -> (e.message ?: e.javaClass.simpleName)
     }
 
     fun refresh() {
@@ -150,7 +149,10 @@ class UpcomingViewModel(app: Application) : AndroidViewModel(app) {
                                     cacheSp.edit().putString("calendar_json", raw).apply()
                                     out = fromBangumi(BangumiClient.parseCalendar(raw))
                                     if (out.isNotEmpty()) break
-                                } catch (_: Exception) { /* 试下一个域名 */ }
+                                } catch (e: Exception) {
+                                    if (e is kotlinx.coroutines.CancellationException) throw e // 取消不是失败
+                                    /* 试下一个域名 */
+                                }
                             }
                             out
                         }
@@ -213,11 +215,6 @@ class UpcomingViewModel(app: Application) : AndroidViewModel(app) {
             { -major(it) },                         // 大作分降序
             { it.name.lowercase() },
         ))
-    }
-
-    /** 同名去重（Bangumi 优先） */
-    private fun merge(a: List<UpcomingEntry>, b: List<UpcomingEntry>, c: List<UpcomingEntry>): List<UpcomingEntry> {
-        return rankEntries((a + b + c).distinctBy { it.name.lowercase().replace(" ", "") })
     }
 
     private fun fromBangumi(list: List<BangumiClient.CalendarEntry>): List<UpcomingEntry> = list.asSequence()

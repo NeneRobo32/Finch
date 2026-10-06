@@ -60,6 +60,10 @@ class TimerService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // startForegroundService 后必须及时调 startForeground，否则系统判定「未及时进入前台」
+        // 直接崩溃（ForegroundServiceDidNotStartInTimeException）。这里同步先进前台再异步处理：
+        // 有活动会话就刷新真实计时通知（同 ID 等价刷新，不闪占位），否则先用占位通知
+        if (runningSessionId > 0) goForegroundRestore(pauseStartedAtMillis > 0) else enterForegroundPlaceholder()
         when (intent?.action) {
             TimerNotifications.ACTION_START -> {
                 val gameId = intent.getLongExtra(TimerNotifications.EXTRA_GAME_ID, -1L)
@@ -74,16 +78,19 @@ class TimerService : Service() {
     }
 
     private suspend fun startTimer(gameId: Long) {
+        // 第一步查库结算进行中的会话（不看内存态）：进程被杀后残留的孤儿会话 endTime=null，
+        // 而统计 SQL 全是 WHERE endTime IS NOT NULL，不结算会让整段时长永久漏计。
+        // 防脏数据残留多条，循环结算到没有为止（有上限防意外死循环）
+        var guard = 0
+        while (guard++ < 8) {
+            val running = db.sessionDao().running() ?: break
+            closeSession(running.id)
+        }
+        runningSessionId = -1L
         val game = db.gameDao().byId(gameId)
-        // 若已有进行中的会话，先结算
-        runningSessionId.takeIf { it > 0 }?.let { closeSession(it) }
         if (game == null) {
-            // startForegroundService 必须及时调 startForeground：用空通知占位再退出，
-            // 否则系统判定「未及时进入前台」直接崩溃
-            goForeground()
-            NotificationManagerCompat.from(this).cancel(TimerNotifications.NOTIFICATION_ID)
-            stopForeground(STOP_FOREGROUND_REMOVE)
-            stopSelf()
+            // 无此游戏：撤掉占位通知并退出前台收尾，不留常驻占位
+            teardownForeground()
             return
         }
         val session = db.sessionDao().insert(PlaySession(gameId = gameId, startTime = java.time.LocalDateTime.now()))
@@ -113,36 +120,54 @@ class TimerService : Service() {
         TimerServiceBridge.pauseAccumMs = 0L
         TimerServiceBridge.pauseStartedAtMillis = 0L
         TimerServiceBridge.isPaused.value = false
-        NotificationManagerCompat.from(this).cancel(TimerNotifications.NOTIFICATION_ID)
-        stopForeground(STOP_FOREGROUND_REMOVE)
-        stopSelf()
+        teardownForeground()
         FinchWidgetSync.update(this)
     }
 
     /** 暂停：记下暂停起点并落库（pauseStartedAt），走秒与通知冻结 */
     private suspend fun pauseTimer() {
-        val id = runningSessionId.takeIf { it > 0 } ?: return
-        if (pauseStartedAtMillis > 0) return // 已在暂停中
-        val s = db.sessionDao().byId(id) ?: return
-        if (s.endTime != null || s.pauseStartedAt != null) return
+        val id = runningSessionId.takeIf { it > 0 }
+        if (id == null || id <= 0) {
+            exitForegroundIfIdle() // 游离的 PAUSE（无活动会话）：撤占位收尾
+            return
+        }
+        if (pauseStartedAtMillis > 0) return // 已在暂停中（真实计时通知在展示，无需收尾）
+        val s = db.sessionDao().byId(id)
+        if (s == null || s.endTime != null || s.pauseStartedAt != null) {
+            exitForegroundIfIdle()
+            return
+        }
         val now = java.time.LocalDateTime.now()
         db.sessionDao().update(s.copy(pauseStartedAt = now))
         pauseStartedAtMillis = System.currentTimeMillis()
         TimerServiceBridge.pauseStartedAtMillis = pauseStartedAtMillis
         TimerServiceBridge.isPaused.value = true
-        // 立刻刷新一次通知（标题变“已暂停”，chronometer 停走）
-        TimerNotifications.update(
-            this, runningGameName, runningPlatform, startedAtMillis,
-            effectiveSeconds(), paused = true, pauseAccumMs = pauseAccumMs,
-        )
+        try {
+            // 立刻刷新一次通知（标题变“已暂停”，chronometer 停走）
+            TimerNotifications.update(
+                this, runningGameName, runningPlatform, startedAtMillis,
+                effectiveSeconds(), paused = true, pauseAccumMs = pauseAccumMs,
+            )
+        } catch (se: SecurityException) {
+            // 与 startTicker 同口径：无通知权限时静默降级，不崩协程
+            Log.w("TimerService", "notify denied", se)
+        }
         FinchWidgetSync.update(this)
     }
 
     /** 继续：把本次暂停段并入 pauseAccumMs 并落库 */
     private suspend fun resumeTimer() {
-        val id = runningSessionId.takeIf { it > 0 } ?: return
-        if (pauseStartedAtMillis <= 0) return // 没在暂停
-        val s = db.sessionDao().byId(id) ?: return
+        val id = runningSessionId.takeIf { it > 0 }
+        if (id == null || id <= 0) {
+            exitForegroundIfIdle() // 游离的 RESUME（无活动会话）：撤占位收尾
+            return
+        }
+        if (pauseStartedAtMillis <= 0) return // 没在暂停（真实计时通知在展示，无需收尾）
+        val s = db.sessionDao().byId(id)
+        if (s == null) {
+            exitForegroundIfIdle()
+            return
+        }
         val segMs = (System.currentTimeMillis() - pauseStartedAtMillis).coerceAtLeast(0L)
         pauseAccumMs += segMs
         db.sessionDao().update(
@@ -155,11 +180,16 @@ class TimerService : Service() {
         TimerServiceBridge.pauseStartedAtMillis = 0L
         TimerServiceBridge.pauseAccumMs = pauseAccumMs
         TimerServiceBridge.isPaused.value = false
-        // 立刻刷新一次通知（标题恢复“正在玩”，chronometer 继续）
-        TimerNotifications.update(
-            this, runningGameName, runningPlatform, startedAtMillis,
-            effectiveSeconds(), paused = false, pauseAccumMs = pauseAccumMs,
-        )
+        try {
+            // 立刻刷新一次通知（标题恢复“正在玩”，chronometer 继续）
+            TimerNotifications.update(
+                this, runningGameName, runningPlatform, startedAtMillis,
+                effectiveSeconds(), paused = false, pauseAccumMs = pauseAccumMs,
+            )
+        } catch (se: SecurityException) {
+            // 与 startTicker 同口径：无通知权限时静默降级，不崩协程
+            Log.w("TimerService", "notify denied", se)
+        }
         FinchWidgetSync.update(this)
     }
 
@@ -174,7 +204,7 @@ class TimerService : Service() {
         val resumed = db.sessionDao().running()
         val game = resumed?.let { db.gameDao().byId(it.gameId) }
         if (resumed == null || game == null) {
-            stopSelf()
+            teardownForeground() // 无可恢复会话：撤掉占位通知并退出前台收尾
             return
         }
         runningSessionId = resumed.id
@@ -198,9 +228,16 @@ class TimerService : Service() {
     private suspend fun closeSession(sessionId: Long) {
         val s = db.sessionDao().running()
         if (s != null && s.id == sessionId) {
-            // 若在暂停中停止：先把当前暂停段并入累计再结算
-            val extra = if (pauseStartedAtMillis > 0) {
-                (System.currentTimeMillis() - pauseStartedAtMillis).coerceAtLeast(0L)
+            // 若在暂停中停止：先把当前暂停段并入累计再结算。
+            // 进程被杀后内存态丢失，回落到库里的 pauseStartedAt（孤儿会话也能扣对暂停）
+            val pauseStartMillis = when {
+                pauseStartedAtMillis > 0 -> pauseStartedAtMillis
+                s.pauseStartedAt != null ->
+                    s.pauseStartedAt.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
+                else -> 0L
+            }
+            val extra = if (pauseStartMillis > 0) {
+                (System.currentTimeMillis() - pauseStartMillis).coerceAtLeast(0L)
             } else 0L
             db.sessionDao().update(
                 s.copy(
@@ -214,6 +251,29 @@ class TimerService : Service() {
 
     private fun goForeground() {
         TimerNotifications.startForeground(this, runningGameName, runningPlatform)
+    }
+
+    /** 同步进前台的占位通知入口（onStartCommand 及时满足 startForeground 要求） */
+    private fun enterForegroundPlaceholder() {
+        androidx.core.app.ServiceCompat.startForeground(
+            this,
+            TimerNotifications.NOTIFICATION_ID,
+            TimerNotifications.buildPlaceholder(this),
+            android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE,
+        )
+    }
+
+    /** 无活动会话的早退收尾：撤掉占位通知并退出前台，不留常驻占位 */
+    private fun exitForegroundIfIdle() {
+        if (runningSessionId > 0) return // 有活动会话＝真实计时通知在展示，不是占位
+        teardownForeground()
+    }
+
+    /** 统一收尾：撤通知、退出前台、停止服务 */
+    private fun teardownForeground() {
+        NotificationManagerCompat.from(this).cancel(TimerNotifications.NOTIFICATION_ID)
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        stopSelf()
     }
 
     /** 恢复路径的前台占位：暂停中则通知直接显示“已暂停” */

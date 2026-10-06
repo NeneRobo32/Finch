@@ -1,14 +1,20 @@
 package dev.cao.finch.data
 
 import android.content.Context
+import android.util.Log
 
-/** 轻量配置存储（Steam Key 等敏感信息只存本机） */
+/**
+ * 轻量配置存储（只存本机）。
+ * F.1：Steam API Key / Switch session_token / PSN refresh_token 三类凭据经
+ * CredentialCipher（Android Keystore + AES/GCM）加密落盘；其余设置项明文不动。
+ * 对调用方透明：属性签名不变，旧明文在首次读取时惰性迁移为密文。
+ */
 class SettingsStore(context: Context) {
     private val sp = context.getSharedPreferences("finch_settings", Context.MODE_PRIVATE)
 
     var steamApiKey: String
-        get() = sp.getString(KEY_STEAM_KEY, "") ?: ""
-        set(value) = sp.edit().putString(KEY_STEAM_KEY, value.trim()).apply()
+        get() = readSecret(KEY_STEAM_KEY)
+        set(value) = writeSecret(KEY_STEAM_KEY, value.trim())
 
     var steamId: String
         get() = sp.getString(KEY_STEAM_ID, "") ?: ""
@@ -18,19 +24,19 @@ class SettingsStore(context: Context) {
         get() = sp.getString(KEY_STEAM_BASE, DEFAULT_BASE) ?: DEFAULT_BASE
         set(value) = sp.edit().putString(KEY_STEAM_BASE, value.trim()).apply()
 
-    /** Switch 家长监护 token（session_token，用于免登录换 access_token） */
+    /** Switch 家长监护 token（session_token，用于免登录换 access_token；加密落盘） */
     var switchSessionToken: String
-        get() = sp.getString(KEY_SWITCH_TOKEN, "") ?: ""
-        set(value) = sp.edit().putString(KEY_SWITCH_TOKEN, value.trim()).apply()
+        get() = readSecret(KEY_SWITCH_TOKEN)
+        set(value) = writeSecret(KEY_SWITCH_TOKEN, value.trim())
 
     var switchNaId: String
         get() = sp.getString(KEY_SWITCH_NAID, "") ?: ""
         set(value) = sp.edit().putString(KEY_SWITCH_NAID, value.trim()).apply()
 
-    /** PSN refresh token（npsso 换取，约两个月有效；每次同步可能轮换，同步后写回） */
+    /** PSN refresh token（npsso 换取，约两个月有效；每次同步可能轮换，同步后写回；加密落盘） */
     var psnRefreshToken: String
-        get() = sp.getString(KEY_PSN_REFRESH, "") ?: ""
-        set(value) = sp.edit().putString(KEY_PSN_REFRESH, value).apply()
+        get() = readSecret(KEY_PSN_REFRESH)
+        set(value) = writeSecret(KEY_PSN_REFRESH, value)
 
     /** PSN refresh token 过期时间（epochMillis，0=未知），用于 UI 提示快过期 */
     var psnRefreshExpiresAtMillis: Long
@@ -65,6 +71,39 @@ class SettingsStore(context: Context) {
     var finchTheme: String
         get() = sp.getString(KEY_FINCH_THEME, "jingying") ?: "jingying"
         set(value) = sp.edit().putString(KEY_FINCH_THEME, value).apply()
+
+    // ---- 凭据加解密（F.1，对调用方透明）----
+
+    /** 读凭据：密文解密；旧版明文原样返回并顺手加密回写（惰性迁移）。
+     *  解密失败（换机恢复出的密文、Keystore 密钥丢失）删坏值返回空串：
+     *  宁可让用户重填 token，不让启动崩溃；PSN 空串上层已有「尚未授权」分支，行为安全。 */
+    private fun readSecret(key: String): String {
+        val raw = sp.getString(key, null) ?: return ""
+        if (!CredentialCipher.isEncrypted(raw)) {
+            writeSecret(key, raw) // 存量明文 → 立即加密回写
+            return raw
+        }
+        return CredentialCipher.decrypt(raw) ?: run {
+            Log.w("SettingsStore", "凭据解密失败，清除坏值：$key")
+            sp.edit().remove(key).apply()
+            ""
+        }
+    }
+
+    /** 写凭据：一律加密落盘；Keystore 不可用时降级存明文（旧格式，下次读取时再尝试迁移）。空值即删除 */
+    private fun writeSecret(key: String, value: String) {
+        if (value.isEmpty()) {
+            sp.edit().remove(key).apply()
+            return
+        }
+        val stored = try {
+            CredentialCipher.encrypt(value)
+        } catch (e: Exception) {
+            Log.w("SettingsStore", "凭据加密不可用，降级明文存储：$key", e)
+            value
+        }
+        sp.edit().putString(key, stored).apply()
+    }
 
     companion object {
         private const val KEY_STEAM_KEY = "steam_api_key"

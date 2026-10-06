@@ -9,4 +9,25 @@
     <string name="timer_paused">已暂停 %1$s</string>
     <string name="timer_session_running">已玩 %1$s</string>
     <string name="timer_session_paused">已暂停 · 已玩 %1$s</string>
+    <!-- 发售提醒（通知与渠道均为系统可见文本，渠道名在系统设置里展示） -->
+    <string name="release_channel_name">发售提醒</string>
+    <string name="release_channel_desc">关注游戏发售前的本地提醒</string>
+    <string name="release_notify_title">《%1$s》%2$s</string>
+    <string name="release_notify_today">今天发售（%1$s）</string>
+    <string name="release_notify_tomorrow">明天发售</string>
+    <string name="release_notify_in_days">%1$d 天后发售（%2$s）</string>
+    <string name="release_notify_body">点开 Finch 把它加入游戏库</string>
+    <!-- 桌面小组件（系统可见文本） -->
+    <string name="widget_elapsed">已玩 %1$d 分钟</string>
+    <string name="widget_today">今日 %1$d 分钟</string>
+    <!-- 系统分享面板 chooser 标题 -->
+    <string name="share_chooser_title">分享战报</string>
+    <!-- 无障碍朗读文本 -->
+    <string name="a11y_cover">%1$s 封面</string>
+    <string name="a11y_search">搜索</string>
+    <string name="a11y_searching">搜索中</string>
+    <string name="a11y_follow">关注</string>
+    <string name="a11y_unfollow">取消关注</string>
+    <string name="a11y_star_on">评分 %1$d 星，已选</string>
+    <string name="a11y_star_off">评分 %1$d 星，未选</string>
 </resources>

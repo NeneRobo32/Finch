@@ -63,6 +63,20 @@ object TimerNotifications {
         )
     }
 
+    /**
+     * 同步进前台的占位通知（onStartCommand 及时满足 startForeground 要求）：
+     * 极简文案，真实计时通知（同 ID）随后替换；处理完早退时整条撤掉。
+     */
+    fun buildPlaceholder(context: Context): Notification {
+        ensureChannel(context)
+        return NotificationCompat.Builder(context, CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_stat_finch)
+            .setContentTitle(context.getString(R.string.channel_timer_name))
+            .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .build()
+    }
+
     /** 恢复路径：未暂停的占位通知（与 startForeground 同文案） */
     fun buildForRestore(context: Context, gameName: String, platform: Platform, startedAtMillis: Long): Notification =
         build(context, gameName, platform, startedAtMillis)

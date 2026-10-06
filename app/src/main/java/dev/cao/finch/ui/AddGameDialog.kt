@@ -8,8 +8,10 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -37,13 +39,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
-import coil3.compose.AsyncImage
+import dev.cao.finch.R
 import dev.cao.finch.data.GameRepository
 import dev.cao.finch.data.GameSearchClient
 import dev.cao.finch.data.Platform
@@ -69,7 +73,7 @@ internal fun AddGameDialog(addViewModel: AddGameViewModel, onDismiss: () -> Unit
             shape = RoundedCornerShape(16.dp),
             color = MaterialTheme.colorScheme.surface,
         ) {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(Modifier.imePadding().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text("添加游戏", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                     OutlinedTextField(
@@ -86,14 +90,21 @@ internal fun AddGameDialog(addViewModel: AddGameViewModel, onDismiss: () -> Unit
                         onClick = { manualMode = true; selectedItem = null },
                         enabled = query.isNotBlank(),
                     ) { Text("手动加") }
+                    val searchDesc = stringResource(R.string.a11y_search)
+                    val searchingDesc = stringResource(R.string.a11y_searching)
                     Button(
                         onClick = { addViewModel.search(query) },
                         enabled = query.isNotBlank() && state !is AddGameViewModel.SearchState.Searching,
                     ) {
                         if (state is AddGameViewModel.SearchState.Searching) {
-                            CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                            CircularProgressIndicator(
+                                Modifier
+                                    .size(18.dp)
+                                    .semantics { contentDescription = searchingDesc },
+                                strokeWidth = 2.dp,
+                            )
                         } else {
-                            Icon(Icons.Filled.Search, contentDescription = null)
+                            Icon(Icons.Filled.Search, contentDescription = searchDesc)
                         }
                     }
                 }
@@ -149,26 +160,24 @@ internal fun AddGameDialog(addViewModel: AddGameViewModel, onDismiss: () -> Unit
                                         .padding(8.dp),
                                     verticalAlignment = Alignment.CenterVertically,
                                 ) {
-                                    if (item.coverUrl != null) {
-                                        AsyncImage(
-                                            model = item.coverUrl,
-                                            contentDescription = null,
-                                            modifier = Modifier
-                                                .size(52.dp)
-                                                .clip(RoundedCornerShape(8.dp)),
-                                            contentScale = ContentScale.Crop,
-                                        )
-                                    } else {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(52.dp)
-                                                .clip(RoundedCornerShape(8.dp))
-                                                .background(MaterialTheme.colorScheme.surfaceVariant),
-                                            contentAlignment = Alignment.Center,
-                                        ) {
-                                            Icon(Icons.Filled.VideogameAsset, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                                        }
-                                    }
+                                    GameCover(
+                                        url = item.coverUrl,
+                                        contentDescription = null,
+                                        modifier = Modifier
+                                            .size(52.dp)
+                                            .clip(RoundedCornerShape(8.dp)),
+                                        requestSize = 104,
+                                        placeholder = {
+                                            Box(
+                                                modifier = Modifier
+                                                    .fillMaxSize()
+                                                    .background(MaterialTheme.colorScheme.surfaceVariant),
+                                                contentAlignment = Alignment.Center,
+                                            ) {
+                                                Icon(Icons.Filled.VideogameAsset, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                            }
+                                        },
+                                    )
                                     Spacer(Modifier.width(10.dp))
                                     Column(Modifier.weight(1f)) {
                                         Text(item.name, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)

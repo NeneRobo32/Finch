@@ -54,14 +54,19 @@ object SyncEngine {
         )
     }
 
+    /** 差分写入结果：写入条数 + 实际入账分钟（未入账份额留待下次差分补写，时长不丢） */
+    internal data class DiffWrite(val added: Int, val writtenMin: Long)
+
     /**
      * 快照差分写会话（Steam / PSN 共用，须在事务内调用）：
      *  - prev == null：首次见到，只建档不回溯（避免把历史时长当成一次增量）
      *  - 无增量：只更新快照（REPLACE 同一行，作为下次差分的时间基准）
-     *  - 有增量：逐日摊分写会话（同游戏同日开始时间已存在则跳过）
-     * 返回本次写入的会话条数。
+     *  - 有增量：逐日摊分写会话；同游戏同来源同开始时间视为同一条占位会话，已存在则不重写
+     *  - 快照只推进实际入账的量（prev.totalMin + writtenMin）：被跳过/被防御丢弃的份额
+     *    留在下次差分里补写，不会像旧版那样「基线已推进、会话被丢弃」造成时长永久丢失
+     * 返回本次写入的会话条数与入账分钟。
      */
-    private suspend fun diffWriteSessions(
+    internal suspend fun diffWriteSessions(
         sessionDao: SessionDao,
         snapshotDao: SnapshotDao,
         source: String,
@@ -74,27 +79,31 @@ object SyncEngine {
         sessionSource: SessionSource,
         now: LocalDateTime,
         zone: ZoneId,
-    ): Int {
-        saveSnapshot(snapshotDao, source, refKey, refName, totalMin, now)
-        if (prev == null) return 0
-        val deltaMin = totalMin - prev.totalMin
-        if (deltaMin <= 0) return 0
-        var added = 0
-        for (s in allocateSteamSessions(deltaMin, prev.at, now, zone, lastPlayedEpoch)) {
-            // 去重：同游戏同日开始时间已存在则跳过
-            val dup = sessionDao.countBetween(
-                gameId,
-                s.start.atZone(zone).toInstant().toEpochMilli(),
-                s.end.atZone(zone).toInstant().toEpochMilli() + 1,
-            )
-            if (dup == 0L) {
-                sessionDao.insert(
-                    PlaySession(gameId = gameId, startTime = s.start, endTime = s.end, source = sessionSource)
-                )
-                added++
-            }
+    ): DiffWrite {
+        if (prev == null) {
+            saveSnapshot(snapshotDao, source, refKey, refName, totalMin, now)
+            return DiffWrite(0, 0)
         }
-        return added
+        val deltaMin = totalMin - prev.totalMin
+        if (deltaMin <= 0) {
+            saveSnapshot(snapshotDao, source, refKey, refName, totalMin, now)
+            return DiffWrite(0, 0)
+        }
+        var added = 0
+        var writtenMin = 0L
+        for (s in allocateSteamSessions(deltaMin, prev.at, now, zone, lastPlayedEpoch)) {
+            val startMs = s.start.atZone(zone).toInstant().toEpochMilli()
+            // 精确去重：同游戏同来源同开始时间 = 同一条占位会话（旧版按区间计数，同日二次同步会误判重复）
+            if (sessionDao.at(gameId, startMs, sessionSource) != null) continue
+            val endMs = s.end.atZone(zone).toInstant().toEpochMilli()
+            sessionDao.insert(
+                PlaySession(gameId = gameId, startTime = s.start, endTime = s.end, source = sessionSource)
+            )
+            added++
+            writtenMin += (endMs - startMs) / 60_000
+        }
+        saveSnapshot(snapshotDao, source, refKey, refName, prev.totalMin + writtenMin, now)
+        return DiffWrite(added, writtenMin)
     }
 
     /** 拉 Steam 库并按快照差分写入会话。 */
@@ -118,30 +127,31 @@ object SyncEngine {
         val zone = ZoneId.systemDefault()
         db.withTransaction {
             for (g in games) {
-                val existing = gameDao.byName(g.name)
-                if (existing != null) {
-                    if (existing.platform == Platform.PC) {
-                        // Steam 改名兜底（v0.15.9）：Steam 侧改名（如去副标题）后按 appid 认领回同一行，
-                        // 避免改名即建新游戏导致统计分裂。name 跟随 Steam 官方名，只动 name/cover。
-                        val rename = existing.steamAppId != null &&
-                            !existing.name.equals(g.name, ignoreCase = true) &&
-                            g.name.isNotBlank()
-                        gameDao.update(
-                            existing.copy(
-                                name = if (rename) g.name.trim() else existing.name,
-                                steamAppId = g.appid,
-                                steamPlaytimeMin = g.playtimeMinutes,
-                                steamSyncedAt = now,
-                                coverUrl = existing.coverUrl
-                                    ?: "https://cdn.cloudflare.steamstatic.com/steam/apps/${g.appid}/header.jpg",
-                            )
-                        )
-                        matched++
-                    } else {
+                // 同名多行时只认领 PC 行（PC + Switch/PS 同名常见，旧版 LIMIT 1 命中另一平台就永远跳过）
+                val candidates = gameDao.allByName(g.name)
+                val existing = candidates.firstOrNull { it.platform == Platform.PC }
+                if (existing == null) {
+                    if (candidates.isNotEmpty()) {
                         skipped++ // 同名但平台标记不同，不覆盖
                         continue
                     }
                 } else {
+                    // Steam 改名兜底（v0.15.9）：Steam 侧改名（如去副标题）后按 appid 认领回同一行，
+                    // 避免改名即建新游戏导致统计分裂。name 跟随 Steam 官方名，只动 name/cover。
+                    val rename = shouldRenameSteam(existing.steamAppId, existing.name, g.name)
+                    gameDao.update(
+                        existing.copy(
+                            name = if (rename) g.name.trim() else existing.name,
+                            steamAppId = g.appid,
+                            steamPlaytimeMin = g.playtimeMinutes,
+                            steamSyncedAt = now,
+                            coverUrl = existing.coverUrl
+                                ?: "https://cdn.cloudflare.steamstatic.com/steam/apps/${g.appid}/header.jpg",
+                        )
+                    )
+                    matched++
+                }
+                if (existing == null) {
                     val cover = "https://cdn.cloudflare.steamstatic.com/steam/apps/${g.appid}/header.jpg"
                     gameDao.insert(
                         Game(
@@ -160,7 +170,7 @@ object SyncEngine {
                 }
                 // 已有 PC 游戏：与上次快照差分
                 val refKey = "steam:${g.appid}"
-                // 与上面 byName 匹配到的同一行；若已有别的行占着该 appid 则以它为准
+                // 与上面 allByName 匹配到的同一行；若已有别的行占着该 appid 则以它为准
                 val gameId = gameDao.bySteamAppId(g.appid)?.id ?: existing.id
                 sessionAdded += diffWriteSessions(
                     sessionDao, snapshotDao,
@@ -170,7 +180,7 @@ object SyncEngine {
                     lastPlayedEpoch = g.lastPlayedEpoch,
                     sessionSource = SessionSource.STEAM,
                     now = now, zone = zone,
-                )
+                ).added
             }
         }
         return SteamResult(created, matched, skipped, sessionAdded)
@@ -193,7 +203,11 @@ object SyncEngine {
         }
         val records = withContext(Dispatchers.IO) {
             devices.flatMap { d -> SwitchClient.getDailySummaries(d.deviceId, accessToken) }
-        }.distinctBy { "${it.date}|${it.applicationId}" }
+        }
+            // 多台主机（Switch + Switch 2 等）同日同游戏的日报按 (date, appId) 求和：
+            // 旧版 distinctBy 去重只留一台的时长，双机用户整天少算
+            .groupBy { "${it.date}|${it.applicationId}" }
+            .map { (_, list) -> list.first().copy(playingSeconds = list.sumOf { it.playingSeconds }) }
         if (records.isEmpty()) {
             throw IllegalStateException("没有拉到游玩记录（家长监护需开启游玩记录并联网同步）")
         }
@@ -208,17 +222,19 @@ object SyncEngine {
         val zone = ZoneId.systemDefault()
         db.withTransaction {
             for (r in records) {
-                // 找既有游戏（switchAppId 或 同名）
+                // 找既有游戏（switchAppId 或 同名；同名多行优先 SWITCH 行，其次未绑定 appId 的行）
                 var g = gameDao.bySwitchAppId(r.applicationId)
-                    ?: gameDao.byName(r.title)
+                if (g == null) {
+                    val candidates = gameDao.allByName(r.title)
+                    g = candidates.firstOrNull { it.platform == Platform.SWITCH }
+                        ?: candidates.firstOrNull { it.switchAppId.isNullOrBlank() }
+                        ?: candidates.firstOrNull()
+                }
                 // 英文名回填（v0.15.9）：Moon 现已发 en-GB，拿回的是英文 title；
                 // 老库是 zh-CN 同步进来的中文名，bySwitchAppId 命中后必须把 name 刷成英文，
                 // 否则 HLTB（纯英文库）按名搜永远匹配不上。只动 name/cover，不碰会话与统计。
                 // 判断条件：同 appId 且标题不同（忽略大小写）→ 视为同一游戏的语言差异，直接改名。
-                if (g != null && !g.switchAppId.isNullOrBlank() &&
-                    !g.name.equals(r.title, ignoreCase = true) &&
-                    r.title.isNotBlank()
-                ) {
+                if (g != null && shouldRenameSwitch(g.switchAppId, g.name, r.title)) {
                     gameDao.update(
                         g.copy(
                             name = r.title.trim(),
@@ -247,7 +263,8 @@ object SyncEngine {
                     skipped++
                     continue
                 }
-                // 写入当日会话（去重：同游戏同日只写一条，时长=当日该游戏秒数）
+                // 写入当日会话（同游戏同来源同起点 = 同一条日报占位：没有则写入，
+                // 已存在则按当日总时长幂等修正终点——多台主机求和/当天续玩后日报会变长，旧版直接跳过会少算）
                 val dayKey = "${r.date}|${g.id}"
                 if (seenSession.add(dayKey)) {
                     // 占位起点 20:00；若这条日报日期是今天且当前还没到 20:00，把日期挪到昨天（不产生未来时间）
@@ -257,22 +274,24 @@ object SyncEngine {
                     val start = allocDate.atStartOfDay(zone).plusHours(20) // 晚上20:00起，贴近真实游玩时段
                     val end = start.plusSeconds(r.playingSeconds)
                     if (end.toLocalDateTime().isAfter(now2)) continue // 防御：占位时刻异常在未来则跳过
-                    // 若已有同日同游戏的会话（之前导入过），跳过
-                    val dup = sessionDao.countBetween(
-                        g.id,
-                        start.toInstant().toEpochMilli(),
-                        end.toInstant().toEpochMilli() + 1,
-                    )
-                    if (dup == 0L) {
-                        sessionDao.insert(
-                            PlaySession(
-                                gameId = g.id,
-                                startTime = start.toLocalDateTime(),
-                                endTime = end.toLocalDateTime(),
-                                source = SessionSource.SWITCH,
+                    val startMs = start.toInstant().toEpochMilli()
+                    val dup = sessionDao.at(g.id, startMs, SessionSource.SWITCH)
+                    val endMs = end.toInstant().toEpochMilli()
+                    when {
+                        dup == null -> {
+                            sessionDao.insert(
+                                PlaySession(
+                                    gameId = g.id,
+                                    startTime = start.toLocalDateTime(),
+                                    endTime = end.toLocalDateTime(),
+                                    source = SessionSource.SWITCH,
+                                )
                             )
-                        )
-                        sessions++
+                            sessions++
+                        }
+                        dup.endTime?.atZone(zone)?.toInstant()?.toEpochMilli() != endMs -> {
+                            sessionDao.update(dup.copy(endTime = end.toLocalDateTime()))
+                        }
                     }
                 }
             }
@@ -280,11 +299,20 @@ object SyncEngine {
         return SwitchResult(created, matched, skipped, sessions)
     }
 
-    /** 拉 PSN 库内官方时长并按快照差分写会话。refresh_token 每次经本函数刷新，轮换结果在返回值里。 */
-    suspend fun runPSN(db: FinchDatabase, refreshToken: String): PsnResult {
+    /**
+     * 拉 PSN 库内官方时长并按快照差分写会话。
+     * refresh_token 每次经本函数刷新且可能被 PSN 轮换（旧 token 即失效）：刷新成功**立即**回调
+     * [onTokensRefreshed] 写回存储，之后拉取失败也不会丢登录态；轮换结果也在返回值里（成功路径写回幂等）。
+     */
+    suspend fun runPSN(
+        db: FinchDatabase,
+        refreshToken: String,
+        onTokensRefreshed: (PsnClient.PsnTokens) -> Unit = {},
+    ): PsnResult {
         val tokens = withContext(Dispatchers.IO) {
             PsnClient.refreshAccessToken(refreshToken)
         }
+        onTokensRefreshed(tokens)
         val titles = withContext(Dispatchers.IO) {
             PsnClient.fetchTitleStats(tokens.accessToken)
         }
@@ -300,23 +328,26 @@ object SyncEngine {
         db.withTransaction {
             for (t in titles) {
                 if (t.totalMinutes <= 0) { skipped++; continue } // 0 时长（未玩/仅入库）不建条目
-                val existing = gameDao.byName(t.name)
-                if (existing != null) {
-                    if (existing.platform == Platform.PS) {
-                        gameDao.update(
-                            existing.copy(
-                                psnTitleId = t.titleId ?: existing.psnTitleId,
-                                psnPlaytimeMin = t.totalMinutes,
-                                psnSyncedAt = now,
-                                coverUrl = existing.coverUrl ?: t.imageUrl,
-                            )
-                        )
-                        matched++
-                    } else {
+                // 同名多行时只认领 PS 行（PC + PS 同名常见，旧版 LIMIT 1 命中另一平台就永远跳过）
+                val candidates = gameDao.allByName(t.name)
+                val existing = candidates.firstOrNull { it.platform == Platform.PS }
+                if (existing == null) {
+                    if (candidates.isNotEmpty()) {
                         skipped++ // 同名但平台标记不同，不覆盖
                         continue
                     }
                 } else {
+                    gameDao.update(
+                        existing.copy(
+                            psnTitleId = t.titleId ?: existing.psnTitleId,
+                            psnPlaytimeMin = t.totalMinutes,
+                            psnSyncedAt = now,
+                            coverUrl = existing.coverUrl ?: t.imageUrl,
+                        )
+                    )
+                    matched++
+                }
+                if (existing == null) {
                     gameDao.insert(
                         Game(
                             name = t.name,
@@ -342,7 +373,7 @@ object SyncEngine {
                     lastPlayedEpoch = t.lastPlayedEpochMillis?.let { it / 1000 },
                     sessionSource = SessionSource.PS,
                     now = now, zone = zone,
-                )
+                ).added
             }
         }
         return PsnResult(
@@ -356,15 +387,24 @@ object SyncEngine {
 /** Steam/PSN 差分摊出的单条占位会话 */
 data class AllocatedSession(val start: LocalDateTime, val end: LocalDateTime)
 
+/** Steam 改名认领条件（v0.15.9）：已有 Steam 绑定 + 名字不同 + 新名非空 → 跟随官方改名（纯函数，单测直接调用） */
+internal fun shouldRenameSteam(existingSteamAppId: Long?, existingName: String, newName: String): Boolean =
+    existingSteamAppId != null && !existingName.equals(newName, ignoreCase = true) && newName.isNotBlank()
+
+/** Switch 英文名回填条件（v0.15.9）：同 appId 绑定 + 标题不同 + 新标题非空 → 同一游戏的语言差异改名（纯函数，单测直接调用） */
+internal fun shouldRenameSwitch(existingSwitchAppId: String?, existingName: String, newTitle: String): Boolean =
+    !existingSwitchAppId.isNullOrBlank() && !existingName.equals(newTitle, ignoreCase = true) && newTitle.isNotBlank()
+
 /**
  * Steam/PSN 增量时长的逐日摊分（纯函数，可单测）。
  *
  * Steam 与 PSN 都只有总时长没有逐次记录，这里把 [prevAt, now] 区间内的增量按天均摊，
- * 每天固定占位起点 20:00（贴近真实游玩时段）：
+ * 每天整分钟（最后一天吃掉余数，总时长精确等于 delta），固定占位起点 20:00（贴近真实游玩时段）：
  *  - 若当前时刻还没到 20:00，「今天」这一份的 20:00 落在未来 → 今天不参与分配，摊到昨天及之前
- *  - 最后一天吃掉整除余数，保证总量精确等于 delta
+ *  - 任何份额的起点不早于 [prevAt]（增量只可能是快照之后产生的；同时避开上次同步写下的占位窗口，
+ *    同日二次同步不再撞车——撞上会被去重跳过，旧版因此丢过增量）
  *  - 若数据源返回了真实「上次游玩时间」且落在分摊日当天，用它的时刻作起点（比 20:00 真实）
- *  - 防御：任何产生未来结束时刻的会话直接丢弃
+ *  - 防御：任何产生未来结束时刻的会话直接丢弃（丢弃的份额由调用方留待下次差分补写，不丢时长）
  */
 fun allocateSteamSessions(
     deltaMinutes: Long,
@@ -378,7 +418,7 @@ fun allocateSteamSessions(
         now.toLocalDate().minusDays(1) else now.toLocalDate()
     var dayCount = ChronoUnit.DAYS.between(prevAt.toLocalDate(), lastAllocDate) + 1
     if (dayCount < 1) dayCount = 1 // 极端：上次快照在今天（已过 20:00 前同步过）→ 至少摊 1 天
-    val perDaySec = deltaMinutes * 60L / dayCount
+    val perDayMin = deltaMinutes / dayCount
     // 有真实上次游玩时刻且不早于上次快照 → 用它（否则回退固定 20:00）
     val lastPlayed = lastPlayedEpoch
         ?.let { Instant.ofEpochSecond(it).atZone(zone).toLocalDateTime() }
@@ -389,11 +429,14 @@ fun allocateSteamSessions(
         val date = lastAllocDate.minusDays(dayCount - 1L - d)
         if (date.isAfter(now.toLocalDate())) continue
         val isLast = d == dayCount - 1
-        val secs = if (isLast) deltaMinutes * 60L - perDaySec * (dayCount - 1) else perDaySec
-        if (secs <= 0) continue
-        val start = if (lastPlayed != null && lastPlayed.toLocalDate() == date) lastPlayed
+        val mins = if (isLast) deltaMinutes - perDayMin * (dayCount - 1) else perDayMin
+        if (mins <= 0) continue
+        var start = if (lastPlayed != null && lastPlayed.toLocalDate() == date) lastPlayed
         else date.atStartOfDay(zone).plusHours(20).toLocalDateTime()
-        val end = start.plusSeconds(secs)
+        // 份额起点不早于上次快照：delta 只含 prevAt 之后的游玩（dayCount 钳 1 的边缘场景
+        // 会算出早于快照的日期，统一钳到 prevAt，也避开上一条同日占位的开始时间）
+        if (start.isBefore(prevAt)) start = prevAt
+        val end = start.plusMinutes(mins)
         if (end.isAfter(now)) continue // 防御：lastPlayed 真时刻异常在未来时跳过
         out += AllocatedSession(start, end)
     }

@@ -35,25 +35,23 @@ interface GameDao {
     @Query("SELECT * FROM games WHERE id = :id")
     suspend fun byId(id: Long): Game?
 
-    @Query("SELECT * FROM games WHERE name = :name COLLATE NOCASE LIMIT 1")
-    suspend fun byName(name: String): Game?
-
-    @Query("SELECT * FROM games WHERE switchAppId = :appId LIMIT 1")
+    @Query("SELECT * FROM games WHERE switchAppId = :appId ORDER BY id LIMIT 1")
     suspend fun bySwitchAppId(appId: String): Game?
 
     @Query("SELECT * FROM games")
     suspend fun all(): List<Game>
 
-    @Query("SELECT * FROM games WHERE name = :name COLLATE NOCASE")
+    /** 同名游戏可能有多行（PC + Switch/PS 同名常见），按 id 定序保证挑选确定性 */
+    @Query("SELECT * FROM games WHERE name = :name COLLATE NOCASE ORDER BY id")
     suspend fun allByName(name: String): List<Game>
 
-    @Query("SELECT * FROM games WHERE name LIKE :query ORDER BY name COLLATE NOCASE LIMIT 10")
+    @Query("SELECT * FROM games WHERE name LIKE :query ESCAPE '\\' ORDER BY name COLLATE NOCASE LIMIT 10")
     suspend fun searchByName(query: String): List<Game>
 
-    @Query("SELECT * FROM games WHERE bangumiId = :id LIMIT 1")
+    @Query("SELECT * FROM games WHERE bangumiId = :id ORDER BY id LIMIT 1")
     suspend fun byBangumiId(id: Long): Game?
 
-    @Query("SELECT * FROM games WHERE steamAppId = :appid LIMIT 1")
+    @Query("SELECT * FROM games WHERE steamAppId = :appid ORDER BY id LIMIT 1")
     suspend fun bySteamAppId(appid: Long): Game?
 
     @Query("UPDATE games SET bangumiId = :bangumiId WHERE id = :id")
@@ -77,8 +75,14 @@ interface SessionDao {
     @Query("DELETE FROM play_sessions WHERE id = :id")
     suspend fun deleteById(id: Long)
 
-    /** 修正异常的未来会话（同步占位偏差）：整体往前挪一天，落到昨天同一时刻 */
-    @Query("UPDATE play_sessions SET startTime = startTime - 86400000, endTime = endTime - 86400000 WHERE startTime > :nowMillis")
+    /** 修正异常的未来会话（同步占位偏差）：已结束的前移到「恰好在现在之前」结束（时长不变），
+     *  进行中的起点拉回现在。旧版一律挪 24h，微超前的会话会被错挪到昨天 */
+    @Query(
+        "UPDATE play_sessions SET " +
+            "endTime = CASE WHEN endTime IS NULL THEN NULL ELSE :nowMillis END, " +
+            "startTime = CASE WHEN endTime IS NULL THEN :nowMillis ELSE :nowMillis - (endTime - startTime) END " +
+            "WHERE startTime > :nowMillis"
+    )
     suspend fun fixFutureSessions(nowMillis: Long)
 
     @Query("SELECT * FROM play_sessions WHERE endTime IS NULL ORDER BY startTime DESC LIMIT 1")
@@ -92,7 +96,7 @@ interface SessionDao {
 
     /** 每款游戏的已完成会话累计（扣暂停），主页按总时长排序用 */
     @Query(
-        "SELECT gameId, SUM(endTime - startTime - COALESCE(pauseAccumMs, 0)) AS totalMs " +
+        "SELECT gameId, SUM(MAX(0, endTime - startTime - COALESCE(pauseAccumMs, 0))) AS totalMs " +
             "FROM play_sessions WHERE endTime IS NOT NULL GROUP BY gameId"
     )
     fun observeTotalsAll(): Flow<List<GameTotalMini>>
@@ -120,7 +124,7 @@ interface SessionDao {
 
     @Query(
         """
-        SELECT SUM(endTime - startTime - COALESCE(pauseAccumMs, 0)) FROM play_sessions
+        SELECT SUM(MAX(0, endTime - startTime - COALESCE(pauseAccumMs, 0))) FROM play_sessions
         WHERE endTime IS NOT NULL AND startTime >= :fromMillis AND startTime < :toMillis
         """
     )
@@ -128,24 +132,22 @@ interface SessionDao {
 
     @Query(
         """
-        SELECT SUM(endTime - startTime - COALESCE(pauseAccumMs, 0)) FROM play_sessions
+        SELECT SUM(MAX(0, endTime - startTime - COALESCE(pauseAccumMs, 0))) FROM play_sessions
         WHERE endTime IS NOT NULL AND startTime >= :fromMillis AND startTime < :toMillis
         """
     )
     suspend fun totalBetween(fromMillis: Long, toMillis: Long): Long?
 
+    /** 同游戏同来源同起点的占位会话（同步去重/幂等更新用；同一条占位只会有一行） */
     @Query(
-        """
-        SELECT COUNT(*) FROM play_sessions
-        WHERE gameId = :gameId AND startTime >= :fromMillis AND startTime < :toMillis
-        """
+        "SELECT * FROM play_sessions WHERE gameId = :gameId AND source = :source AND startTime = :startMillis LIMIT 1"
     )
-    suspend fun countBetween(gameId: Long, fromMillis: Long, toMillis: Long): Long
+    suspend fun at(gameId: Long, startMillis: Long, source: SessionSource): PlaySession?
 
     @Query(
         """
         SELECT strftime('%Y-%m-%d', startTime / 1000, 'unixepoch', 'localtime') AS day,
-               SUM(endTime - startTime - COALESCE(pauseAccumMs, 0)) AS totalMs
+               SUM(MAX(0, endTime - startTime - COALESCE(pauseAccumMs, 0))) AS totalMs
         FROM play_sessions
         WHERE endTime IS NOT NULL AND startTime >= :fromMillis AND startTime < :toMillis
         GROUP BY day ORDER BY day
@@ -155,7 +157,7 @@ interface SessionDao {
 
     @Query(
         """
-        SELECT g.platform AS platform, SUM(s.endTime - s.startTime - COALESCE(s.pauseAccumMs, 0)) AS totalMs
+        SELECT g.platform AS platform, SUM(MAX(0, s.endTime - s.startTime - COALESCE(s.pauseAccumMs, 0))) AS totalMs
         FROM play_sessions s JOIN games g ON g.id = s.gameId
         WHERE s.endTime IS NOT NULL AND s.startTime >= :fromMillis AND s.startTime < :toMillis
         GROUP BY g.platform
@@ -164,7 +166,7 @@ interface SessionDao {
     fun observePlatformTotals(fromMillis: Long, toMillis: Long): Flow<List<PlatformTotal>>
 
     @Query("SELECT g.id AS gameId, g.name AS name, g.platform AS platform, g.coverUrl AS coverUrl,\n" +
-        "       g.steamPlaytimeMin AS steamPlaytimeMin, SUM(s.endTime - s.startTime - COALESCE(s.pauseAccumMs, 0)) AS totalMs, COUNT(s.id) AS sessionCount\n" +
+        "       g.steamPlaytimeMin AS steamPlaytimeMin, SUM(MAX(0, s.endTime - s.startTime - COALESCE(s.pauseAccumMs, 0))) AS totalMs, COUNT(s.id) AS sessionCount\n" +
         "FROM play_sessions s JOIN games g ON g.id = s.gameId\n" +
         "WHERE s.endTime IS NOT NULL AND s.startTime >= :fromMillis AND s.startTime < :toMillis\n" +
         "GROUP BY g.id ORDER BY totalMs DESC")
@@ -181,7 +183,7 @@ interface SessionDao {
     /** 某游戏的累计统计（总时长扣掉暂停 / 会话数 / 最近游玩） */
     @Query(
         """
-        SELECT SUM(endTime - startTime - COALESCE(pauseAccumMs, 0)) AS totalMs, COUNT(id) AS sessionCount, MAX(startTime) AS lastPlayedAt
+        SELECT SUM(MAX(0, endTime - startTime - COALESCE(pauseAccumMs, 0))) AS totalMs, COUNT(id) AS sessionCount, MAX(startTime) AS lastPlayedAt
         FROM play_sessions WHERE gameId = :gameId AND endTime IS NOT NULL
         """
     )
@@ -190,7 +192,7 @@ interface SessionDao {
     /** 某游戏累计毫秒（通关联动封顶用，一次性 suspend 查询） */
     @Query(
         """
-        SELECT COALESCE(SUM(endTime - startTime - COALESCE(pauseAccumMs, 0)), 0) FROM play_sessions
+        SELECT COALESCE(SUM(MAX(0, endTime - startTime - COALESCE(pauseAccumMs, 0))), 0) FROM play_sessions
         WHERE gameId = :gameId AND endTime IS NOT NULL
         """
     )
@@ -200,7 +202,7 @@ interface SessionDao {
     @Query(
         """
         SELECT CAST(strftime('%w', startTime / 1000, 'unixepoch', 'localtime') AS INTEGER) AS bucket,
-               SUM(endTime - startTime - COALESCE(pauseAccumMs, 0)) AS totalMs
+               SUM(MAX(0, endTime - startTime - COALESCE(pauseAccumMs, 0))) AS totalMs
         FROM play_sessions
         WHERE endTime IS NOT NULL AND startTime >= :fromMillis AND startTime < :toMillis
         GROUP BY bucket ORDER BY bucket
@@ -212,7 +214,7 @@ interface SessionDao {
     @Query(
         """
         SELECT CAST(strftime('%H', startTime / 1000, 'unixepoch', 'localtime') AS INTEGER) AS bucket,
-               SUM(endTime - startTime - COALESCE(pauseAccumMs, 0)) AS totalMs
+               SUM(MAX(0, endTime - startTime - COALESCE(pauseAccumMs, 0))) AS totalMs
         FROM play_sessions
         WHERE endTime IS NOT NULL AND startTime >= :fromMillis AND startTime < :toMillis
         GROUP BY bucket ORDER BY bucket

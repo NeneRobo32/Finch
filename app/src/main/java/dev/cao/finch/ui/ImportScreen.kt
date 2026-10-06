@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
@@ -44,7 +45,6 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.cao.finch.data.Platform
-import dev.cao.finch.data.SettingsStore
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 
@@ -79,7 +79,8 @@ fun ImportScreen(
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
             .statusBarsPadding()
-            .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 120.dp),
+            .imePadding()
+            .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = Dimens.BottomBarOverlap),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Text("导入", style = MaterialTheme.typography.headlineSmall)
@@ -244,31 +245,11 @@ fun ImportScreen(
                     }
                 }
                 if (manualGameId != null) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedTextField(
-                            value = dateField,
-                            onValueChange = { dateField = it },
-                            label = { Text("日期 2025-8-30") },
-                            singleLine = true,
-                            modifier = Modifier.weight(1f),
-                        )
-                    }
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedTextField(
-                            value = startField,
-                            onValueChange = { startField = it },
-                            label = { Text("开始 21:30") },
-                            singleLine = true,
-                            modifier = Modifier.weight(1f),
-                        )
-                        OutlinedTextField(
-                            value = endField,
-                            onValueChange = { endField = it },
-                            label = { Text("结束 23:05") },
-                            singleLine = true,
-                            modifier = Modifier.weight(1f),
-                        )
-                    }
+                    SessionTimeFields(
+                        dateField = dateField, onDateChange = { dateField = it },
+                        startField = startField, onStartChange = { startField = it },
+                        endField = endField, onEndChange = { endField = it },
+                    )
                     Button(onClick = {
                         importViewModel.addManualSession(manualGameId!!, dateField, startField, endField)
                     }) {
@@ -347,7 +328,8 @@ private fun PsnImportCard(importViewModel: ImportViewModel) {
 @Composable
 private fun HltbOnlineRow() {
     val context = LocalContext.current
-    val store = remember { SettingsStore(context.applicationContext) }
+    // 用 FinchApp 单例的 SettingsStore：原先 new 第二实例，与全局单例内存态可能不一致
+    val store = remember { (context.applicationContext as dev.cao.finch.FinchApp).settings }
     var enabled by remember { mutableStateOf(store.hltbOnlineEnabled) }
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -419,7 +401,7 @@ private fun BackupCard(importViewModel: ImportViewModel) {
 /** Switch 游玩记录导入卡片（家长监护 API：WebView 登录任天堂账号 → 拉记录 → 写库） */
 @Composable
 private fun SwitchImportCard(importViewModel: ImportViewModel) {
-    val switchState = importViewModel.switchState.collectAsState()
+    val switchState by importViewModel.switchState.collectAsState()
     val loggedIn by importViewModel.switchLoggedIn.collectAsState()
     var showLogin by remember { mutableStateOf(false) }
 
@@ -445,16 +427,13 @@ private fun SwitchImportCard(importViewModel: ImportViewModel) {
                 } else {
                     Button(
                         onClick = { importViewModel.syncSwitch() },
-                        enabled = switchState.value !is ImportViewModel.SyncState.Running,
-                    ) { Text(if (switchState.value is ImportViewModel.SyncState.Running) "同步中…" else "同步记录") }
-                    TextButton(onClick = {
-                        importViewModel.switchLoggedIn.value = false
-                        // 清 token（简单登出）
-                        importViewModel.logoutSwitch()
-                    }) { Text("退出账号") }
+                        enabled = switchState !is ImportViewModel.SyncState.Running,
+                    ) { Text(if (switchState is ImportViewModel.SyncState.Running) "同步中…" else "同步记录") }
+                    // 登出只走 VM 唯一入口（清 token + 置未登录），UI 不直写 VM 状态
+                    TextButton(onClick = { importViewModel.logoutSwitch() }) { Text("退出账号") }
                 }
             }
-            StateBanner(switchState.value)
+            StateBanner(switchState)
             Text(
                 "说明：需任天堂账号曾用于家长监护 App；游玩记录 T+1 更新；只导入已记录的天。",
                 style = MaterialTheme.typography.labelSmall,
@@ -566,6 +545,7 @@ private fun SwitchLoginDialog(
                             settings.setSupportMultipleWindows(true)
                             settings.javaScriptCanOpenWindowsAutomatically = true
                             webViewClient = object : android.webkit.WebViewClient() {
+                                @Deprecated("Deprecated in Java")
                                 override fun shouldOverrideUrlLoading(view: android.webkit.WebView?, url: String?): Boolean {
                                     if (url?.startsWith(dev.cao.finch.data.SwitchClient.REDIRECT_SCHEME) == true) {
                                         handleNintendoDeepLink(url, pkce, fireOnce)
@@ -596,6 +576,7 @@ private fun SwitchLoginDialog(
                                     newView.settings.setSupportMultipleWindows(true)
                                     newView.settings.javaScriptCanOpenWindowsAutomatically = true
                                     newView.webViewClient = object : android.webkit.WebViewClient() {
+                                        @Deprecated("Deprecated in Java")
                                         override fun shouldOverrideUrlLoading(v: android.webkit.WebView?, url: String?): Boolean {
                                             if (url?.startsWith(dev.cao.finch.data.SwitchClient.REDIRECT_SCHEME) == true) {
                                                 handleNintendoDeepLink(url, pkce, fireOnce)

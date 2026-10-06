@@ -9,3 +9,8 @@
 # 保留行号便于 crash 反解（不影响混淆与优化）
 -keepattributes SourceFile,LineNumberTable
 -renamesourcefileattribute SourceFile
+
+# WorkManager：Worker 由框架反射构造（ReleaseCheckWorker），显式保留构造器防 shrinker 变化
+-keep class * extends androidx.work.ListenableWorker {
+    public <init>(android.content.Context, androidx.work.WorkerParameters);
+}

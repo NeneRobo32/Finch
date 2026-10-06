@@ -29,6 +29,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -64,7 +65,7 @@ fun HistoryScreen(viewModel: FinchViewModel, backdrop: com.kyant.backdrop.Backdr
         }
         LazyColumn(
             verticalArrangement = Arrangement.spacedBy(8.dp),
-            contentPadding = PaddingValues(bottom = 120.dp),
+            contentPadding = PaddingValues(bottom = Dimens.BottomBarOverlap),
         ) {
             items(sessions, key = { it.session.id }) { item ->
                 SessionRow(
@@ -89,7 +90,7 @@ private fun SessionRow(
     var showConfirm by remember { mutableStateOf(false) }
     var showEdit by remember { mutableStateOf(false) }
     var editError by remember { mutableStateOf<String?>(null) }
-    val scope = remember { kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main) }
+    val scope = rememberCoroutineScope()
     // 已完成会话扣暂停，计时中实时走（扣暂停）
     val duration = if (s.endTime != null) {
         Duration.ofMillis(s.effectiveMillis())
@@ -147,7 +148,7 @@ private fun SessionRow(
         }
     }
     if (showEdit && s.endTime != null) {
-        HistorySessionEditDialog(
+        SessionEditDialog(
             session = s,
             error = editError,
             onDismiss = { showEdit = false; editError = null },
@@ -180,71 +181,6 @@ private fun SessionRow(
             },
         )
     }
-}
-
-/** 记录页的会话起止编辑框（与详情页同逻辑，独立一份避免跨文件私有复用） */
-@Composable
-private fun HistorySessionEditDialog(
-    session: dev.cao.finch.data.PlaySession,
-    error: String?,
-    onDismiss: () -> Unit,
-    onConfirm: (start: LocalDateTime, end: LocalDateTime) -> Unit,
-) {
-    val dateFmt = java.time.format.DateTimeFormatter.ofPattern("yyyy-M-d")
-    val timeFmt = java.time.format.DateTimeFormatter.ofPattern("H:mm")
-    var dateField by remember(session.id) { mutableStateOf(session.startTime.format(dateFmt)) }
-    var startField by remember(session.id) { mutableStateOf(session.startTime.format(timeFmt)) }
-    var endField by remember(session.id) {
-        mutableStateOf(session.endTime?.format(timeFmt) ?: session.startTime.format(timeFmt))
-    }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("编辑记录") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                androidx.compose.material3.OutlinedTextField(
-                    value = dateField,
-                    onValueChange = { dateField = it },
-                    label = { Text("日期 2025-8-30") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    androidx.compose.material3.OutlinedTextField(
-                        value = startField,
-                        onValueChange = { startField = it },
-                        label = { Text("开始 21:30") },
-                        singleLine = true,
-                        modifier = Modifier.weight(1f),
-                    )
-                    androidx.compose.material3.OutlinedTextField(
-                        value = endField,
-                        onValueChange = { endField = it },
-                        label = { Text("结束 23:05") },
-                        singleLine = true,
-                        modifier = Modifier.weight(1f),
-                    )
-                }
-                if (error != null) {
-                    Text(error, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = {
-                runCatching {
-                    val date = java.time.LocalDate.parse(dateField.trim(), dateFmt)
-                    val start = java.time.LocalTime.parse(startField.trim(), timeFmt)
-                    val end = java.time.LocalTime.parse(endField.trim(), timeFmt)
-                    var s = LocalDateTime.of(date, start)
-                    var e = LocalDateTime.of(date, end)
-                    if (e.isBefore(s)) e = e.plusDays(1) // 跨夜
-                    onConfirm(s, e)
-                }
-            }) { Text("保存") }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
-    )
 }
 
 @Composable

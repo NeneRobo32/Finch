@@ -1,5 +1,6 @@
 package dev.cao.finch.data
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.ForeignKey
 import androidx.room.Index
@@ -25,6 +26,8 @@ data class PlaySession(
     val endTime: LocalDateTime? = null, // null = 计时中
     val source: SessionSource = SessionSource.TIMER,
     // 暂停累计（v0.13）：暂停段不计入时长；pauseStartedAt 非空 = 当前正暂停
+    // defaultValue 与 MIGRATION_8_9 的 ALTER（DEFAULT 0）对齐，升级装/新装 DDL 一致（v15→16 重建统一）
+    @ColumnInfo(defaultValue = "0")
     val pauseAccumMs: Long = 0,
     val pauseStartedAt: LocalDateTime? = null,
 ) {

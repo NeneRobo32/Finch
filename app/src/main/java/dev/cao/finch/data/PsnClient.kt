@@ -1,5 +1,6 @@
 package dev.cao.finch.data
 
+import kotlinx.coroutines.runInterruptible
 import okhttp3.FormBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -7,7 +8,6 @@ import okhttp3.RequestBody
 import org.json.JSONObject
 import java.io.IOException
 import java.time.OffsetDateTime
-import java.util.concurrent.TimeUnit
 
 /**
  * PSN（PlayStation Network）客户端 —— npsso 换 token + 库内游戏官方时长。
@@ -38,15 +38,12 @@ object PsnClient {
     private const val ACCOUNT_BASE = "https://dms.api.playstation.com/api"
     private const val GAMELIST_BASE = "https://m.np.playstation.com/api/gamelist/v2"
 
-    private val client = OkHttpClient.Builder()
-        .connectTimeout(10, TimeUnit.SECONDS)
-        .readTimeout(20, TimeUnit.SECONDS)
-        .build()
+    private val client get() = HttpClients.shared // 共享客户端（connect 5s / read 10s / call 30s）
 
-    /** 授权码流程禁止跟随重定向（code 在 302 的 Location 里） */
-    private val noRedirectClient: OkHttpClient = client.newBuilder()
-        .followRedirects(false)
-        .build()
+    /** 授权码流程禁止跟随重定向（code 在 302 的 Location 里），差异配置从共享 client 派生 */
+    private val noRedirectClient: OkHttpClient by lazy {
+        HttpClients.shared.newBuilder().followRedirects(false).build()
+    }
 
     data class PsnTokens(
         val accessToken: String,
@@ -66,7 +63,7 @@ object PsnClient {
     )
 
     /** npsso（64 位）→ tokens。npsso 过期/错误抛 IOException（消息已可读）。 */
-    fun exchangeNpsso(npsso: String): PsnTokens {
+    suspend fun exchangeNpsso(npsso: String): PsnTokens {
         val code = requestAuthorizationCode(npsso.trim())
         return requestToken(
             FormBody.Builder()
@@ -81,7 +78,7 @@ object PsnClient {
     }
 
     /** refresh_token → 新 tokens（refresh_token 可能被轮换，调用方须写回存储） */
-    fun refreshAccessToken(refreshToken: String): PsnTokens =
+    suspend fun refreshAccessToken(refreshToken: String): PsnTokens =
         requestToken(
             FormBody.Builder()
                 .add("refresh_token", refreshToken.trim())
@@ -91,20 +88,20 @@ object PsnClient {
                 .build()
         )
 
-    fun fetchAccountId(accessToken: String): String {
+    suspend fun fetchAccountId(accessToken: String): String {
         val req = Request.Builder()
             .url("$ACCOUNT_BASE/v1/devices/accounts/me")
             .header("Authorization", "Bearer $accessToken")
             .build()
-        client.newCall(req).execute().use { resp ->
+        runInterruptible { client.newCall(req).execute() }.use { resp ->
             val body = resp.body?.string().orEmpty()
-            if (!resp.isSuccessful) throw IOException("PSN accountId HTTP ${resp.code}")
+            if (!resp.isSuccessful) throw HttpStatusException(resp.code, "PSN accountId HTTP ${resp.code}")
             return JSONObject(body).optString("accountId").ifBlank { throw IOException("PSN 返回无 accountId") }
         }
     }
 
     /** 拉全部游戏时长统计（自动分页） */
-    fun fetchTitleStats(accessToken: String, accountId: String = "me"): List<PsnTitle> {
+    suspend fun fetchTitleStats(accessToken: String, accountId: String = "me"): List<PsnTitle> {
         val out = ArrayList<PsnTitle>(64)
         var offset = 0
         while (true) {
@@ -112,35 +109,47 @@ object PsnClient {
                 .url("$GAMELIST_BASE/users/$accountId/titles?limit=200&offset=$offset")
                 .header("Authorization", "Bearer $accessToken")
                 .build()
-            val body = client.newCall(req).execute().use { resp ->
+            val body = runInterruptible { client.newCall(req).execute() }.use { resp ->
                 val b = resp.body?.string().orEmpty()
-                if (!resp.isSuccessful) throw IOException("PSN gameList HTTP ${resp.code}")
+                if (!resp.isSuccessful) throw HttpStatusException(resp.code, "PSN gameList HTTP ${resp.code}")
                 b
             }
-            val json = JSONObject(body)
-            val titles = json.optJSONArray("titles") ?: break
-            for (i in 0 until titles.length()) {
-                val t = titles.getJSONObject(i)
-                out += PsnTitle(
-                    titleId = t.optString("titleId").takeIf { it.isNotBlank() },
-                    name = t.optString("name").ifBlank { "PS ${t.optString("titleId")}" },
-                    imageUrl = t.optString("imageUrl").takeIf { it.isNotBlank() },
-                    category = t.optString("category").takeIf { it.isNotBlank() },
-                    playCount = t.optInt("playCount", 0),
-                    lastPlayedEpochMillis = parseIsoToMillis(t.optString("lastPlayedDateTime").takeIf { it.isNotBlank() }),
-                    totalMinutes = parsePlayDurationToMinutes(t.optString("playDuration").takeIf { it.isNotBlank() }),
-                )
-            }
-            val next = json.optInt("nextOffset", 0)
-            if (next <= 0 || titles.length() == 0) break
+            val page = parseTitlePage(body)
+            out += page.titles
+            val next = page.nextOffset
+            // next 不前进（next <= offset）即到头/异常，防死循环
+            if (next <= offset || page.titles.isEmpty()) break
             offset = next
         }
         return out
     }
 
+    /** gameList 单页解析结果：标题列表 + 分页游标 */
+    internal data class TitlePage(val titles: List<PsnTitle>, val nextOffset: Int)
+
+    /** gameList 单页 JSON → 标题映射（纯函数，单测直测生产口径，与网络调用解耦） */
+    internal fun parseTitlePage(body: String): TitlePage {
+        val json = JSONObject(body)
+        val arr = json.optJSONArray("titles") ?: return TitlePage(emptyList(), 0)
+        val out = ArrayList<PsnTitle>(arr.length())
+        for (i in 0 until arr.length()) {
+            val t = arr.getJSONObject(i)
+            out += PsnTitle(
+                titleId = t.optString("titleId").takeIf { it.isNotBlank() },
+                name = t.optString("name").ifBlank { "PS ${t.optString("titleId")}" },
+                imageUrl = t.optString("imageUrl").takeIf { it.isNotBlank() },
+                category = t.optString("category").takeIf { it.isNotBlank() },
+                playCount = t.optInt("playCount", 0),
+                lastPlayedEpochMillis = parseIsoToMillis(t.optString("lastPlayedDateTime").takeIf { it.isNotBlank() }),
+                totalMinutes = parsePlayDurationToMinutes(t.optString("playDuration").takeIf { it.isNotBlank() }),
+            )
+        }
+        return TitlePage(out, json.optInt("nextOffset", 0))
+    }
+
     // ---- 内部 ----
 
-    private fun requestAuthorizationCode(npsso: String): String {
+    private suspend fun requestAuthorizationCode(npsso: String): String {
         val params = linkedMapOf(
             "access_type" to "offline",
             "cid" to "finch-app",
@@ -169,9 +178,9 @@ object PsnClient {
             .header("Cookie", "npsso=$npsso")
             .header("X-Requested-With", "com.scee.psxandroid")
             .build()
-        noRedirectClient.newCall(req).execute().use { resp ->
+        runInterruptible { noRedirectClient.newCall(req).execute() }.use { resp ->
             if (resp.code != 302 && resp.code != 303) {
-                throw IOException("PSN 授权 HTTP ${resp.code}（网络不通或 npsso 格式不对）")
+                throw HttpStatusException(resp.code, "PSN 授权 HTTP ${resp.code}（网络不通或 npsso 格式不对）")
             }
             val location = resp.header("Location") ?: throw IOException("PSN 授权无重定向")
             val pairs = location.substringAfter('?', "").split('&')
@@ -190,17 +199,17 @@ object PsnClient {
         }
     }
 
-    private fun requestToken(form: RequestBody): PsnTokens {
+    private suspend fun requestToken(form: RequestBody): PsnTokens {
         val req = Request.Builder()
             .url("$AUTH_BASE/authz/v3/oauth/token")
             .header("Authorization", "Basic $BASIC_AUTH")
             .header("User-Agent", "com.sony.snei.np.android.sso.share.oauth.versa.USER_AGENT")
             .post(form)
             .build()
-        client.newCall(req).execute().use { resp ->
+        runInterruptible { client.newCall(req).execute() }.use { resp ->
             val body = resp.body?.string().orEmpty()
             if (!resp.isSuccessful) {
-                throw IOException("PSN token HTTP ${resp.code}${if (body.length < 200) "：$body" else ""}")
+                throw HttpStatusException(resp.code, "PSN token HTTP ${resp.code}${if (body.length < 200) "：$body" else ""}")
             }
             val json = JSONObject(body)
             val access = json.optString("access_token").ifBlank { throw IOException("PSN token 响应缺 access_token") }

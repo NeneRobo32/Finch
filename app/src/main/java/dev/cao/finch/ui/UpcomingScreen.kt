@@ -25,6 +25,8 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Event
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -43,13 +45,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
-import coil3.compose.AsyncImage
+import dev.cao.finch.R
 import dev.cao.finch.data.GameRepository
 import dev.cao.finch.data.Platform
 import java.time.LocalDate
@@ -145,12 +147,14 @@ fun UpcomingScreen(
                                 modifier = Modifier.weight(1f),
                             )
                             Spacer(Modifier.width(8.dp))
-                            val countdown = remember(f.dateIso) {
+                            // 「今天」进 remember key：跨天重组后倒计时不再显示昨天算的陈旧值
+                            val today = LocalDate.now()
+                            val countdown = remember(f.dateIso, today) {
                                 val d = runCatching {
                                     LocalDate.parse(f.dateIso, DateTimeFormatter.ISO_DATE)
                                 }.getOrNull()
                                 if (d == null) "日期待定"
-                                else dev.cao.finch.notify.ReleaseCheckWorker.countdownText(LocalDate.now(), d, f.notifyDays)
+                                else dev.cao.finch.notify.ReleaseCheckWorker.countdownText(today, d, f.notifyDays)
                                     ?: d.format(DateTimeFormatter.ofPattern("M月d日"))
                             }
                             Text(
@@ -183,7 +187,7 @@ fun UpcomingScreen(
                 }
             }
             is UpcomingViewModel.LoadState.Ready -> {
-                if (s.note == "缓存") {
+                if (s.note?.startsWith("缓存") == true) {
                     Text(
                         "正在刷新在线数据…",
                         style = MaterialTheme.typography.labelSmall,
@@ -208,7 +212,7 @@ fun UpcomingScreen(
                 LazyColumn(
                     modifier = Modifier.fillMaxSize(),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
-                    contentPadding = PaddingValues(bottom = 120.dp),
+                    contentPadding = PaddingValues(bottom = Dimens.BottomBarOverlap),
                 ) {
                     val now = LocalDate.now()
                     if (filtered.isEmpty() && q.isNotEmpty()) {
@@ -301,24 +305,22 @@ private fun UpcomingRow(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-                if (entry.coverUrl != null) {
-                    AsyncImage(
-                        model = entry.coverUrl,
-                        contentDescription = null,
-                        modifier = Modifier
-                            .size(52.dp)
-                            .clip(RoundedCornerShape(8.dp)),
-                        contentScale = ContentScale.Crop,
-                    )
-                } else {
-                    Box(
-                        modifier = Modifier
-                            .size(52.dp)
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(MaterialTheme.colorScheme.surfaceVariant),
-                        contentAlignment = Alignment.Center,
-                    ) { Icon(Icons.Filled.Event, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant) }
-                }
+                GameCover(
+                    url = entry.coverUrl,
+                    contentDescription = null,
+                    modifier = Modifier
+                        .size(52.dp)
+                        .clip(RoundedCornerShape(8.dp)),
+                    requestSize = 104,
+                    placeholder = {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(MaterialTheme.colorScheme.surfaceVariant),
+                            contentAlignment = Alignment.Center,
+                        ) { Icon(Icons.Filled.Event, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant) }
+                    },
+                )
                 Spacer(Modifier.width(12.dp))
                 Column {
                     Text(entry.name, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -370,7 +372,12 @@ private fun UpcomingRow(
             } else {
                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
                     TextButton(onClick = onToggleFollow) {
-                        Text(if (followed) "★" else "☆", maxLines = 1)
+                        Icon(
+                            if (followed) Icons.Filled.Star else Icons.Filled.StarBorder,
+                            contentDescription = stringResource(
+                                if (followed) R.string.a11y_unfollow else R.string.a11y_follow,
+                            ),
+                        )
                     }
                     Button(onClick = onAdd) {
                         Icon(Icons.Filled.Add, contentDescription = null)

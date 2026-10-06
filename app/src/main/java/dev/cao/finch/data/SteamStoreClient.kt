@@ -3,6 +3,7 @@ package dev.cao.finch.data
 import okhttp3.Request
 import org.json.JSONObject
 import java.io.IOException
+import kotlinx.coroutines.runInterruptible
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -20,9 +21,13 @@ object SteamStoreClient {
         val releaseDate: LocalDate?,
     )
 
-    private val client by lazy { BangumiClient.client } // 复用共享直连客户端
+    private val client get() = HttpClients.shared // 共享客户端（connect 5s / read 10s / call 30s）
 
-    private fun get(url: String, vararg fallbackUrls: String): String {
+    /**
+     * 网络 GET（多 URL 容灾；G.1 取消安全口径）：suspend + runInterruptible——协程取消即中断阻塞调用；
+     * 退避用 delay()（取消即抛）；4xx 不重试，仅 5xx/429/IO 重试。
+     */
+    private suspend fun get(url: String, vararg fallbackUrls: String): String {
         val urls = listOf(url) + fallbackUrls
         var lastErr: Exception? = null
         for (u in urls) {
@@ -31,20 +36,24 @@ object SteamStoreClient {
                     val req = Request.Builder().url(u)
                         .header("User-Agent", "Mozilla/5.0 (Linux; Android 14) finch/0.5")
                         .build()
-                    client.newCall(req).execute().use { resp ->
-                        if (!resp.isSuccessful) throw IOException("HTTP ${resp.code}")
-                        return resp.body?.string() ?: throw IOException("空响应")
+                    return runInterruptible {
+                        client.newCall(req).execute().use { resp ->
+                            if (!resp.isSuccessful) throw HttpStatusException(resp.code, "HTTP ${resp.code}")
+                            resp.body?.string() ?: throw IOException("空响应")
+                        }
                     }
                 } catch (e: Exception) {
+                    if (e is kotlinx.coroutines.CancellationException) throw e // 取消不是失败，照常上抛
                     lastErr = e
-                    if (attempt < 2) Thread.sleep(800L * (attempt + 1))
+                    if (!isRetryable(e)) throw e // 4xx 等不重试
+                    if (attempt < 2) kotlinx.coroutines.delay(800L * (attempt + 1))
                 }
             }
         }
         throw lastErr ?: IOException("未知网络错误")
     }
 
-    fun search(keyword: String): List<Result> {
+    suspend fun search(keyword: String): List<Result> {
         val url = "https://store.steampowered.com/api/storesearch/?term=${java.net.URLEncoder.encode(keyword, "UTF-8")}&l=schinese&cc=CN"
         val json = get(url)
         val items = JSONObject(json).optJSONArray("items") ?: return emptyList()
@@ -60,7 +69,8 @@ object SteamStoreClient {
         return out
     }
 
-    /** 商店「即将推出」+「新上架」（featuredcategories 的 coming_soon + new_releases 合并去重） */    fun fetchComingSoon(): List<ComingSoonGame> {
+    /** 商店「即将推出」+「新上架」（featuredcategories 的 coming_soon + new_releases 合并去重） */
+    suspend fun fetchComingSoon(): List<ComingSoonGame> {
         // 主 URL 失败自动试备用（featured/comingsoon 编辑精选——量少但稳定）
         val json = get(
             "https://store.steampowered.com/api/featuredcategories/?l=schinese&cc=CN",

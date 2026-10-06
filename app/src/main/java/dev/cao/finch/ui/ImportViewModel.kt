@@ -11,6 +11,7 @@ import dev.cao.finch.data.PlaySession
 import dev.cao.finch.data.PsnClient
 import dev.cao.finch.data.SessionSource
 import dev.cao.finch.data.SettingsStore
+import dev.cao.finch.data.networkErrorKind
 import dev.cao.finch.data.SwitchClient
 import dev.cao.finch.data.SyncEngine
 import dev.cao.finch.timer.TimerServiceBridge
@@ -30,13 +31,17 @@ class ImportViewModel(app: Application) : AndroidViewModel(app) {
     private val sessionDao = db.sessionDao()
     private val settings = (app as FinchApp).settings
 
-    // ---- Steam 配置 ----
-    val steamKey = MutableStateFlow(settings.steamApiKey)
-    val steamId = MutableStateFlow(settings.steamId)
-    val steamBase = MutableStateFlow(settings.steamBaseUrl)
+    // ---- Steam 配置 ----（StateFlow 只读暴露：写入口只有 saveSteamConfig，UI 不直写 .value）
+    private val _steamKey = MutableStateFlow(settings.steamApiKey)
+    val steamKey: StateFlow<String> = _steamKey
+    private val _steamId = MutableStateFlow(settings.steamId)
+    val steamId: StateFlow<String> = _steamId
+    private val _steamBase = MutableStateFlow(settings.steamBaseUrl)
+    val steamBase: StateFlow<String> = _steamBase
 
-    // ---- Switch 配置 ----
-    val switchLoggedIn = MutableStateFlow(settings.switchSessionToken.isNotBlank())
+    // ---- Switch 配置 ----（登录态写入口：switchAuthorize / logoutSwitch）
+    private val _switchLoggedIn = MutableStateFlow(settings.switchSessionToken.isNotBlank())
+    val switchLoggedIn: StateFlow<Boolean> = _switchLoggedIn
     private val _switchState = MutableStateFlow<SyncState>(SyncState.Idle)
     val switchState: StateFlow<SyncState> = _switchState
 
@@ -59,9 +64,9 @@ class ImportViewModel(app: Application) : AndroidViewModel(app) {
         settings.steamId = id
         settings.steamBaseUrl = base.ifBlank { SettingsStore.DEFAULT_BASE }
         // 同步回 StateFlow，保持内存态一致
-        steamKey.value = key.trim()
-        steamId.value = id.trim()
-        steamBase.value = base.ifBlank { SettingsStore.DEFAULT_BASE }
+        _steamKey.value = key.trim()
+        _steamId.value = id.trim()
+        _steamBase.value = base.ifBlank { SettingsStore.DEFAULT_BASE }
     }
 
     /** 拉取 Steam 库，按名字匹配/新建游戏并写入总时长。值以点击瞬间界面输入为准。 */
@@ -82,13 +87,13 @@ class ImportViewModel(app: Application) : AndroidViewModel(app) {
                 )
             } catch (e: Exception) {
                 _steamState.value = SyncState.Failed(
-                    when (e) {
-                        is java.net.UnknownHostException -> "域名解析失败：该 API 地址不通，请换一个 Steam 反代地址"
-                        is java.net.ConnectException -> "连接失败：该 API 地址不通，请换一个 Steam 反代地址"
-                        is java.net.SocketTimeoutException -> "连接超时：该 API 地址不通，请换一个 Steam 反代地址"
-                        is javax.net.ssl.SSLException -> "SSL/连接中断：当前 API 地址响应不完整，多试一次或换反代地址"
-                        is java.io.IOException -> "响应中断（unexpected end of stream 常见）：反代不稳定，重试或换地址"
-                        else -> e.message ?: e.toString()
+                    when (e.networkErrorKind()) {
+                        dev.cao.finch.data.NetworkErrorKind.DNS -> "域名解析失败：该 API 地址不通，请换一个 Steam 反代地址"
+                        dev.cao.finch.data.NetworkErrorKind.CONNECT -> "连接失败：该 API 地址不通，请换一个 Steam 反代地址"
+                        dev.cao.finch.data.NetworkErrorKind.TIMEOUT -> "连接超时：该 API 地址不通，请换一个 Steam 反代地址"
+                        dev.cao.finch.data.NetworkErrorKind.SSL -> "SSL/连接中断：当前 API 地址响应不完整，多试一次或换反代地址"
+                        dev.cao.finch.data.NetworkErrorKind.IO -> "响应中断（unexpected end of stream 常见）：反代不稳定，重试或换地址"
+                        dev.cao.finch.data.NetworkErrorKind.OTHER -> e.message ?: e.toString()
                     }
                 )
             }
@@ -138,7 +143,7 @@ class ImportViewModel(app: Application) : AndroidViewModel(app) {
                 }
                 settings.switchSessionToken = auth.sessionToken
                 settings.switchNaId = auth.naId
-                switchLoggedIn.value = true
+                _switchLoggedIn.value = true
                 _switchState.value = SyncState.Done("任天堂账号已授权")
             } catch (e: Exception) {
                 _switchState.value = SyncState.Failed("授权失败：" + (e.message ?: e.toString()))
@@ -162,10 +167,10 @@ class ImportViewModel(app: Application) : AndroidViewModel(app) {
                 )
             } catch (e: Exception) {
                 _switchState.value = SyncState.Failed(
-                    when (e) {
-                        is java.net.UnknownHostException -> "域名解析失败：可能需科学上网才能连任天堂 API"
-                        is java.net.SocketTimeoutException -> "连接超时：任天堂 API 响应慢，重试一次"
-                        is javax.net.ssl.SSLException -> "SSL中断：网络不稳，重试"
+                    when (e.networkErrorKind()) {
+                        dev.cao.finch.data.NetworkErrorKind.DNS -> "域名解析失败：可能需科学上网才能连任天堂 API"
+                        dev.cao.finch.data.NetworkErrorKind.TIMEOUT -> "连接超时：任天堂 API 响应慢，重试一次"
+                        dev.cao.finch.data.NetworkErrorKind.SSL -> "SSL中断：网络不稳，重试"
                         else -> e.message ?: e.toString()
                     }
                 )
@@ -174,14 +179,16 @@ class ImportViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     // ---- PSN 配置 ----
-    val psnLoggedIn = MutableStateFlow(settings.psnRefreshToken.isNotBlank())
+    private val _psnLoggedIn = MutableStateFlow(settings.psnRefreshToken.isNotBlank())
+    val psnLoggedIn: StateFlow<Boolean> = _psnLoggedIn
     private val _psnState = MutableStateFlow<SyncState>(SyncState.Idle)
     val psnState: StateFlow<SyncState> = _psnState
 
     /** npsso 授权是否快过期（7 天内），用于卡片提示 */
-    val psnExpiringSoon = MutableStateFlow(
+    private val _psnExpiringSoon = MutableStateFlow(
         settings.psnRefreshExpiresAtMillis in 1..(System.currentTimeMillis() + 7L * 24 * 3600 * 1000)
     )
+    val psnExpiringSoon: StateFlow<Boolean> = _psnExpiringSoon
 
     /** npsso（64 位）→ refresh_token 存本地 */
     fun psnLogin(npsso: String) {
@@ -197,8 +204,8 @@ class ImportViewModel(app: Application) : AndroidViewModel(app) {
                 }
                 settings.psnRefreshToken = t.refreshToken
                 settings.psnRefreshExpiresAtMillis = t.refreshExpiresAtMillis
-                psnLoggedIn.value = true
-                psnExpiringSoon.value = false
+                _psnLoggedIn.value = true
+                _psnExpiringSoon.value = false
                 _psnState.value = SyncState.Done("PSN 已授权，点同步拉取时长")
             } catch (e: Exception) {
                 _psnState.value = SyncState.Failed("授权失败：" + (e.message ?: e.toString()))
@@ -216,21 +223,25 @@ class ImportViewModel(app: Application) : AndroidViewModel(app) {
         _psnState.value = SyncState.Running
         viewModelScope.launch {
             try {
-                val r = SyncEngine.runPSN(db, token)
+                val r = SyncEngine.runPSN(db, token) { t ->
+                    // 轮换后的 token 立即落盘：后续拉取失败也不掉登录（PSN 旧 refresh_token 即刻失效）
+                    settings.psnRefreshToken = t.refreshToken.ifBlank { settings.psnRefreshToken }
+                    settings.psnRefreshExpiresAtMillis = t.refreshExpiresAtMillis
+                }
                 settings.psnRefreshToken = r.refreshTokenOut
                 settings.psnRefreshExpiresAtMillis = r.refreshExpiresAtMillis
-                psnExpiringSoon.value =
+                _psnExpiringSoon.value =
                     r.refreshExpiresAtMillis in 1..(System.currentTimeMillis() + 7L * 24 * 3600 * 1000)
                 _psnState.value = SyncState.Done(
                     "同步完成：新增 ${r.created} 款，匹配更新 ${r.matched} 款，跳过 ${r.skipped} 款，写入 ${r.sessionsAdded} 条游玩记录"
                 )
             } catch (e: Exception) {
                 _psnState.value = SyncState.Failed(
-                    when (e) {
-                        is java.net.UnknownHostException -> "域名解析失败：PSN 接口网络不通（可能需科学上网）"
-                        is java.net.ConnectException -> "连接失败：PSN 接口网络不通（可能需科学上网）"
-                        is java.net.SocketTimeoutException -> "连接超时：PSN 接口响应慢，重试一次"
-                        is javax.net.ssl.SSLException -> "SSL 中断：网络不稳，重试"
+                    when (e.networkErrorKind()) {
+                        dev.cao.finch.data.NetworkErrorKind.DNS -> "域名解析失败：PSN 接口网络不通（可能需科学上网）"
+                        dev.cao.finch.data.NetworkErrorKind.CONNECT -> "连接失败：PSN 接口网络不通（可能需科学上网）"
+                        dev.cao.finch.data.NetworkErrorKind.TIMEOUT -> "连接超时：PSN 接口响应慢，重试一次"
+                        dev.cao.finch.data.NetworkErrorKind.SSL -> "SSL 中断：网络不稳，重试"
                         else -> e.message ?: e.toString()
                     }
                 )
@@ -280,9 +291,10 @@ class ImportViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** Switch 登出唯一入口：清 token + 置未登录（UI 不直写 _switchLoggedIn） */
     fun logoutSwitch() {
         settings.switchSessionToken = ""
         settings.switchNaId = ""
-        switchLoggedIn.value = false
+        _switchLoggedIn.value = false
     }
 }

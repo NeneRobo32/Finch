@@ -52,12 +52,10 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import coil3.compose.AsyncImage
 import dev.cao.finch.TimeFormatter
 import dev.cao.finch.data.DailyTotal
 import dev.cao.finch.data.PlatformTotal
@@ -139,7 +137,7 @@ fun StatsScreen(viewModel: FinchViewModel) {
             .statusBarsPadding()
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
-        contentPadding = PaddingValues(bottom = 120.dp),
+        contentPadding = PaddingValues(bottom = Dimens.BottomBarOverlap),
     ) {
         item {
             Row(
@@ -209,7 +207,7 @@ fun StatsScreen(viewModel: FinchViewModel) {
     // 战报分享：把本期关键数字拼成文本走系统分享（v1 先文本，图片模板 v0.17 再做）
     if (shareRequest) {
         val context = androidx.compose.ui.platform.LocalContext.current
-        androidx.compose.runtime.LaunchedEffect(shareRequest) {
+        androidx.compose.runtime.LaunchedEffect(Unit) {
             val top = topGames.firstOrNull()
             val text = buildString {
                 append(if (mode == StatsMode.MONTH) TimeFormatter.monthTitle(anchorMonth) else TimeFormatter.yearTitle(anchorMonth.year))
@@ -229,7 +227,13 @@ fun StatsScreen(viewModel: FinchViewModel) {
                 type = "text/plain"
                 putExtra(android.content.Intent.EXTRA_TEXT, text)
             }
-            context.startActivity(android.content.Intent.createChooser(intent, "分享战报"))
+            // chooser 标题显示在系统分享面板 → 走 strings.xml
+            context.startActivity(
+                android.content.Intent.createChooser(
+                    intent,
+                    context.getString(dev.cao.finch.R.string.share_chooser_title),
+                )
+            )
             shareRequest = false
         }
     }
@@ -453,19 +457,19 @@ private fun ActivityCard(daily: List<DailyTotal>, mode: StatsMode) {
         Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text("活动", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
             val bars = if (mode == StatsMode.MONTH) {
-                daily.map { Bar(it.day, it.totalMs, "M") }
+                daily.map { Bar(it.day, it.totalMs) }
             } else {
                 // 年视图：按 yyyy-MM 聚合为 12 根
                 daily.groupBy { it.day.substring(0, 7) }
                     .toSortedMap()
-                    .map { Bar(it.key, it.value.sumOf { d -> d.totalMs }, "Y") }
+                    .map { Bar(it.key, it.value.sumOf { d -> d.totalMs }) }
             }
             BarChart(bars, mode)
         }
     }
 }
 
-private data class Bar(val label: String, val totalMs: Long, val kind: String)
+private data class Bar(val label: String, val totalMs: Long)
 
 @Composable
 private fun BarChart(bars: List<Bar>, mode: StatsMode) {
@@ -575,14 +579,12 @@ private fun TopGamesCard(topGames: List<TopGameRow>) {
                             .clip(RoundedCornerShape(10.dp))
                             .background(platformColor(g.platform)),
                     ) {
-                        if (g.coverUrl != null) {
-                            AsyncImage(
-                                model = g.coverUrl,
-                                contentDescription = null,
-                                contentScale = ContentScale.Crop,
-                                modifier = Modifier.fillMaxSize(),
-                            )
-                        }
+                        GameCover(
+                            url = g.coverUrl,
+                            contentDescription = null,
+                            modifier = Modifier.fillMaxSize(),
+                            requestSize = 88,
+                        )
                     }
                     Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {

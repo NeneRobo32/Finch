@@ -4,7 +4,6 @@ import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -24,6 +23,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -32,7 +32,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
@@ -58,6 +58,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -68,11 +69,11 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import coil3.compose.AsyncImage
+import dev.cao.finch.R
 import dev.cao.finch.TimeFormatter
 import dev.cao.finch.data.Game
 import dev.cao.finch.data.GameRepository
@@ -81,7 +82,6 @@ import dev.cao.finch.data.GameStatus
 import dev.cao.finch.data.PlaySession
 import dev.cao.finch.timer.TimerServiceBridge
 import java.time.Duration
-import java.time.format.DateTimeFormatter
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -189,19 +189,22 @@ fun GameDetailScreen(
         Duration.ofMillis(if (showCloudTotal) cloudMinutes * 60_000 else (stats.totalMs ?: 0L)),
     )
 
-    // 封面进场动画：轻缩放 + 淡入
-    val coverProgress by animateFloatAsState(
-        targetValue = 1f,
-        animationSpec = spring(Spring.DampingRatioMediumBouncy, Spring.StiffnessMediumLow),
-        label = "coverIn",
-    )
+    // 封面进场动画：轻缩放 + 淡入（初值 0.96 + animateTo，
+    // animateFloatAsState 初值即目标值、动画永不播放）
+    val coverAnim = remember { Animatable(0.96f) }
+    LaunchedEffect(Unit) {
+        coverAnim.animateTo(1f, spring(Spring.DampingRatioMediumBouncy, Spring.StiffnessMediumLow))
+    }
+    // 封面是否真正出图：无封面/加载失败时悬浮顶栏前景改用 onSurface（白色在浅色占位上不可读）
+    var coverOk by remember(game.id) { mutableStateOf(game.coverUrl != null) }
 
     Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
+                .imePadding()
                 .verticalScroll(rememberScrollState())
-                .padding(bottom = 130.dp), // 给悬浮底栏留出空间
+                .padding(bottom = Dimens.BottomBarOverlap), // 给悬浮底栏留出空间
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             // 封面全出血：顶到屏幕最上沿（状态栏后面），底部圆角 + 顶部渐变遮罩
@@ -211,33 +214,32 @@ fun GameDetailScreen(
                     .aspectRatio(16f / 9f)
                     .clip(RoundedCornerShape(bottomStart = 20.dp, bottomEnd = 20.dp))
                     .graphicsLayer {
-                        scaleX = coverProgress
-                        scaleY = coverProgress
-                        alpha = coverProgress
+                        scaleX = coverAnim.value
+                        scaleY = coverAnim.value
+                        alpha = coverAnim.value
                     },
             ) {
-                if (game.coverUrl != null) {
-                    AsyncImage(
-                        model = game.coverUrl,
-                        contentDescription = null,
-                        modifier = Modifier.fillMaxSize(),
-                        contentScale = ContentScale.Crop,
-                    )
-                } else {
-                    Box(
-                        Modifier
-                            .fillMaxSize()
-                            .background(MaterialTheme.colorScheme.surfaceVariant),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Icon(
-                            platformIcon(game.platform),
-                            contentDescription = null,
-                            modifier = Modifier.size(72.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
+                GameCover(
+                    url = game.coverUrl,
+                    contentDescription = stringResource(R.string.a11y_cover, game.name),
+                    modifier = Modifier.fillMaxSize(),
+                    onCoverLoaded = { coverOk = it },
+                    placeholder = {
+                        Box(
+                            Modifier
+                                .fillMaxSize()
+                                .background(MaterialTheme.colorScheme.surfaceVariant),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(
+                                platformIcon(game.platform),
+                                contentDescription = null,
+                                modifier = Modifier.size(72.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    },
+                )
                 // 顶部渐变遮罩：让状态栏与悬浮顶栏可读
                 Box(
                     Modifier
@@ -289,8 +291,10 @@ fun GameDetailScreen(
                                     style = MaterialTheme.typography.labelMedium,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
+                                // 走秒过渡只跟分钟级 key 走（每秒跑一次弹簧动画太耗电），
+                                // 秒级文字直接重绘
                                 AnimatedContent(
-                                    targetState = elapsedText,
+                                    targetState = elapsedText.substringBeforeLast(':'),
                                     transitionSpec = {
                                         (fadeIn(animationSpec = spring<Float>()) +
                                             scaleIn(
@@ -299,9 +303,9 @@ fun GameDetailScreen(
                                             )) togetherWith fadeOut(animationSpec = spring<Float>())
                                     },
                                     label = "elapsedPulse",
-                                ) { text ->
+                                ) {
                                     Text(
-                                        text,
+                                        elapsedText,
                                         style = MaterialTheme.typography.headlineMedium,
                                         fontWeight = FontWeight.Bold,
                                         color = MaterialTheme.colorScheme.primary,
@@ -423,7 +427,7 @@ fun GameDetailScreen(
                             Text("已通关", style = MaterialTheme.typography.bodyLarge)
                             game.completedAt?.let {
                                 Text(
-                                    " · ${it.format(DateTimeFormatter.ofPattern("yyyy-M-d"))}",
+                                    " · ${it.format(TimeFormatter.DATE_YMD)}",
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
@@ -438,14 +442,18 @@ fun GameDetailScreen(
                         ) {
                             Text("评分", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
                             (1..5).forEach { star ->
+                                val starOn = game.rating != null && star <= game.rating
                                 IconButton(
                                     onClick = { viewModel.setRating(game.id, if (game.rating == star) null else star) },
                                     modifier = Modifier.size(38.dp),
                                 ) {
                                     Icon(
-                                        if (game.rating != null && star <= game.rating) Icons.Filled.Star else Icons.Filled.StarBorder,
-                                        contentDescription = "$star 星",
-                                        tint = if (game.rating != null && star <= game.rating) StarGold
+                                        if (starOn) Icons.Filled.Star else Icons.Filled.StarBorder,
+                                        contentDescription = stringResource(
+                                            if (starOn) R.string.a11y_star_on else R.string.a11y_star_off,
+                                            star,
+                                        ),
+                                        tint = if (starOn) StarGold
                                         else MaterialTheme.colorScheme.onSurfaceVariant,
                                         modifier = Modifier.size(30.dp),
                                     )
@@ -537,7 +545,8 @@ fun GameDetailScreen(
             }
         }
 
-        // 悬浮顶栏（压在封面上，状态栏沉浸）
+        // 悬浮顶栏（压在封面上，状态栏沉浸）；无封面/封面失败时前景改用 onSurface 保证浅底可读
+        val topBarFg = if (coverOk) Color.White else MaterialTheme.colorScheme.onSurface
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -547,18 +556,18 @@ fun GameDetailScreen(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             TextButton(onClick = onBack) {
-                Icon(Icons.Filled.ArrowBack, contentDescription = "返回", tint = Color.White)
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回", tint = topBarFg)
             }
             Text(
                 "游戏详情",
                 style = MaterialTheme.typography.labelMedium,
-                color = Color.White,
+                color = topBarFg,
             )
             IconButton(onClick = { viewModel.toggleFavorite(game.id) }) {
                 Icon(
                     if (game.favorite) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
                     contentDescription = if (game.favorite) "取消收藏" else "收藏",
-                    tint = if (game.favorite) Color(0xFFE05565) else Color.White,
+                    tint = if (game.favorite) Color(0xFFE05565) else topBarFg,
                 )
             }
         }
@@ -582,7 +591,7 @@ fun GameDetailScreen(
     }
 
     pendingEdit?.let { s ->
-        val scope = remember { kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main) }
+        val scope = rememberCoroutineScope()
         SessionEditDialog(
             session = s,
             error = sessionEditError,
@@ -602,71 +611,36 @@ fun GameDetailScreen(
     }
 }
 
-/** 会话起止编辑框：日期 + 开始/结束（结束必须晚于开始，跨夜自动+1天） */
+/** HLTB 手动贴链接 + 获取按钮 + 结果文案（HltbProgressCard / HltbEmptyRow 两处编辑块共用） */
 @Composable
-private fun SessionEditDialog(
-    session: PlaySession,
-    error: String?,
-    onDismiss: () -> Unit,
-    onConfirm: (start: java.time.LocalDateTime, end: java.time.LocalDateTime) -> Unit,
+private fun HltbFetchSection(
+    hltbInput: String,
+    onInputChange: (String) -> Unit,
+    label: String,
+    fetching: Boolean,
+    fetchMsg: String?,
+    onFetch: () -> Unit,
 ) {
-    val dateFmt = DateTimeFormatter.ofPattern("yyyy-M-d")
-    val timeFmt = DateTimeFormatter.ofPattern("H:mm")
-    var dateField by remember(session.id) { mutableStateOf(session.startTime.format(dateFmt)) }
-    var startField by remember(session.id) { mutableStateOf(session.startTime.format(timeFmt)) }
-    var endField by remember(session.id) {
-        mutableStateOf(session.endTime?.format(timeFmt) ?: session.startTime.format(timeFmt))
-    }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("编辑记录") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(
-                    value = dateField,
-                    onValueChange = { dateField = it },
-                    label = { Text("日期 2025-8-30") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(
-                        value = startField,
-                        onValueChange = { startField = it },
-                        label = { Text("开始 21:30") },
-                        singleLine = true,
-                        modifier = Modifier.weight(1f),
-                    )
-                    OutlinedTextField(
-                        value = endField,
-                        onValueChange = { endField = it },
-                        label = { Text("结束 23:05") },
-                        singleLine = true,
-                        modifier = Modifier.weight(1f),
-                    )
-                }
-                if (error != null) {
-                    Text(error, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = {
-                runCatching {
-                    val date = java.time.LocalDate.parse(dateField.trim(), dateFmt)
-                    val start = java.time.LocalTime.parse(startField.trim(), timeFmt)
-                    val end = java.time.LocalTime.parse(endField.trim(), timeFmt)
-                    var s = java.time.LocalDateTime.of(date, start)
-                    var e = java.time.LocalDateTime.of(date, end)
-                    if (e.isBefore(s)) e = e.plusDays(1) // 跨夜
-                    onConfirm(s, e)
-                }.onFailure {
-                    // 格式错误本地直接提示，不进 ViewModel
-                }
-            }) { Text("保存") }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+    OutlinedTextField(
+        value = hltbInput,
+        onValueChange = onInputChange,
+        label = { Text(label) },
+        singleLine = true,
+        modifier = Modifier.fillMaxWidth(),
     )
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        TextButton(enabled = !fetching, onClick = onFetch) {
+            Text(if (fetching) "获取中…" else "从 HLTB 获取")
+        }
+        if (fetchMsg != null) {
+            Text(
+                fetchMsg,
+                style = MaterialTheme.typography.labelSmall,
+                color = if (fetchMsg == "已更新") MaterialTheme.colorScheme.primary
+                else MaterialTheme.colorScheme.error,
+            )
+        }
+    }
 }
 
 /** HLTB 点开自动获取的状态机：只在无三围时触发一次 */
@@ -689,7 +663,8 @@ private fun HltbProgressCard(
     var hltbInput by remember { mutableStateOf("") }
     var fetching by remember { mutableStateOf(false) }
     var fetchMsg by remember { mutableStateOf<String?>(null) }
-    val frac = (playedMin.toFloat() / hltbMin).coerceIn(0f, 1f)
+    // 进度百分比走生产纯函数（单测直测同口径，防 UI 内联式与规范漂移）
+    val frac = dev.cao.finch.data.progressFraction(playedMin, hltbMin)
     // 已通关的游戏进度强制封顶（VM 在勾选瞬间已把参考钳到已玩，这里 UI 再兜一层防旧数据）
     val done = completed || playedMin >= hltbMin
     GlassCard(modifier = Modifier.fillMaxWidth()) {
@@ -770,35 +745,22 @@ private fun HltbProgressCard(
                     }) { Text("清除") }
                 }
                 // HLTB 自动获取（中转 API）：Steam 直查→按名搜；找不到则用手动贴的 id/链接
-                OutlinedTextField(
-                    value = hltbInput,
-                    onValueChange = { hltbInput = it; fetchMsg = null },
-                    label = { Text("HLTB 链接或 id（可选，自动搜不到时贴）") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
+                HltbFetchSection(
+                    hltbInput = hltbInput,
+                    onInputChange = { hltbInput = it; fetchMsg = null },
+                    label = "HLTB 链接或 id（可选，自动搜不到时贴）",
+                    fetching = fetching,
+                    fetchMsg = fetchMsg,
+                    onFetch = {
+                        fetching = true
+                        fetchMsg = null
+                        viewModel.fetchHltbTimes(gameId, hltbInput.ifBlank { null }) { r ->
+                            fetching = false
+                            fetchMsg = if (r.isSuccess) "已更新"
+                            else (r.exceptionOrNull()?.message ?: "没抓到")
+                        }
+                    },
                 )
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    TextButton(
-                        enabled = !fetching,
-                        onClick = {
-                            fetching = true
-                            fetchMsg = null
-                            viewModel.fetchHltbTimes(gameId, hltbInput.ifBlank { null }) { r ->
-                                fetching = false
-                                fetchMsg = if (r.isSuccess) "已更新"
-                                else (r.exceptionOrNull()?.message ?: "没抓到")
-                            }
-                        },
-                    ) { Text(if (fetching) "获取中…" else "从 HLTB 获取") }
-                    if (fetchMsg != null) {
-                        Text(
-                            fetchMsg!!,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = if (fetchMsg == "已更新") MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.error,
-                        )
-                    }
-                }
             }
         }
     }
@@ -867,39 +829,26 @@ private fun HltbEmptyRow(
                         editing = false
                     }) { Text("保存") }
                 }
-                OutlinedTextField(
-                    value = hltbInput,
-                    onValueChange = { hltbInput = it; fetchMsg = null },
-                    label = { Text("或贴 HLTB 链接自动填三围") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    TextButton(
-                        enabled = !fetching,
-                        onClick = {
-                            fetching = true
-                            fetchMsg = null
-                            viewModel.fetchHltbTimes(gameId, hltbInput.ifBlank { null }) { r ->
-                                fetching = false
-                                if (r.isSuccess) {
-                                    fetchMsg = "已更新"
-                                    editing = false
-                                } else {
-                                    fetchMsg = r.exceptionOrNull()?.message ?: "没抓到"
-                                }
+                HltbFetchSection(
+                    hltbInput = hltbInput,
+                    onInputChange = { hltbInput = it; fetchMsg = null },
+                    label = "或贴 HLTB 链接自动填三围",
+                    fetching = fetching,
+                    fetchMsg = fetchMsg,
+                    onFetch = {
+                        fetching = true
+                        fetchMsg = null
+                        viewModel.fetchHltbTimes(gameId, hltbInput.ifBlank { null }) { r ->
+                            fetching = false
+                            if (r.isSuccess) {
+                                fetchMsg = "已更新"
+                                editing = false
+                            } else {
+                                fetchMsg = r.exceptionOrNull()?.message ?: "没抓到"
                             }
-                        },
-                    ) { Text(if (fetching) "获取中…" else "从 HLTB 获取") }
-                    if (fetchMsg != null) {
-                        Text(
-                            fetchMsg!!,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = if (fetchMsg == "已更新") MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.error,
-                        )
-                    }
-                }
+                        }
+                    },
+                )
             }
         }
     }
@@ -909,7 +858,7 @@ private fun HltbEmptyRow(
 @Composable
 private fun SessionRow(s: PlaySession, onDelete: () -> Unit, onEdit: () -> Unit) {
     val end = s.endTime ?: return
-    val fmt = DateTimeFormatter.ofPattern("M月d日 HH:mm")
+    val fmt = TimeFormatter.DATE_MD_HM
     Row(
         modifier = Modifier
             .fillMaxWidth()

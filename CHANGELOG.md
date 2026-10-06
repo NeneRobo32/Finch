@@ -1,5 +1,52 @@
 # Changelog
 
+## 0.15.13 (2026-10-05)
+
+数据安全与测试加固版（DB 15→16）：
+
+- **修复（数据正确性）**：
+  - Android 13+ 从未请求 `POST_NOTIFICATIONS`，计时通知/发售提醒在通知栏不显示——启动时请求授权
+  - Steam/PSN 快照差分丢时长：基线只推进实际入账份额、去重改精确起点，同日二次同步不再撞旧占位
+    （旧版「基线已推进、会话被丢弃」会让增量永久丢失）；摊分份额起点钳到上次快照之后
+  - PSN refresh_token 轮换后立即写回（旧 token 即刻失效），中途网络失败不再掉登录
+  - TimerService 及时 `startForeground`（防 FGS 超时崩溃）；`startTimer` 查库结算孤儿会话
+    （进程被杀残留的 `endTime=NULL` 会话不再漏计时长）
+  - 发售提醒：无通知权限不再误标「已提醒」（提醒不丢，下次重试）；通知 ID 全 32 位哈希防互相覆盖
+  - 备份：meta.json + 核心表 + 版本交叉校验（任意 SQLite 文件不再能顶掉 `finch.db`）；
+    `VACUUM INTO` 一致性导出（旧 SQLite 回退 checkpoint+copy）；失败路径不再关死 DB；`restartApp` NPE
+  - Switch 多台主机同日日报按 (date, appId) 求和（原去重丢弃会少算）；同名多行按平台优先认领
+  - `pauseAccumMs` DDL 对齐：实体补 `defaultValue="0"`，DB 15→16 重建 `play_sessions`（升级装/新装一致）
+  - HLTB `parseGameId` 带尾部 query 的 URL 取错 id（`/game/68151?foo=999` 取 999）——优先取 path 末段
+  - PSN 分页 `nextOffset` 不前进死循环防护；Moon 时区头取系统时区（原写死 Asia/Shanghai）；
+    统计 SQL 加 `MAX(0, …)` 防负时长；未来会话保时长钳制（原一律挪 24h）；LIKE 通配符转义
+  - UI：主页 Flow 重组重建闪 0、两处永不取消的 `CoroutineScope` 泄漏、走秒每秒弹簧动画、
+    永不播放的死动画/死参数、跨夜记录显示歧义、跨天倒计时陈旧值、`LaunchedEffect` key 误用等
+- **体验与状态**：
+  - `rememberSaveable` 全量：旋转/切 tab 不再丢搜索词、筛选、详情页位置、当前 tab
+  - 返回栈：非 Home tab 按返回先回 Home tab；桌面小组件点击直达正在计时的游戏详情
+  - OkHttp 全面收敛：共享 client + `callTimeout 30s`；网络调用 `runInterruptible` + `delay` 退避，
+    协程取消即中断（原 `Thread.sleep` 吞中断）；4xx 不再无效重试；Gamersky 线程池泄漏改协程超时
+  - 系统可见文本入 strings.xml（小组件/发售通知与渠道/分享面板）；无障碍描述补齐
+  - Coil 全局配置（crossfade/内存磁盘缓存）+ 统一 `GameCover` 组件（占位/失败兜底）
+  - `imePadding` 修键盘遮挡；底部留白统一常量；widget `SizeMode.Responsive` 自适应 +「今日」按日历日边界
+- **安全**：
+  - Steam Key / Switch session_token / PSN refresh_token 改 Android Keystore + AES-GCM 加密落盘，
+    旧明文读取时惰性迁移；解密失败删坏值返回空（宁可重填不崩启动）
+  - 签名口令优先环境变量 / `gradle.properties`（`FINCH_KEYSTORE_*`），明文 `keystore.properties` 降为兜底
+- **测试**（新增 30+ 用例）：
+  - 复刻单测全部改调生产函数（`shouldRename*`/`stripPlatformTails`/`latinSegment`/`snapRefForCompleted`/
+    `followKey`/`progressFraction`），被测即生产口径
+  - 快照差分口径单测（含「丢份额不丢时长」回归用例）、备份校验决策单测
+  - Room 迁移测试（Robolectric）：v7→v16 逐版升级数据保留 + 15→16 重建专项 + 新装直开
+  - JSON/HTML 解析测试（PSN gameList/Bangumi 日历/Switch TitleID/Gamersky 页面）
+- **工程化**：
+  - CI（GitHub Actions：单测 + lint + assemble）；lint 显式策略（错误阻断，完整 lint 不再只靠 lintVital）
+  - version catalog（`gradle/libs.versions.toml`）统一依赖版本；移除死配置 `kotlin.android` 插件
+  - wrapper 补官方 `distributionSha256Sum`（镜像分发也验真）+ `retries=3`
+  - 重复代码收敛：会话编辑弹窗双份合并为共用件、HLTB 获取块/时间输入框/网络异常分类收敛为共享组件
+  - README compileSdk 修正、ROADMAP 过期行清理与 DB 16 行、.gitignore/.gitattributes 补全
+- **验证**：全部单测通过；`assembleDebug` / `assembleRelease`（R8）构建通过
+
 ## 0.15.12 (2026-10-05)
 
 体验修复版（无 DB 变更）：
