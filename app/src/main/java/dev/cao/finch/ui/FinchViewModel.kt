@@ -188,7 +188,8 @@ class FinchViewModel(app: Application) : AndroidViewModel(app) {
      * 2) Steam 游戏：`GET 中转/steam/<appid>` 直查（一次命中）
      * 3) 按名搜：`POST 中转/hltb/search`（数字强制匹配，相似度 ≥0.4）。
      *    HLTB 是纯英文库（只认英文名），中文/日文库名先走英文名解析链换到英文线索
-     *    （Nlib / Steam 中文反查 / Bangumi 原名 / eShop 英文段 / MyMemory 机翻，逐级兜底）
+     *    （Nlib 官方条目 / Steam 中文反查 / Bangumi 原名 / eShop 英文段，逐级兜底；
+     *    机翻已移除，换不到英文线索时引导手动贴链接）
      * 成功写库（三围），返回 Result.success(times)；失败返回 Result.failure(原因)。
      * 开关关闭时直接失败（UI 引导手动填，不发任何包）。
      */
@@ -243,38 +244,55 @@ class FinchViewModel(app: Application) : AndroidViewModel(app) {
             }
             // 3) 英文名解析 + 按名搜。HLTB 是纯英文库（只认英文名），中文/日文库名直搜必 404，
             // 非英文库名必须先换到英文线索。来源优先级（各自静默失败，逐级兜底）：
-            //   a) Nlib 官方英文名（Switch TitleID 精确翻译，免配置）→ 直接按名搜
+            //   a) Nlib 官方条目（Switch TitleID 精确翻译，免配置）：官方英文名直搜；
+            //      isDemo 标记试玩版直接引导手动；无封面时顺手回填官方图标
             //   b) Steam 中文反查（跨平台第三方游戏）：中文名命中 Steam 中文索引 →
             //      拿 appid 直查中转 /steam/<appid>，绕开 HLTB 名字匹配，一次命中最准
+            //   b2) 游民星空游戏库反查（NS1/NS2 通吃，任天堂独占也能兜——Nlib 无 NS2 数据）：
+            //      中文名搜游戏库 → 相似词条 → ① Steam appid 直查 ② 词条官方英文名进轮询
             //   c) Bangumi 原名（日/英）：拉丁原名直接搜；日文原名拿去 eShop 日区换英文段
             //   d) eShop 英文段（查询词需含假名/拉丁；纯中文名搜日区必空，跳过省请求）
-            //   e) MyMemory 机翻兜底：中/日文名机翻成英文做候选（错译只导致搜不到，极少写错）
-            // Nlib 直查（Switch 专用）：switchAppId 归一出 16 位 TitleID 时，一次 GET 拿官方英文名；
-            // 非法格式/未知/超时全部返回 null，静默回退按名搜。
+            //   （MyMemory 机翻已于 v0.15.18 移除：错译率高、时好时坏，宁可引导手动贴链接）
+            // Nlib 直查（Switch 专用）：switchAppId 归一出 16 位 TitleID 时一次 GET 拿官方条目；
+            // update 形态 TitleID 自动回退本体（SwitchTitleClient 内处理）；失败静默回退按名搜。
             // baseName：剥掉平台/版本尾巴的核心名——英文名解析链各来源的查询词一律用它
-            // （带 "Nintendo Switch 2 Edition" 尾巴的全名去搜 Steam/Bangumi/机翻都对不上）
+            // （带 "Nintendo Switch 2 Edition" 尾巴的全名去搜 Steam/Bangumi/日区都对不上）
             val baseName = stripPlatformTails(game.name)
-            val nlibName: String? = if (game.platform == dev.cao.finch.data.Platform.SWITCH) {
-                try {
-                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                        SwitchTitleClient.fetchEnglishName(game.switchAppId)
+            val nlibEntry: dev.cao.finch.data.SwitchTitleClient.NlibEntry? =
+                if (game.platform == dev.cao.finch.data.Platform.SWITCH) {
+                    try {
+                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                            SwitchTitleClient.fetchEntry(game.switchAppId)
+                        }
+                    } catch (_: Exception) {
+                        null
                     }
-                } catch (_: Exception) {
-                    null
-                }
-            } else null
+                } else null
+            // 试玩版没有可查的三围（Nlib isDemo 标记）——直接引导手动填，别白跑一轮搜索
+            if (nlibEntry != null && nlibEntry.isDemo) {
+                onDone(Result.failure(IllegalStateException("「${game.name}」是试玩版，HLTB 不单独记时长——手动填参考时长")))
+                return@launch
+            }
+            val nlibName = nlibEntry?.name
             if (nlibName != null) {
-                val hit = try {
-                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                        dev.cao.finch.data.HltbProxyClient.searchBest(nlibName)
+                // 官方名剥平台尾巴的变体优先（Switch 2 升级版官方名带 "Nintendo Switch 2 Edition"）
+                for (q in listOfNotNull(stripPlatformTails(nlibName).takeIf { it != nlibName && it.length >= 3 }, nlibName)) {
+                    val hit = try {
+                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                            dev.cao.finch.data.HltbProxyClient.searchBest(q)
+                        }
+                    } catch (_: Exception) {
+                        null
                     }
-                } catch (_: Exception) {
-                    null
+                    if (hit != null && hit.times.any()) {
+                        setHltbTimes(id, hit.times.mainMin, hit.times.extraMin, hit.times.completeMin)
+                        onDone(Result.success(hit.times))
+                        return@launch
+                    }
                 }
-                if (hit != null && hit.times.any()) {
-                    setHltbTimes(id, hit.times.mainMin, hit.times.extraMin, hit.times.completeMin)
-                    onDone(Result.success(hit.times))
-                    return@launch
+                // Nlib 元数据顺手用：库无封面时回填官方图标（icon 是 Nlib 媒体地址）
+                if (game.coverUrl.isNullOrBlank() && nlibEntry.iconUrl != null) {
+                    updateGame(game.id) { it.copy(coverUrl = nlibEntry.iconUrl) }
                 }
                 // Nlib 有名但中转搜不到：把英文名也加入后续轮询（剥尾巴可能再救一次）
             }
@@ -305,6 +323,43 @@ class FinchViewModel(app: Application) : AndroidViewModel(app) {
                         onDone(Result.success(times))
                         return@launch
                     }
+                }
+            }
+            // b2) 游民星空游戏库反查（中文名 → 官方英文名/Steam appid；NS2 独占靠它兜）：
+            //     相似度 ≥0.5 才认词条（游民译名与官方译名可能不同，宁漏勿错）；
+            //     有 appid 直查最优，英文名存下来进轮询；单级 8s 预算（搜索+词条两跳），超时静默跳过
+            var gamerskyEn: String? = null
+            if (!isHltbSearchable(game.name)) {
+                val gs = try {
+                    kotlinx.coroutines.withTimeoutOrNull(8_000) {
+                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                            val best = dev.cao.finch.data.GamerskyKuClient.search(baseName)
+                                .map { it to dev.cao.finch.data.HltbProxyClient.similarity(baseName, it.title, emptySet()) }
+                                .filter { it.second >= 0.5 }
+                                .maxByOrNull { it.second }
+                                ?.first
+                            best?.let { dev.cao.finch.data.GamerskyKuClient.fetchEntry(it.url) }
+                        }
+                    }
+                } catch (_: Exception) {
+                    null
+                }
+                if (gs != null) {
+                    if (gs.steamAppId != null) {
+                        val times = try {
+                            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                dev.cao.finch.data.HltbProxyClient.fetchBySteam(gs.steamAppId)
+                            }
+                        } catch (_: Exception) {
+                            null
+                        }
+                        if (times != null && times.any()) {
+                            setHltbTimes(id, times.mainMin, times.extraMin, times.completeMin)
+                            onDone(Result.success(times))
+                            return@launch
+                        }
+                    }
+                    gamerskyEn = gs.englishName
                 }
             }
             // c) Bangumi 原名联动（名字不可直搜）：Result.name 是日/英原名（name_cn 才是中文）。
@@ -340,6 +395,8 @@ class FinchViewModel(app: Application) : AndroidViewModel(app) {
             queries += buildNameVariants(game.name).filter { isHltbSearchable(it) }
             // c) 拉丁原名直接进轮询（日文原名不直搜，走下面 eShop 换英文段）
             originalName?.takeIf { isHltbSearchable(it) && it.length >= 3 }?.let { queries += it }
+            // b2) 游民词条官方英文名进轮询（NS2 独占没有 Steam 版，靠它送 HLTB 按名搜）
+            gamerskyEn?.takeIf { isHltbSearchable(it) && it.length >= 3 }?.let { queries += it }
             // d) eShop 英文名联动：日区标题是「英文名（日文名）」格式，只取拉丁英文段
             //    （searchTitles 已过滤纯日文/中文标题）。查询词用日文原名最佳、剥尾巴的拉丁名次之，
             //    无拉丁/假名的查询词（纯中文名）在日区索引里必空——跳过省一次请求
@@ -354,21 +411,8 @@ class FinchViewModel(app: Application) : AndroidViewModel(app) {
                 } catch (_: Exception) {
                 }
             }
-            // e) MyMemory 机翻兜底（最后一级）：官方英文名全落空时，把中/日文名机翻成英文试匹配。
-            //    机翻只是候选，最终仍要过相似度 ≥0.4 + 数字强制才写库；单级 5s 预算
-            //    （v0.15.11 删除的「Bangumi 中文名兜底」只送中文词、命中率≈0，此处改为换英文线索）
-            if (!isHltbSearchable(game.name)) {
-                val mt = try {
-                    kotlinx.coroutines.withTimeoutOrNull(5_000) {
-                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                            dev.cao.finch.data.TitleTranslateClient.candidates(baseName)
-                        }
-                    }.orEmpty()
-                } catch (_: Exception) {
-                    emptyList()
-                }
-                mt.filter { it.length >= 3 }.forEach { queries += it }
-            }
+            // MyMemory 机翻兜底已移除（v0.15.18）：错译率高（「异度神剑」→ Divergent Sword）、
+            // 时好时坏污染查询词；官方名换不到时直接走手动贴链接，比给错答案好。
             var best: dev.cao.finch.data.HltbProxyClient.Hit? = null
             var bestQuery = game.name
             val tried = mutableListOf<String>()

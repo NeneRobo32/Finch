@@ -135,18 +135,29 @@ class JsonParseTest {
         }
     }
 
-    // ---- SwitchTitleClient：Nlib 响应 JSON → name ----
+    // ---- SwitchTitleClient：Nlib 响应 JSON → 官方条目 ----
 
     @Test
-    fun `parseName_正常返回name字段`() {
-        assertEquals("Xenoblade 2", SwitchTitleClient.parseName("""{"name":"Xenoblade 2"}"""))
+    fun `parseEntry_完整条目_字段正确映射`() {
+        val e = SwitchTitleClient.parseEntry(
+            """{"id":"01007EF00011E000","name":"The Legend of Zelda™: Breath of the Wild","publisher":"Nintendo","releaseDate":"2017-03-03","type":"base","isDemo":false,"icon":"https://api.nlib.cc/nx/01007EF00011E000/icon"}"""
+        )
+        assertNotNull(e)
+        assertEquals("The Legend of Zelda: Breath of the Wild", e!!.name) // 商标剥掉
+        assertEquals("Nintendo", e.publisher)
+        assertEquals("2017-03-03", e.releaseDate)
+        assertEquals("base", e.type)
+        assertEquals(false, e.isDemo)
+        assertEquals("https://api.nlib.cc/nx/01007EF00011E000/icon", e.iconUrl)
     }
 
     @Test
-    fun `parseName_空缺字段与非法JSON返回null`() {
-        assertNull(SwitchTitleClient.parseName("""{"name":""}"""))
-        assertNull(SwitchTitleClient.parseName("""{}"""))
-        assertNull(SwitchTitleClient.parseName("not json"))
+    fun `parseEntry_试玩版标记_缺字段与非法JSON返回null`() {
+        assertEquals(true, SwitchTitleClient.parseEntry("""{"name":"Demo Game","isDemo":true}""")!!.isDemo)
+        assertNull(SwitchTitleClient.parseEntry("""{"name":""}""")) // 空名
+        assertNull(SwitchTitleClient.parseEntry("""{"name":"ゼルダの伝説"}""")) // 无拉丁字母：Nlib 数据异常
+        assertNull(SwitchTitleClient.parseEntry("""{}"""))
+        assertNull(SwitchTitleClient.parseEntry("not json"))
     }
 
     @Test
@@ -159,44 +170,5 @@ class JsonParseTest {
         assertTrue(!SwitchTitleClient.isTitleId("0100E9500403800G")) // 非十六进制
         assertTrue(!SwitchTitleClient.isTitleId(null))
         assertTrue(!SwitchTitleClient.isTitleId(""))
-    }
-
-    // ---- TitleTranslateClient：MyMemory 响应 → 英文候选（v0.15.15 机翻兜底）----
-
-    @Test
-    fun `pickTranslations_主译文优先_高匹配补位_例句噪声不收`() {
-        val json = """
-            {"responseData":{"translatedText":"Legend of Zelda Tears of the Kingdom"},
-             "matches":[
-               {"translation":"FINAL FANTASY XV ROYAL EDITION INCLUDES:","match":0.21},
-               {"translation":"This is clearly a long example sentence from translation memory, not a game title at all","match":0.9},
-               {"translation":"The Legend of Zelda","match":0.4},
-               {"translation":"ZELDA","match":0.48}
-             ]}
-        """.trimIndent()
-        val out = TitleTranslateClient.pickTranslations(json)
-        // 主译文优先，记忆库高匹配条目按 match 降序补位（最多 3 个）
-        assertEquals(
-            listOf("Legend of Zelda Tears of the Kingdom", "ZELDA", "The Legend of Zelda"),
-            out,
-        )
-        // 低匹配例句（match<0.4）与长句（>60 字符）都不收
-        assertTrue(out.none { it.contains("FINAL FANTASY") || it.contains("example sentence") })
-    }
-
-    @Test
-    fun `pickTranslations_非法JSON_空译文_非拉丁返回空`() {
-        assertTrue(TitleTranslateClient.pickTranslations("not json").isEmpty())
-        assertTrue(TitleTranslateClient.pickTranslations("""{"responseData":{"translatedText":""}}""").isEmpty())
-        assertTrue(TitleTranslateClient.pickTranslations("""{"responseData":{"translatedText":"完全中文译文"}}""").isEmpty())
-    }
-
-    @Test
-    fun `pickTranslations_剥商标_去重保序`() {
-        val json = """
-            {"responseData":{"translatedText":"Game™"},
-             "matches":[{"translation":"Game","match":0.9}]}
-        """.trimIndent()
-        assertEquals(listOf("Game"), TitleTranslateClient.pickTranslations(json))
     }
 }

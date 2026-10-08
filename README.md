@@ -10,7 +10,7 @@
 - **总结页**：月/年切换，总时长、环比上期、平台分布、每日柱状图、热力图、作息（周几/几点）、游戏 Top10、Steam 终身时长对账、「分享战报」
 - **即将发售**：Bangumi 发售日历 / Steam 即将推出 / eShop 多源聚合；☆ 关注后置顶倒计时，发售前 3 天本地推送
 - **游戏资料库**：「添加游戏」在线搜封面和平台：Bangumi（免Key）→ Steam 商店（免Key）
-- **通关时长**：点开详情自动查 HLTB 中转服务（可在导入页一键关闭；数据来自第三方 Crashdummy/HowLongToBeatApi）。HLTB 只认英文名——中文/日文库名自动走英文名解析链换到英文线索再查（Nlib 官方英文名 / Steam 中文反查 / Bangumi 原名 / eShop 英文段 / MyMemory 机翻兜底）；只发游戏名/appid，不发记录与密钥
+- **通关时长**：点开详情自动查 HLTB 中转服务（可在导入页一键关闭；数据来自第三方 Crashdummy/HowLongToBeatApi）。HLTB 只认英文名——中文/日文库名自动走英文名解析链换到官方英文线索再查（Nlib 官方条目（TitleID 直查，NS1）/ Steam 中文反查 / 游民星空游戏库反查（NS1/NS2 通吃）/ Bangumi 原名 / eShop 英文段）；换不到时引导手动贴链接（机翻已移除）；只发游戏名/appid，不发记录与密钥
 - **数据同步**：
   - Steam Web API `GetOwnedGames`（快照差分写会话，历史时长不会误算成增量）
   - Switch 家长监护 Moon API（PKCE OAuth，逐日游玩记录，日粒度）

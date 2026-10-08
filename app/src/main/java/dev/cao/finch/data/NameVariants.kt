@@ -84,12 +84,8 @@ internal fun isHltbSearchable(name: String): Boolean {
 }
 
 /**
- * 是否含假名（日文名）：机翻选 ja→en 方向——日文名多为音译，
- * 还原英文名的成功率远高于中文直译（如「異度神劍」直译成 Divergent Sword 就废了）。
+ * 是否含假名（日文名）：日区 eShop 搜索的合法查询词（日区标题索引是日文），
+ * 也是「名字不可直搜」的旁证之一。
  */
 internal fun hasKana(s: String): Boolean =
     s.any { it in '\u3040'..'\u309f' || it in '\u30a0'..'\u30ff' }
-
-/** 是否含谚文（韩文名）：机翻选 ko→en 方向（按中文送翻韩文名基本出不来可用结果） */
-internal fun hasHangul(s: String): Boolean =
-    s.any { it in '\uac00'..'\ud7af' || it in '\u1100'..'\u11ff' || it in '\u3130'..'\u318f' }

@@ -45,7 +45,7 @@ object GamerskyClient {
 
     private val client get() = HttpClients.shared // 共享客户端（connect 5s / read 10s / call 30s）
 
-    private suspend fun get(url: String): String {
+    internal suspend fun get(url: String): String {
         // 必须用完整 Chrome UA——游民 CDN 对自定义 UA（含 app 标记）返回 15KB 拦截页
         val req = Request.Builder().url(url)
             .header("User-Agent", "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36")

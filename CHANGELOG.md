@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.15.18 (2026-10-08)
+
+功能版（Nlib 优先、移除机翻，无 DB 变更）：
+
+- **变更（移除 MyMemory 机翻兜底）**：错译率高（「异度神剑」→ Divergent Sword）、时好时坏，
+  污染查询词还可能误配——换不到官方英文线索时直接引导手动贴链接，不给错答案
+- **增强（Nlib 官方条目，按文档 https://api.nlib.cc/nx/#game 实测后重写）**：
+  - 一次 GET 拉全 `name/publisher/releaseDate/type/isDemo/icon`（实测 name 恒为官方英文名，lang 参数不影响）
+  - **update 形态 TitleID 自动回退本体**：升级数据 TitleID（低 12 位 `0x800`）Nlib 库里 404、
+    本体记录命中——部分同步游戏 Nlib 查空很可能就是这个原因（`baseTitleId` 清低 12 位重查）
+  - `isDemo` 试玩版直接引导手动填（HLTB 不单独记试玩时长，不白跑搜索）
+  - 官方英文名送搜前剥「Nintendo Switch 2 Edition」等平台尾巴（剥尾巴变体优先搜）
+  - `icon` 顺手回填：库无封面时用 Nlib 官方图标
+- **新增（游民星空游戏库反查，补 NS2 覆盖）**：中文名搜游民游戏库（so.gamersky.com 服务端直出，
+  国内直连稳定）→ 相似词条（≥0.5 防译名误配）→ ① 词条 Steam appid 直查 `/steam/<appid>`（本体优先）
+  ② 词条官方英文名（meta keywords 口径）送 HLTB 按名搜。**任天堂独占 / NS2 新作没有 Steam 版也能兜**
+  （Nlib 数据源 TitleDB 无 NS2 游戏，这级是 NS2 中文名的主要英文名来源）
+- **变更（eShop 联动）**：过滤 DLC 条目（`sctg=aoc`），DLC 标题英文段不再污染按名搜
+- **测试**：Nlib 条目解析 / update→本体回退 / 试玩版标记 / 游民搜索与词条解析 / 无拉丁数据异常用例（101 个单测）
+
 ## 0.15.17 (2026-10-08)
 
 热修复版（v0.15.16 直搜判定仍误判，无 DB 变更）：

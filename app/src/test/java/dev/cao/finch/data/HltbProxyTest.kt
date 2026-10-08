@@ -116,19 +116,35 @@ class HltbProxyTest {
     }
 
     @Test
-    fun `Nlib_响应解析_取name_缺字段null`() {
-        // pickName 纯逻辑（parseName 碰 org.json，JVM stub 跑不了，只测 pickName）
+    fun `Nlib_条目解析_取name_缺字段null`() {
+        // pickName 纯逻辑（parseEntry 碰 org.json，JVM stub 跑不了，只测 pickName）：
+        // 剥商标符号 + 必须含拉丁字母（Nlib name 恒为官方英文名，无拉丁＝数据异常）
         assertEquals("Xenoblade Chronicles 2", SwitchTitleClient.pickName("Xenoblade Chronicles 2"))
+        assertEquals(
+            "The Legend of Zelda: Breath of the Wild",
+            SwitchTitleClient.pickName("The Legend of Zelda™: Breath of the Wild"),
+        )
+        assertNull(SwitchTitleClient.pickName("ゼルダの伝説"))
         assertNull(SwitchTitleClient.pickName(""))
         assertNull(SwitchTitleClient.pickName(null))
     }
 
     @Test
     fun `Nlib_非法id不发请求_直接null`() {
-        // fetchEnglishName 非法格式直接返回 null（纯逻辑路径，不联网）
-        assertNull(SwitchTitleClient.fetchEnglishName(null))
-        assertNull(SwitchTitleClient.fetchEnglishName(""))
-        assertNull(SwitchTitleClient.fetchEnglishName("app123"))
+        // fetchEntry 非法格式直接返回 null（纯逻辑路径，不联网）
+        assertNull(SwitchTitleClient.fetchEntry(null))
+        assertNull(SwitchTitleClient.fetchEntry(""))
+        assertNull(SwitchTitleClient.fetchEntry("app123"))
+    }
+
+    @Test
+    fun `update形态TitleID回退本体`() {
+        // 生产口径：SwitchTitleClient.baseTitleId——升级数据 TitleID 是本体低 12 位 0x800
+        // （实测 update 记录 Nlib 404、本体记录命中），查空时清低 12 位回退本体再查
+        assertEquals("01007EF00011E000", SwitchTitleClient.baseTitleId("01007EF00011E800"))
+        assertEquals("01007EF00011E000", SwitchTitleClient.baseTitleId(" 01007ef00011e800_002 ")) // 变体先归一
+        assertNull(SwitchTitleClient.baseTitleId("01007EF00011E000")) // 本体无需回退
+        assertNull(SwitchTitleClient.baseTitleId("app123"))
     }
 
     // ---- 英文名来源口径（v0.15.15：HLTB 只认英文名，中文/日文库名换英文线索）----
@@ -182,18 +198,11 @@ class HltbProxyTest {
     }
 
     @Test
-    fun `假名谚文判定_决定机翻方向`() {
-        // 生产口径：NameVariants.kt 的 hasKana/hasHangul + TitleTranslateClient.sourceLang
+    fun `假名判定_日文名可搜日区`() {
+        // 生产口径：NameVariants.kt 的 hasKana（含假名的名字是日区 eShop 搜索的合法查询词）
         assertTrue(hasKana("ゼルダの伝説 ティアーズ"))
         assertTrue(!hasKana("塞尔达传说"))
         assertTrue(!hasKana("Zelda"))
-        assertTrue(hasHangul("몬스터 헌터"))
-        assertTrue(!hasHangul("怪物猎人"))
-        // 机翻方向：日文名 ja→en（音译还原率高）、韩文名 ko→en、其余 zh-CN→en；混排名按最具体先判
-        assertEquals("ja", TitleTranslateClient.sourceLang("ゼルダの伝説 ティアーズ"))
-        assertEquals("ja", TitleTranslateClient.sourceLang("少女☆歌劇 レヴュースタァライト"))
-        assertEquals("ko", TitleTranslateClient.sourceLang("몬스터 헌터"))
-        assertEquals("zh-CN", TitleTranslateClient.sourceLang("怪物猎人 崛起"))
     }
 
     @Test

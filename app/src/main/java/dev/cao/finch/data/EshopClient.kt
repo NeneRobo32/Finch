@@ -88,7 +88,10 @@ object EshopClient {
             ?: return emptyList()
         val out = mutableListOf<String>()
         for (i in 0 until items.length()) {
-            val title = items.optJSONObject(i)?.optString("title").orEmpty()
+            val o = items.optJSONObject(i) ?: continue
+            // 追加内容（aoc=DLC）不产英文词候选：DLC 标题的英文段会污染按名搜
+            if (o.optString("sctg") == "aoc") continue
+            val title = o.optString("title").orEmpty()
             if (title.isBlank()) continue
             // 「Hollow Knight（ホロウナイト） Switch 2 Edition」→ "Hollow Knight"；
             // 纯日文/中文标题（如「ゼルダの伝説」）直接丢弃，不返回

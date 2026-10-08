@@ -17,6 +17,60 @@ import org.robolectric.annotation.Config
 @Config(sdk = [34])
 class HtmlParseTest {
 
+    // ---- GamerskyKuClient：游戏库搜索/词条解析（v0.15.18 中文名反查）----
+
+    private val kuSearchHtml = """
+        <ul class="ImgY search-game-grid">
+                <li>
+                    <a href="https://ku.gamersky.com/2026/trails-in-the-sky-2nd-chapter/" target="_blank">
+                        <div class="img">
+                            <img src="https://imgs.gamersky.com/x.jpg" title="空之轨迹 the 2nd" alt="空之轨迹 the 2nd" />
+                        </div>
+                    </a>
+                </li>
+                <li>
+                    <a href="https://ku.gamersky.com/2025/trails-in-the-sky-the-1st/" target="_blank">
+                        <div class="img">
+                            <img src="https://imgs.gamersky.com/y.jpg" title="空之轨迹 the 1st" alt="空之轨迹 the 1st" />
+                        </div>
+                    </a>
+                </li>
+        </ul>
+    """.trimIndent()
+
+    @Test
+    fun `parseSearchResults_词条链接与中文名配对_无结果空表`() {
+        val cands = GamerskyKuClient.parseSearchResults(kuSearchHtml)
+        assertEquals(2, cands.size)
+        assertEquals("空之轨迹 the 2nd", cands[0].title)
+        assertEquals("https://ku.gamersky.com/2026/trails-in-the-sky-2nd-chapter/", cands[0].url)
+        assertEquals("空之轨迹 the 1st", cands[1].title)
+        assertTrue(GamerskyKuClient.parseSearchResults("<html>啥也没有</html>").isEmpty())
+    }
+
+    @Test
+    fun `parseEntry_metaKeywords取英文名_首个Steam链接是本体`() {
+        val html = """
+            <meta name="keywords" content="空之轨迹 the 2nd,Trails in the Sky 2nd Chapter,空之轨迹 the 2nd下载,空之轨迹 the 2nd配置" />
+            <a href="https://store.steampowered.com/app/4225980/?utm_source=gamersky.com">前往商店</a>
+            <a href="https://store.steampowered.com/app/5009480/">DLC</a>
+        """.trimIndent()
+        val e = GamerskyKuClient.parseEntry(html)!!
+        // 「XX下载/XX配置」中文噪声项被 isHltbSearchable 口径过滤，取到正式英文名
+        assertEquals("Trails in the Sky 2nd Chapter", e.englishName)
+        assertEquals(4225980L, e.steamAppId) // 首个 = 本体，不是 DLC 的 5009480
+    }
+
+    @Test
+    fun `parseEntry_任天堂独占无Steam链接_仍取英文名`() {
+        // NS2 独占（如马力欧卡丁车世界）没有 Steam 版，英文名一路照样能送 HLTB 按名搜
+        val html = """<meta name="keywords" content="马里奥赛车世界,Mario Kart World,马里奥赛车世界下载" />"""
+        val e = GamerskyKuClient.parseEntry(html)!!
+        assertEquals("Mario Kart World", e.englishName)
+        assertNull(e.steamAppId)
+        assertNull(GamerskyKuClient.parseEntry("<html>三无页面</html>"))
+    }
+
     private val sampleHtml = """
         <ul>
         <li class="lx1">
