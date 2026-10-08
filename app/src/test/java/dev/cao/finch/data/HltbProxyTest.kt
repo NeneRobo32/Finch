@@ -130,4 +130,72 @@ class HltbProxyTest {
         assertNull(SwitchTitleClient.fetchEnglishName(""))
         assertNull(SwitchTitleClient.fetchEnglishName("app123"))
     }
+
+    // ---- 英文名来源口径（v0.15.15：HLTB 只认英文名，中文/日文库名换英文线索）----
+
+    @Test
+    fun `TitleID变体归一_带后缀取前16位_非TitleID形态null`() {
+        // 生产口径：SwitchTitleClient.normalizeTitleId（Moon 的 applicationId 有带后缀变体）
+        assertEquals("0100E95004038000", SwitchTitleClient.normalizeTitleId("0100E95004038000"))
+        assertEquals("0100E95004038000", SwitchTitleClient.normalizeTitleId("  0100e95004038000  ")) // 大小写+空白容忍
+        assertEquals("0100E95004038000", SwitchTitleClient.normalizeTitleId("0100E95004038000_002")) // 带后缀变体
+        assertNull(SwitchTitleClient.normalizeTitleId("app123")) // 短 id
+        assertNull(SwitchTitleClient.normalizeTitleId("70010000012345")) // 纯数字 nsuId
+        assertNull(SwitchTitleClient.normalizeTitleId("0100E9500403800G")) // 15 位十六进制 + 非法字符
+        assertNull(SwitchTitleClient.normalizeTitleId(null))
+    }
+
+    @Test
+    fun `商标符号剥离_Nlib官方名送搜前`() {
+        // 生产口径：NameVariants.kt 的 stripMarks
+        assertEquals(
+            "The Legend of Zelda: Breath of the Wild",
+            stripMarks("The Legend of Zelda™: Breath of the Wild"),
+        )
+        assertEquals("Game", stripMarks("Game®©"))
+        assertEquals("Hollow Knight", stripMarks("Hollow  Knight")) // 顺带压缩连续空白
+        assertEquals("plain", stripMarks("plain"))
+    }
+
+    @Test
+    fun `纯CJK判定_中日韩名不可直搜HLTB`() {
+        // 生产口径：NameVariants.kt 的 isCjkOnly（自 FinchViewModel 内联逻辑平移）
+        assertTrue(isCjkOnly("塞尔达传说"))
+        assertTrue(isCjkOnly("ゼルダの伝説"))
+        assertTrue(isCjkOnly("몬스터 헌터"))
+        assertTrue(isCjkOnly("异度神剑3")) // 数字混排仍算纯 CJK
+        assertTrue(!isCjkOnly("Hollow Knight"))
+        assertTrue(!isCjkOnly("怪物猎人Rise")) // 混拉丁可直搜
+        assertTrue(!isCjkOnly(""))
+    }
+
+    @Test
+    fun `假名判定_决定机翻方向`() {
+        // 生产口径：NameVariants.kt 的 hasKana（日文名走 ja→en，还原成功率高）
+        assertTrue(hasKana("ゼルダの伝説 ティアーズ"))
+        assertTrue(!hasKana("塞尔达传说"))
+        assertTrue(!hasKana("Zelda"))
+    }
+
+    @Test
+    fun `Steam中文反查_相似最高者胜出_全角数字归一`() {
+        // 生产口径：SteamStoreClient.pickAppId（中文名命中 Steam 中文索引 → appid 直查 HLTB）
+        val items = listOf(
+            SteamStoreClient.Result(1687950L, "女神异闻录5皇家版", null),
+            SteamStoreClient.Result(2254740L, "女神异闻录５ 战略版", null),
+        )
+        assertEquals(1687950L, SteamStoreClient.pickAppId("女神异闻录5 皇家版", items)?.appid)
+        assertEquals(2254740L, SteamStoreClient.pickAppId("女神异闻录５ 战略版", items)?.appid) // 全角数字归一后命中
+    }
+
+    @Test
+    fun `Steam中文反查_数字强制与低相似不认_宁漏勿错`() {
+        val items = listOf(
+            SteamStoreClient.Result(1687950L, "女神异闻录5皇家版", null),
+            SteamStoreClient.Result(367520L, "空洞骑士", null),
+        )
+        assertNull(SteamStoreClient.pickAppId("女神异闻录3", items)) // 3 代不认 5 代：appid 直查命中即写库
+        assertNull(SteamStoreClient.pickAppId("怪物猎人 崛起", items)) // 低相似不认
+        assertNull(SteamStoreClient.pickAppId("", items))
+    }
 }

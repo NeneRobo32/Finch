@@ -46,3 +46,31 @@ internal fun buildNameVariants(name: String): List<String> {
     }
     return out.distinct()
 }
+
+/**
+ * 剥商标符号（™®©）：Nlib 官方英文名/机翻结果常带商标
+ * （如 "The Legend of Zelda™: Breath of the Wild"），送 HLTB 按名搜前清掉，避免拉低相似度。
+ */
+internal fun stripMarks(name: String): String =
+    name.replace(Regex("[™®©]"), "").replace(Regex("\\s{2,}"), " ").trim()
+
+/**
+ * 是否纯 CJK 名（汉字/假名/韩文，允许数字空格标点混排）：HLTB 是纯英文库，
+ * 纯 CJK 名按名搜必 404，直搜只是浪费请求。
+ * （自 FinchViewModel.fetchHltbTimes 内联 isCjkOnly 平移，行为零变化）
+ */
+internal fun isCjkOnly(s: String): Boolean {
+    val t = s.replace(Regex("[0-9\\s\\p{Punct}]"), "")
+    return t.isNotEmpty() && t.all { c ->
+        c in '\u4e00'..'\u9fff' || c in '\u3400'..'\u4dbf' ||
+            c in '\u3040'..'\u309f' || c in '\u30a0'..'\u30ff' ||
+            c in '\uac00'..'\ud7af'
+    }
+}
+
+/**
+ * 是否含假名（日文名）：机翻选 ja→en 方向——日文名多为音译，
+ * 还原英文名的成功率远高于中文直译（如「異度神劍」直译成 Divergent Sword 就废了）。
+ */
+internal fun hasKana(s: String): Boolean =
+    s.any { it in '\u3040'..'\u309f' || it in '\u30a0'..'\u30ff' }

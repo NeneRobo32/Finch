@@ -69,6 +69,32 @@ object SteamStoreClient {
         return out
     }
 
+    /**
+     * 中文名 → Steam 候选匹配口径（纯逻辑，可单测）：Steam 中文索引能命中中文库名，
+     * 取相似度最高的候选（门槛 0.55 + 数字强制）。
+     * 命中后可拿 appid 直查 HLTB 中转 /steam/<appid>，绕开 HLTB 的英文名匹配。
+     * 数字强制比按名搜（-0.1 惩罚）更严、直接否决：appid 直查命中即写库，
+     * 「女神异闻录3」绝不能写成 5 代的三围。罗马数字/汉字数字名（XI/八）会因此漏配，
+     * 由原名/机翻等下级来源兜底——宁漏勿错。
+     */
+    internal fun pickAppId(query: String, items: List<Result>): Result? {
+        val q = query.trim()
+        if (q.isBlank()) return null
+        val qNums = digitTokens(q)
+        return items
+            .map { it to HltbProxyClient.similarity(q, it.name, emptySet()) }
+            .filter { (hit, sim) -> sim >= 0.55 && qNums.all { it in digitTokens(hit.name) } }
+            .maxByOrNull { it.second }
+            ?.first
+    }
+
+    /** 数字词口径（纯逻辑，可单测）：全角数字归一成半角后抠连续数字段（「女神异闻录５」→ {"5"}） */
+    internal fun digitTokens(s: String): Set<String> {
+        val half = s.map { c -> if (c in '０'..'９') (c.code - 0xFF10 + 0x30).toChar() else c }
+            .joinToString("")
+        return Regex("\\d+").findAll(half).map { it.value }.toSet()
+    }
+
     /** 商店「即将推出」+「新上架」（featuredcategories 的 coming_soon + new_releases 合并去重） */
     suspend fun fetchComingSoon(): List<ComingSoonGame> {
         // 主 URL 失败自动试备用（featured/comingsoon 编辑精选——量少但稳定）

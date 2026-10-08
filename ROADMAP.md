@@ -1,7 +1,7 @@
 # Finch 路线图
 
 基线：`v0.15.12`（DB v15 不变，versionCode 66）。
-IGDB 已整体移除（国内直连不通）；HLTB 改走 Crashdummy 中转 API（Steam 直查+Nlib 英文名+按名搜，默认开、可一键关）。
+IGDB 已整体移除（国内直连不通）；HLTB 改走 Crashdummy 中转 API（Steam 直查+Nlib 英文名+按名搜，默认开、可一键关）；非英文库名走英文名解析链换英文线索再搜（Steam 中文反查/Bangumi 原名/eShop 英文段/机翻兜底，v0.15.15）。
 下阶段主题：**让数据更安全 → 让留存更有趣**。
 
 ## 规划原则

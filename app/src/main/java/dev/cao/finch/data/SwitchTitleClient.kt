@@ -25,6 +25,7 @@ object SwitchTitleClient {
     private const val UA = "finch/0.15 (Android; game time tracker)"
 
     private val TID_RE = Regex("^[0-9a-fA-F]{16}$")
+    private val TID_PREFIX_RE = Regex("^[0-9a-fA-F]{16}")
 
     /** 是否合法 TitleID（16 位十六进制，去掉首尾空白后判定） */
     fun isTitleId(s: String?): Boolean {
@@ -33,12 +34,21 @@ object SwitchTitleClient {
     }
 
     /**
+     * TitleID 变体归一（纯逻辑，可单测）：Moon 的 applicationId 偶有带后缀变体
+     * （如 "0100E95004038000_002"），取开头 16 位十六进制并统一大写；
+     * 短 id / 纯数字 nsuId 等非 TitleID 形态返回 null（不发请求，调用方回退老链路）。
+     */
+    internal fun normalizeTitleId(raw: String?): String? {
+        val s = raw?.trim().orEmpty()
+        return TID_PREFIX_RE.find(s)?.value?.uppercase()
+    }
+
+    /**
      * 按 TitleID 取官方英文名；非法/未知/失败返回 null（调用方回退老链路）。
-     * 返回的名字保证非空且含拉丁字母，否则按失败处理。
+     * 返回的名字保证非空且含拉丁字母，否则按失败处理；商标符号（™®©）剥掉再送 HLTB 匹配。
      */
     fun fetchEnglishName(switchAppId: String?): String? {
-        if (!isTitleId(switchAppId)) return null
-        val tid = switchAppId!!.trim().uppercase()
+        val tid = normalizeTitleId(switchAppId) ?: return null
         val req = Request.Builder()
             .url("$BASE/nx/$tid?lang=en&fields=name")
             .header("User-Agent", UA)
@@ -51,7 +61,9 @@ object SwitchTitleClient {
         } catch (_: Exception) {
             return null
         }
-        return parseName(json)?.takeIf { it.length >= 2 && it.any { c -> c in 'A'..'Z' || c in 'a'..'z' } }
+        return parseName(json)
+            ?.let { stripMarks(it) }
+            ?.takeIf { it.length >= 2 && it.any { c -> c in 'A'..'Z' || c in 'a'..'z' } }
     }
 
     /** 纯逻辑：从已抠出的 name 字段判定可用性（空/缺字段返回 null，可单测） */

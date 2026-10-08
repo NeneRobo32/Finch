@@ -12,6 +12,8 @@ import dev.cao.finch.data.SessionWithGame
 import dev.cao.finch.data.SwitchTitleClient
 import dev.cao.finch.data.SyncEngine
 import dev.cao.finch.data.buildNameVariants
+import dev.cao.finch.data.hasKana
+import dev.cao.finch.data.isCjkOnly
 import dev.cao.finch.data.snapRefForCompleted
 import dev.cao.finch.timer.TimerServiceBridge
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -182,7 +184,9 @@ class FinchViewModel(app: Application) : AndroidViewModel(app) {
      * HLTB 自动获取（v0.15.6 起走中转 API，不再直连 HLTB/Bangumi）：
      * 1) 手动贴的 HLTB id/链接（最准，永远优先）
      * 2) Steam 游戏：`GET 中转/steam/<appid>` 直查（一次命中）
-     * 3) 按名搜：`POST 中转/hltb/search`（数字强制匹配，相似度 ≥0.4）
+     * 3) 按名搜：`POST 中转/hltb/search`（数字强制匹配，相似度 ≥0.4）。
+     *    HLTB 是纯英文库（只认英文名），中文/日文库名先走英文名解析链换到英文线索
+     *    （Nlib / Steam 中文反查 / Bangumi 原名 / eShop 英文段 / MyMemory 机翻，逐级兜底）
      * 成功写库（三围），返回 Result.success(times)；失败返回 Result.failure(原因)。
      * 开关关闭时直接失败（UI 引导手动填，不发任何包）。
      */
@@ -235,11 +239,15 @@ class FinchViewModel(app: Application) : AndroidViewModel(app) {
                     return@launch
                 }
             }
-            // 3) 按名搜（多查询词轮询，Switch TitleID 联动在前）：
-            // Switch 库名可能是纯中文（家长监护 title 按机器语言），HLTB 是英文库，中文直搜必 404。
-            // 顺序：Nlib 英文名（TitleID 精确翻译，免配置）→ 原名 → 剥尾巴变体 →
-            //       eShop 英文名联动 → 中转搜英文词。
-            // Nlib 直查（Switch 专用）：switchAppId 是 16 位 TitleID 时，一次 GET 拿官方英文名；
+            // 3) 英文名解析 + 按名搜。HLTB 是纯英文库（只认英文名），中文/日文库名直搜必 404，
+            // 非英文库名必须先换到英文线索。来源优先级（各自静默失败，逐级兜底）：
+            //   a) Nlib 官方英文名（Switch TitleID 精确翻译，免配置）→ 直接按名搜
+            //   b) Steam 中文反查（跨平台第三方游戏）：中文名命中 Steam 中文索引 →
+            //      拿 appid 直查中转 /steam/<appid>，绕开 HLTB 名字匹配，一次命中最准
+            //   c) Bangumi 原名（日/英）：拉丁原名直接搜；日文原名拿去 eShop 日区换英文段
+            //   d) eShop 英文段（查询词需含假名/拉丁；纯中文名搜日区必空，跳过省请求）
+            //   e) MyMemory 机翻兜底：中/日文名机翻成英文做候选（错译只导致搜不到，极少写错）
+            // Nlib 直查（Switch 专用）：switchAppId 归一出 16 位 TitleID 时，一次 GET 拿官方英文名；
             // 非法格式/未知/超时全部返回 null，静默回退按名搜。
             val nlibName: String? = if (game.platform == dev.cao.finch.data.Platform.SWITCH) {
                 try {
@@ -265,18 +273,57 @@ class FinchViewModel(app: Application) : AndroidViewModel(app) {
                 }
                 // Nlib 有名但中转搜不到：把英文名也加入后续轮询（剥尾巴可能再救一次）
             }
-            val queries = linkedSetOf<String>()
-            if (nlibName != null && nlibName.length >= 3) queries += nlibName
-            // 纯中文名直接跳过（中转必 404，还浪费一次请求；eShop 联动会产出英文词）
-            // 判定：去掉数字空格后全是 CJK/假名/韩文 → 纯 CJK 名
-            fun isCjkOnly(s: String): Boolean {
-                val t = s.replace(Regex("[0-9\\s\\p{Punct}]"), "")
-                return t.isNotEmpty() && t.all { c ->
-                    c in '\u4e00'..'\u9fff' || c in '\u3400'..'\u4dbf' ||
-                        c in '\u3040'..'\u309f' || c in '\u30a0'..'\u30ff' ||
-                        c in '\uac00'..'\ud7af'
+            // b) Steam 中文反查（纯中文库名且无 steamAppId——有 appid 的步骤 2 已直查过）：
+            //    Steam 中文索引能命中中文名，命中 appid 后 /steam/<appid> 直查一次拿三围，
+            //    完全绕开 HLTB 的英文名匹配（P5R/怪猎等第三方跨平台游戏的最短路径）
+            if (game.steamAppId == null && isCjkOnly(game.name) && !hasKana(game.name)) {
+                val steamItems = try {
+                    kotlinx.coroutines.withTimeoutOrNull(5_000) {
+                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                            dev.cao.finch.data.SteamStoreClient.search(game.name)
+                        }
+                    }
+                } catch (_: Exception) {
+                    null
+                }
+                val steamHit = steamItems?.let { dev.cao.finch.data.SteamStoreClient.pickAppId(game.name, it) }
+                if (steamHit != null) {
+                    val times = try {
+                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                            dev.cao.finch.data.HltbProxyClient.fetchBySteam(steamHit.appid)
+                        }
+                    } catch (_: Exception) {
+                        null
+                    }
+                    if (times != null && times.any()) {
+                        setHltbTimes(id, times.mainMin, times.extraMin, times.completeMin)
+                        onDone(Result.success(times))
+                        return@launch
+                    }
                 }
             }
+            // c) Bangumi 原名联动（纯 CJK 库名）：Result.name 是日/英原名（name_cn 才是中文）。
+            //    与库名相似度 ≥0.5 的最像条目才算同一游戏（防同名/系列误配）；
+            //    手机直连 api.bgm.tv 可能超时（v0.15.11），单级 5s 预算，超时静默跳过
+            val originalName: String? = if (isCjkOnly(game.name)) {
+                val hits = try {
+                    kotlinx.coroutines.withTimeoutOrNull(5_000) {
+                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                            dev.cao.finch.data.BangumiClient.search(game.name)
+                        }
+                    }.orEmpty()
+                } catch (_: Exception) {
+                    emptyList()
+                }
+                hits.filter {
+                    dev.cao.finch.data.HltbProxyClient.similarity(game.name, it.nameCn ?: it.name, emptySet()) >= 0.5
+                }.maxByOrNull {
+                    dev.cao.finch.data.HltbProxyClient.similarity(game.name, it.nameCn ?: it.name, emptySet())
+                }?.name?.trim()?.takeIf { mv -> mv.isNotBlank() }
+            } else null
+            val queries = linkedSetOf<String>()
+            if (nlibName != null && nlibName.length >= 3) queries += nlibName
+            // 纯 CJK 名直接跳过（中转必 404，还浪费一次请求；下方英文名来源会产出英文词）
             if (!isCjkOnly(game.name)) queries += game.name
             // 去括号副标题
             game.name.split(Regex("\\s+[\\(\\[]")).firstOrNull()?.trim()?.takeIf { it.length >= 3 }?.let {
@@ -284,18 +331,37 @@ class FinchViewModel(app: Application) : AndroidViewModel(app) {
             }
             // 去平台后缀词（Switch/PS5/Edition/Version/Remaster 等尾巴）
             queries += buildNameVariants(game.name).filter { !isCjkOnly(it) }
-            // eShop 英文名联动：拿库名去日区搜，只取拉丁英文段
-            // （searchTitles 已过滤纯日文/中文标题；英文段再经中转模糊匹配即可命中）
-            try {
-                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                    EshopClient.searchTitles(game.name)
-                }.take(3).forEach { en ->
-                    if (en.length >= 3) queries += en
+            // c) 拉丁原名直接进轮询（日文原名不直搜，走下面 eShop 换英文段）
+            originalName?.takeIf { !isCjkOnly(it) && it.length >= 3 }?.let { queries += it }
+            // d) eShop 英文名联动：日区标题是「英文名（日文名）」格式，只取拉丁英文段
+            //    （searchTitles 已过滤纯日文/中文标题）。查询词用日文原名最佳、拉丁名次之，
+            //    纯中文名在日区索引里必空——这就是 v0.15.14 之前联动失效的原因
+            val eshopKey = listOfNotNull(originalName, game.name).firstOrNull { !isCjkOnly(it) || hasKana(it) }
+            if (eshopKey != null) {
+                try {
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        EshopClient.searchTitles(eshopKey)
+                    }.take(3).forEach { en ->
+                        if (en.length >= 3) queries += en
+                    }
+                } catch (_: Exception) {
                 }
-            } catch (_: Exception) {
             }
-            // Bangumi 中文名兜底已删除（v0.15.11）：手机直连 api.bgm.tv/bgm.tv 超时，
-            // 且 HLTB 纯英文库中文别名命中率≈0，留着只浪费两次请求。
+            // e) MyMemory 机翻兜底（最后一级）：官方英文名全落空时，把中/日文名机翻成英文试匹配。
+            //    机翻只是候选，最终仍要过相似度 ≥0.4 + 数字强制才写库；单级 5s 预算
+            //    （v0.15.11 删除的「Bangumi 中文名兜底」只送中文词、命中率≈0，此处改为换英文线索）
+            if (isCjkOnly(game.name)) {
+                val mt = try {
+                    kotlinx.coroutines.withTimeoutOrNull(5_000) {
+                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                            dev.cao.finch.data.TitleTranslateClient.candidates(game.name)
+                        }
+                    }.orEmpty()
+                } catch (_: Exception) {
+                    emptyList()
+                }
+                mt.filter { it.length >= 3 }.forEach { queries += it }
+            }
             var best: dev.cao.finch.data.HltbProxyClient.Hit? = null
             var bestQuery = game.name
             val tried = mutableListOf<String>()
