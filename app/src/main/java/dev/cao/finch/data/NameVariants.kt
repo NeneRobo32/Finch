@@ -56,13 +56,32 @@ internal fun stripMarks(name: String): String =
     name.replace(Regex("[\\p{So}\\p{Sk}]"), "").replace(Regex("\\s{2,}"), " ").trim()
 
 /**
- * 名字里是否有拉丁字母——这才是 HLTB 能不能按名搜的真正标准（HLTB 是纯英文库，
- * 没有拉丁字母的中/日/韩文名直搜必 404，直搜只是浪费请求）。
- * 不能用「纯 CJK」判定代替：☆/♪/～/全角空格等符号混进名字时（如「少女☆歌劇 レヴュースタァライト」），
- * 「纯 CJK」判定会误判为可直搜——原名进了查询词、英文名来源全被跳过（v0.15.15 的教训）。
+ * 名字里是否有拉丁字母。注意这只是素材判定，不能单独当「HLTB 可直搜」用——
+ * 「ゼルダの伝説 …Nintendo Switch 2 Edition」「空の軌跡 the 1st」这类名字尾巴/片段带拉丁词，
+ * 直搜判定请用 [isHltbSearchable]。
  */
 internal fun hasLatin(s: String): Boolean =
     s.any { it in 'A'..'Z' || it in 'a'..'z' }
+
+/** 是否含 CJK 字符（汉字/假名/韩文）：名字掺了这些就不能指望 HLTB 按名搜命中 */
+internal fun hasCjk(s: String): Boolean =
+    s.any {
+        it in '\u4e00'..'\u9fff' || it in '\u3400'..'\u4dbf' || it in '\uf900'..'\ufaff' ||
+            it in '\u3040'..'\u309f' || it in '\u30a0'..'\u30ff' ||
+            it in '\uac00'..'\ud7af'
+    }
+
+/**
+ * 名字能否直接送 HLTB 按名搜：剥掉平台/版本尾巴（"Nintendo Switch 2 Edition" 等）后，
+ * 剩余核心名必须是纯拉丁。只看「有没有拉丁字母」不够（v0.15.16 的教训）：
+ * Switch 2 升级版「ゼルダの伝説 …Nintendo Switch 2 Edition」、带序数的「英雄伝説 空の軌跡 the 1st」
+ * 只是尾巴/片段带拉丁词，主体仍是中日韩文，直搜必 404——这些名字要走英文名解析链
+ * （Steam 反查/Bangumi 原名/机翻）换成真英文名，且各来源的查询词也应剥掉尾巴再发。
+ */
+internal fun isHltbSearchable(name: String): Boolean {
+    val core = stripPlatformTails(name)
+    return hasLatin(core) && !hasCjk(core)
+}
 
 /**
  * 是否含假名（日文名）：机翻选 ja→en 方向——日文名多为音译，

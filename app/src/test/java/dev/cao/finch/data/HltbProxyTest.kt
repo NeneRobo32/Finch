@@ -159,18 +159,26 @@ class HltbProxyTest {
     }
 
     @Test
-    fun `拉丁判定_无拉丁名字不可直搜HLTB`() {
-        // 生产口径：NameVariants.kt 的 hasLatin（HLTB 能否按名搜的真正标准）。
-        // 回归用例：v0.15.15 的「纯 CJK」判定会把带 ☆ 等符号的日文名误判为可直搜——
-        // 原名进了查询词、Steam/Bangumi/机翻三级全被跳过（用户实测「试了日文中文，就是没有英文」）
-        assertTrue(hasLatin("Hollow Knight"))
-        assertTrue(hasLatin("怪物猎人Rise")) // 混拉丁可直搜
-        assertTrue(!hasLatin("塞尔达传说"))
-        assertTrue(!hasLatin("ゼルダの伝説"))
-        assertTrue(!hasLatin("몬스터 헌터"))
-        assertTrue(!hasLatin("异度神剑3")) // 数字不是拉丁字母，HLTB 搜不了
-        assertTrue(!hasLatin("少女☆歌劇 レヴュースタァライト")) // 符号混排仍是不可直搜
-        assertTrue(!hasLatin(""))
+    fun `HLTB可直搜判定_剥尾巴后须纯拉丁`() {
+        // 生产口径：NameVariants.kt 的 isHltbSearchable（剥平台尾巴后核心名须纯拉丁）。
+        // 回归用例 1（v0.15.15）：带 ☆ 等符号的日文名曾被「纯 CJK」判定误判为可直搜。
+        // 回归用例 2（v0.15.16）：只看「有没有拉丁字母」会把尾巴/片段带拉丁词的中日韩名误判为可直搜——
+        //   Switch 2 升级版「…Nintendo Switch 2 Edition」、带序数的「空の軌跡 the 1st」，
+        //   直搜必 404，必须走英文名解析链
+        assertTrue(isHltbSearchable("Hollow Knight"))
+        assertTrue(isHltbSearchable("Hollow Knight Switch Edition")) // 剥尾巴后核心名纯拉丁 ✓
+        assertTrue(isHltbSearchable("Xenoblade2")) // 括号副标题切出来的核心名 ✓
+        assertTrue(!isHltbSearchable("塞尔达传说"))
+        assertTrue(!isHltbSearchable("异度神剑3"))
+        assertTrue(!isHltbSearchable("怪物猎人Rise")) // 中日混排主体是中文，直搜必 404
+        assertTrue(!isHltbSearchable("少女☆歌劇 レヴュースタァライト"))
+        assertTrue(!isHltbSearchable("ゼルダの伝説 ティアーズ オブ ザ キングダム Nintendo Switch 2 Edition"))
+        assertTrue(!isHltbSearchable("Xenoblade2 (ゼノブレイド2) Nintendo Switch 2 Edition")) // 核心名混假名
+        assertTrue(!isHltbSearchable("英雄伝説 空の軌跡 the 1st")) // 尾巴带 1st 不算可直搜
+        assertTrue(!isHltbSearchable(""))
+        // 素材判定：拉丁/CJK 有无（isHltbSearchable 的组成件）
+        assertTrue(hasLatin("1st") && hasLatin("Zelda"))
+        assertTrue(hasCjk("空の軌跡") && hasCjk("塞尔达") && hasCjk("몬스터") && !hasCjk("Zelda"))
     }
 
     @Test

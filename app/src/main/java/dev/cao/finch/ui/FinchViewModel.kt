@@ -14,7 +14,9 @@ import dev.cao.finch.data.SyncEngine
 import dev.cao.finch.data.buildNameVariants
 import dev.cao.finch.data.hasKana
 import dev.cao.finch.data.hasLatin
+import dev.cao.finch.data.isHltbSearchable
 import dev.cao.finch.data.snapRefForCompleted
+import dev.cao.finch.data.stripPlatformTails
 import dev.cao.finch.timer.TimerServiceBridge
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -249,6 +251,9 @@ class FinchViewModel(app: Application) : AndroidViewModel(app) {
             //   e) MyMemory 机翻兜底：中/日文名机翻成英文做候选（错译只导致搜不到，极少写错）
             // Nlib 直查（Switch 专用）：switchAppId 归一出 16 位 TitleID 时，一次 GET 拿官方英文名；
             // 非法格式/未知/超时全部返回 null，静默回退按名搜。
+            // baseName：剥掉平台/版本尾巴的核心名——英文名解析链各来源的查询词一律用它
+            // （带 "Nintendo Switch 2 Edition" 尾巴的全名去搜 Steam/Bangumi/机翻都对不上）
+            val baseName = stripPlatformTails(game.name)
             val nlibName: String? = if (game.platform == dev.cao.finch.data.Platform.SWITCH) {
                 try {
                     kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
@@ -273,20 +278,20 @@ class FinchViewModel(app: Application) : AndroidViewModel(app) {
                 }
                 // Nlib 有名但中转搜不到：把英文名也加入后续轮询（剥尾巴可能再救一次）
             }
-            // b) Steam 中文反查（无拉丁字母的库名且无 steamAppId——有 appid 的步骤 2 已直查过）：
+            // b) Steam 中文反查（名字不可直搜且无 steamAppId——有 appid 的步骤 2 已直查过）：
             //    Steam 中文索引能命中中文名，命中 appid 后 /steam/<appid> 直查一次拿三围，
             //    完全绕开 HLTB 的英文名匹配（P5R/怪猎等第三方跨平台游戏的最短路径）
-            if (game.steamAppId == null && !hasLatin(game.name)) {
+            if (game.steamAppId == null && !isHltbSearchable(game.name)) {
                 val steamItems = try {
                     kotlinx.coroutines.withTimeoutOrNull(5_000) {
                         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                            dev.cao.finch.data.SteamStoreClient.search(game.name)
+                            dev.cao.finch.data.SteamStoreClient.search(baseName)
                         }
                     }
                 } catch (_: Exception) {
                     null
                 }
-                val steamHit = steamItems?.let { dev.cao.finch.data.SteamStoreClient.pickAppId(game.name, it) }
+                val steamHit = steamItems?.let { dev.cao.finch.data.SteamStoreClient.pickAppId(baseName, it) }
                 if (steamHit != null) {
                     val times = try {
                         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
@@ -302,43 +307,43 @@ class FinchViewModel(app: Application) : AndroidViewModel(app) {
                     }
                 }
             }
-            // c) Bangumi 原名联动（无拉丁字母的库名）：Result.name 是日/英原名（name_cn 才是中文）。
-            //    与库名相似度 ≥0.5 的最像条目才算同一游戏（防同名/系列误配）；
+            // c) Bangumi 原名联动（名字不可直搜）：Result.name 是日/英原名（name_cn 才是中文）。
+            //    与核心名相似度 ≥0.5 的最像条目才算同一游戏（防同名/系列误配）；
             //    手机直连 api.bgm.tv 可能超时（v0.15.11），单级 5s 预算，超时静默跳过
-            val originalName: String? = if (!hasLatin(game.name)) {
+            val originalName: String? = if (!isHltbSearchable(game.name)) {
                 val hits = try {
                     kotlinx.coroutines.withTimeoutOrNull(5_000) {
                         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                            dev.cao.finch.data.BangumiClient.search(game.name)
+                            dev.cao.finch.data.BangumiClient.search(baseName)
                         }
                     }.orEmpty()
                 } catch (_: Exception) {
                     emptyList()
                 }
                 hits.filter {
-                    dev.cao.finch.data.HltbProxyClient.similarity(game.name, it.nameCn ?: it.name, emptySet()) >= 0.5
+                    dev.cao.finch.data.HltbProxyClient.similarity(baseName, it.nameCn ?: it.name, emptySet()) >= 0.5
                 }.maxByOrNull {
-                    dev.cao.finch.data.HltbProxyClient.similarity(game.name, it.nameCn ?: it.name, emptySet())
+                    dev.cao.finch.data.HltbProxyClient.similarity(baseName, it.nameCn ?: it.name, emptySet())
                 }?.name?.trim()?.takeIf { mv -> mv.isNotBlank() }
             } else null
             val queries = linkedSetOf<String>()
             if (nlibName != null && nlibName.length >= 3) queries += nlibName
-            // 无拉丁字母的库名直接跳过（中转必 404，还浪费一次请求；下方英文名来源会产出英文词）。
-            // 判定必须看「有没有拉丁字母」而不是「是不是纯 CJK」：带 ☆/♪/～ 等符号的中日韩名
-            // （如「少女☆歌劇 レヴュースタァライト」）按纯 CJK 判会漏进查询词并把英文名来源全跳过
-            if (hasLatin(game.name)) queries += game.name
+            // 只送「剥尾巴后纯拉丁」的名字直搜（isHltbSearchable）：中日韩文名、
+            // 「…Nintendo Switch 2 Edition」「空の軌跡 the 1st」这类尾巴带拉丁词的名字直搜必 404，
+            // 不进查询词（英文名来源会产出真正的英文词）
+            if (isHltbSearchable(game.name)) queries += game.name
             // 去括号副标题
             game.name.split(Regex("\\s+[\\(\\[]")).firstOrNull()?.trim()?.takeIf { it.length >= 3 }?.let {
-                if (hasLatin(it)) queries += it
+                if (isHltbSearchable(it)) queries += it
             }
             // 去平台后缀词（Switch/PS5/Edition/Version/Remaster 等尾巴）
-            queries += buildNameVariants(game.name).filter { hasLatin(it) }
+            queries += buildNameVariants(game.name).filter { isHltbSearchable(it) }
             // c) 拉丁原名直接进轮询（日文原名不直搜，走下面 eShop 换英文段）
-            originalName?.takeIf { hasLatin(it) && it.length >= 3 }?.let { queries += it }
+            originalName?.takeIf { isHltbSearchable(it) && it.length >= 3 }?.let { queries += it }
             // d) eShop 英文名联动：日区标题是「英文名（日文名）」格式，只取拉丁英文段
-            //    （searchTitles 已过滤纯日文/中文标题）。查询词用日文原名最佳、拉丁名次之，
+            //    （searchTitles 已过滤纯日文/中文标题）。查询词用日文原名最佳、剥尾巴的拉丁名次之，
             //    无拉丁/假名的查询词（纯中文名）在日区索引里必空——跳过省一次请求
-            val eshopKey = listOfNotNull(originalName, game.name).firstOrNull { hasLatin(it) || hasKana(it) }
+            val eshopKey = listOfNotNull(originalName, baseName).firstOrNull { hasLatin(it) || hasKana(it) }
             if (eshopKey != null) {
                 try {
                     kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
@@ -352,11 +357,11 @@ class FinchViewModel(app: Application) : AndroidViewModel(app) {
             // e) MyMemory 机翻兜底（最后一级）：官方英文名全落空时，把中/日文名机翻成英文试匹配。
             //    机翻只是候选，最终仍要过相似度 ≥0.4 + 数字强制才写库；单级 5s 预算
             //    （v0.15.11 删除的「Bangumi 中文名兜底」只送中文词、命中率≈0，此处改为换英文线索）
-            if (!hasLatin(game.name)) {
+            if (!isHltbSearchable(game.name)) {
                 val mt = try {
                     kotlinx.coroutines.withTimeoutOrNull(5_000) {
                         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                            dev.cao.finch.data.TitleTranslateClient.candidates(game.name)
+                            dev.cao.finch.data.TitleTranslateClient.candidates(baseName)
                         }
                     }.orEmpty()
                 } catch (_: Exception) {
