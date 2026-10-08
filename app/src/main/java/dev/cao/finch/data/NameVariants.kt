@@ -48,25 +48,21 @@ internal fun buildNameVariants(name: String): List<String> {
 }
 
 /**
- * 剥商标符号（™®©）：Nlib 官方英文名/机翻结果常带商标
- * （如 "The Legend of Zelda™: Breath of the Wild"），送 HLTB 按名搜前清掉，避免拉低相似度。
+ * 剥符号噪声（™®©☆★♪等 Symbol 类 + 修饰符）：Nlib 官方英文名/机翻结果常带商标符号，
+ * 库名里的 ☆/♪ 等装饰符号会拉低相似度（如 "The Legend of Zelda™: Breath of the Wild"），
+ * 送 HLTB 匹配前清掉并压缩连续空白。
  */
 internal fun stripMarks(name: String): String =
-    name.replace(Regex("[™®©]"), "").replace(Regex("\\s{2,}"), " ").trim()
+    name.replace(Regex("[\\p{So}\\p{Sk}]"), "").replace(Regex("\\s{2,}"), " ").trim()
 
 /**
- * 是否纯 CJK 名（汉字/假名/韩文，允许数字空格标点混排）：HLTB 是纯英文库，
- * 纯 CJK 名按名搜必 404，直搜只是浪费请求。
- * （自 FinchViewModel.fetchHltbTimes 内联 isCjkOnly 平移，行为零变化）
+ * 名字里是否有拉丁字母——这才是 HLTB 能不能按名搜的真正标准（HLTB 是纯英文库，
+ * 没有拉丁字母的中/日/韩文名直搜必 404，直搜只是浪费请求）。
+ * 不能用「纯 CJK」判定代替：☆/♪/～/全角空格等符号混进名字时（如「少女☆歌劇 レヴュースタァライト」），
+ * 「纯 CJK」判定会误判为可直搜——原名进了查询词、英文名来源全被跳过（v0.15.15 的教训）。
  */
-internal fun isCjkOnly(s: String): Boolean {
-    val t = s.replace(Regex("[0-9\\s\\p{Punct}]"), "")
-    return t.isNotEmpty() && t.all { c ->
-        c in '\u4e00'..'\u9fff' || c in '\u3400'..'\u4dbf' ||
-            c in '\u3040'..'\u309f' || c in '\u30a0'..'\u30ff' ||
-            c in '\uac00'..'\ud7af'
-    }
-}
+internal fun hasLatin(s: String): Boolean =
+    s.any { it in 'A'..'Z' || it in 'a'..'z' }
 
 /**
  * 是否含假名（日文名）：机翻选 ja→en 方向——日文名多为音译，
@@ -74,3 +70,7 @@ internal fun isCjkOnly(s: String): Boolean {
  */
 internal fun hasKana(s: String): Boolean =
     s.any { it in '\u3040'..'\u309f' || it in '\u30a0'..'\u30ff' }
+
+/** 是否含谚文（韩文名）：机翻选 ko→en 方向（按中文送翻韩文名基本出不来可用结果） */
+internal fun hasHangul(s: String): Boolean =
+    s.any { it in '\uac00'..'\ud7af' || it in '\u1100'..'\u11ff' || it in '\u3130'..'\u318f' }

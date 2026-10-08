@@ -13,7 +13,7 @@ import dev.cao.finch.data.SwitchTitleClient
 import dev.cao.finch.data.SyncEngine
 import dev.cao.finch.data.buildNameVariants
 import dev.cao.finch.data.hasKana
-import dev.cao.finch.data.isCjkOnly
+import dev.cao.finch.data.hasLatin
 import dev.cao.finch.data.snapRefForCompleted
 import dev.cao.finch.timer.TimerServiceBridge
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -273,10 +273,10 @@ class FinchViewModel(app: Application) : AndroidViewModel(app) {
                 }
                 // Nlib 有名但中转搜不到：把英文名也加入后续轮询（剥尾巴可能再救一次）
             }
-            // b) Steam 中文反查（纯中文库名且无 steamAppId——有 appid 的步骤 2 已直查过）：
+            // b) Steam 中文反查（无拉丁字母的库名且无 steamAppId——有 appid 的步骤 2 已直查过）：
             //    Steam 中文索引能命中中文名，命中 appid 后 /steam/<appid> 直查一次拿三围，
             //    完全绕开 HLTB 的英文名匹配（P5R/怪猎等第三方跨平台游戏的最短路径）
-            if (game.steamAppId == null && isCjkOnly(game.name) && !hasKana(game.name)) {
+            if (game.steamAppId == null && !hasLatin(game.name)) {
                 val steamItems = try {
                     kotlinx.coroutines.withTimeoutOrNull(5_000) {
                         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
@@ -302,10 +302,10 @@ class FinchViewModel(app: Application) : AndroidViewModel(app) {
                     }
                 }
             }
-            // c) Bangumi 原名联动（纯 CJK 库名）：Result.name 是日/英原名（name_cn 才是中文）。
+            // c) Bangumi 原名联动（无拉丁字母的库名）：Result.name 是日/英原名（name_cn 才是中文）。
             //    与库名相似度 ≥0.5 的最像条目才算同一游戏（防同名/系列误配）；
             //    手机直连 api.bgm.tv 可能超时（v0.15.11），单级 5s 预算，超时静默跳过
-            val originalName: String? = if (isCjkOnly(game.name)) {
+            val originalName: String? = if (!hasLatin(game.name)) {
                 val hits = try {
                     kotlinx.coroutines.withTimeoutOrNull(5_000) {
                         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
@@ -323,20 +323,22 @@ class FinchViewModel(app: Application) : AndroidViewModel(app) {
             } else null
             val queries = linkedSetOf<String>()
             if (nlibName != null && nlibName.length >= 3) queries += nlibName
-            // 纯 CJK 名直接跳过（中转必 404，还浪费一次请求；下方英文名来源会产出英文词）
-            if (!isCjkOnly(game.name)) queries += game.name
+            // 无拉丁字母的库名直接跳过（中转必 404，还浪费一次请求；下方英文名来源会产出英文词）。
+            // 判定必须看「有没有拉丁字母」而不是「是不是纯 CJK」：带 ☆/♪/～ 等符号的中日韩名
+            // （如「少女☆歌劇 レヴュースタァライト」）按纯 CJK 判会漏进查询词并把英文名来源全跳过
+            if (hasLatin(game.name)) queries += game.name
             // 去括号副标题
             game.name.split(Regex("\\s+[\\(\\[]")).firstOrNull()?.trim()?.takeIf { it.length >= 3 }?.let {
-                if (!isCjkOnly(it)) queries += it
+                if (hasLatin(it)) queries += it
             }
             // 去平台后缀词（Switch/PS5/Edition/Version/Remaster 等尾巴）
-            queries += buildNameVariants(game.name).filter { !isCjkOnly(it) }
+            queries += buildNameVariants(game.name).filter { hasLatin(it) }
             // c) 拉丁原名直接进轮询（日文原名不直搜，走下面 eShop 换英文段）
-            originalName?.takeIf { !isCjkOnly(it) && it.length >= 3 }?.let { queries += it }
+            originalName?.takeIf { hasLatin(it) && it.length >= 3 }?.let { queries += it }
             // d) eShop 英文名联动：日区标题是「英文名（日文名）」格式，只取拉丁英文段
             //    （searchTitles 已过滤纯日文/中文标题）。查询词用日文原名最佳、拉丁名次之，
-            //    纯中文名在日区索引里必空——这就是 v0.15.14 之前联动失效的原因
-            val eshopKey = listOfNotNull(originalName, game.name).firstOrNull { !isCjkOnly(it) || hasKana(it) }
+            //    无拉丁/假名的查询词（纯中文名）在日区索引里必空——跳过省一次请求
+            val eshopKey = listOfNotNull(originalName, game.name).firstOrNull { hasLatin(it) || hasKana(it) }
             if (eshopKey != null) {
                 try {
                     kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
@@ -350,7 +352,7 @@ class FinchViewModel(app: Application) : AndroidViewModel(app) {
             // e) MyMemory 机翻兜底（最后一级）：官方英文名全落空时，把中/日文名机翻成英文试匹配。
             //    机翻只是候选，最终仍要过相似度 ≥0.4 + 数字强制才写库；单级 5s 预算
             //    （v0.15.11 删除的「Bangumi 中文名兜底」只送中文词、命中率≈0，此处改为换英文线索）
-            if (isCjkOnly(game.name)) {
+            if (!hasLatin(game.name)) {
                 val mt = try {
                     kotlinx.coroutines.withTimeoutOrNull(5_000) {
                         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {

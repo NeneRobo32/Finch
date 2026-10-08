@@ -21,8 +21,7 @@ object TitleTranslateClient {
 
     /** 库名 → 英文候选（主译文 + 翻译记忆库高匹配条目）；失败/超时返回空列表（调用方继续下一级） */
     suspend fun candidates(name: String): List<String> {
-        // 机翻方向：含假名走 ja→en（日文名多音译，还原成功率高），其余按 zh-CN→en
-        val src = if (hasKana(name)) "ja" else "zh-CN"
+        val src = sourceLang(name)
         val url = "$BASE?q=${java.net.URLEncoder.encode(name, "UTF-8")}&langpair=$src%7Cen"
         val req = Request.Builder()
             .url(url)
@@ -33,6 +32,17 @@ object TitleTranslateClient {
             resp.body?.string() ?: return emptyList()
         }
         return pickTranslations(json)
+    }
+
+    /**
+     * 机翻方向（纯逻辑，可单测）：含假名走 ja→en（日文名多音译，还原成功率高），
+     * 含谚文走 ko→en（按中文送翻韩文名出不来可用结果），其余按 zh-CN→en。
+     * 混排名按最具体的先判：日文名常混汉字，韩文名常混拉丁。
+     */
+    internal fun sourceLang(name: String): String = when {
+        hasKana(name) -> "ja"
+        hasHangul(name) -> "ko"
+        else -> "zh-CN"
     }
 
     /**

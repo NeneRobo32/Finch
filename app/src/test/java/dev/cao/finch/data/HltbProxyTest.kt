@@ -153,28 +153,39 @@ class HltbProxyTest {
             stripMarks("The Legend of Zelda™: Breath of the Wild"),
         )
         assertEquals("Game", stripMarks("Game®©"))
+        assertEquals("少女歌劇 レヴュースタァライト", stripMarks("少女☆歌劇 レヴュースタァライト")) // 装饰符号剥掉
         assertEquals("Hollow Knight", stripMarks("Hollow  Knight")) // 顺带压缩连续空白
         assertEquals("plain", stripMarks("plain"))
     }
 
     @Test
-    fun `纯CJK判定_中日韩名不可直搜HLTB`() {
-        // 生产口径：NameVariants.kt 的 isCjkOnly（自 FinchViewModel 内联逻辑平移）
-        assertTrue(isCjkOnly("塞尔达传说"))
-        assertTrue(isCjkOnly("ゼルダの伝説"))
-        assertTrue(isCjkOnly("몬스터 헌터"))
-        assertTrue(isCjkOnly("异度神剑3")) // 数字混排仍算纯 CJK
-        assertTrue(!isCjkOnly("Hollow Knight"))
-        assertTrue(!isCjkOnly("怪物猎人Rise")) // 混拉丁可直搜
-        assertTrue(!isCjkOnly(""))
+    fun `拉丁判定_无拉丁名字不可直搜HLTB`() {
+        // 生产口径：NameVariants.kt 的 hasLatin（HLTB 能否按名搜的真正标准）。
+        // 回归用例：v0.15.15 的「纯 CJK」判定会把带 ☆ 等符号的日文名误判为可直搜——
+        // 原名进了查询词、Steam/Bangumi/机翻三级全被跳过（用户实测「试了日文中文，就是没有英文」）
+        assertTrue(hasLatin("Hollow Knight"))
+        assertTrue(hasLatin("怪物猎人Rise")) // 混拉丁可直搜
+        assertTrue(!hasLatin("塞尔达传说"))
+        assertTrue(!hasLatin("ゼルダの伝説"))
+        assertTrue(!hasLatin("몬스터 헌터"))
+        assertTrue(!hasLatin("异度神剑3")) // 数字不是拉丁字母，HLTB 搜不了
+        assertTrue(!hasLatin("少女☆歌劇 レヴュースタァライト")) // 符号混排仍是不可直搜
+        assertTrue(!hasLatin(""))
     }
 
     @Test
-    fun `假名判定_决定机翻方向`() {
-        // 生产口径：NameVariants.kt 的 hasKana（日文名走 ja→en，还原成功率高）
+    fun `假名谚文判定_决定机翻方向`() {
+        // 生产口径：NameVariants.kt 的 hasKana/hasHangul + TitleTranslateClient.sourceLang
         assertTrue(hasKana("ゼルダの伝説 ティアーズ"))
         assertTrue(!hasKana("塞尔达传说"))
         assertTrue(!hasKana("Zelda"))
+        assertTrue(hasHangul("몬스터 헌터"))
+        assertTrue(!hasHangul("怪物猎人"))
+        // 机翻方向：日文名 ja→en（音译还原率高）、韩文名 ko→en、其余 zh-CN→en；混排名按最具体先判
+        assertEquals("ja", TitleTranslateClient.sourceLang("ゼルダの伝説 ティアーズ"))
+        assertEquals("ja", TitleTranslateClient.sourceLang("少女☆歌劇 レヴュースタァライト"))
+        assertEquals("ko", TitleTranslateClient.sourceLang("몬스터 헌터"))
+        assertEquals("zh-CN", TitleTranslateClient.sourceLang("怪物猎人 崛起"))
     }
 
     @Test
