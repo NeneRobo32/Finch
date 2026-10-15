@@ -315,8 +315,12 @@ private fun PsnImportCard(importViewModel: ImportViewModel) {
                         color = MaterialTheme.colorScheme.error,
                     )
                 }
-                Button(onClick = { importViewModel.syncPSN() }) {
-                    Text(if (psnState is ImportViewModel.SyncState.Running) "同步中…" else "同步 PSN 时长")
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = { importViewModel.syncPSN() }) {
+                        Text(if (psnState is ImportViewModel.SyncState.Running) "同步中…" else "同步 PSN 时长")
+                    }
+                    // 登出只走 VM 唯一入口（清 refresh_token + 置未登录），UI 不直写 VM 状态
+                    TextButton(onClick = { importViewModel.logoutPSN() }) { Text("退出账号") }
                 }
             }
             StateBanner(psnState)

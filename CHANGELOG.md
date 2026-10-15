@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.15.20 (2026-10-08)
+
+功能小修版（无 DB 变更）：
+
+- **新增（用户反馈）**：PSN 导入卡加「退出账号」（与 Switch 卡同款入口）——
+  已授权态下同步按钮旁一键登出，清 `psnRefreshToken` 与过期时间（`writeSecret("")` 即删条目，
+  加密存储随清）、置未登录；登出走 `ImportViewModel.logoutPSN()` 唯一入口，UI 不直写状态
+- **测试**：纯 UI/VM 入口新增，沿用现有单测口径（90 个通过；MigrationTest 11 个仍受
+  开发机 Robolectric+sqlite4java 运行时故障阻塞，与本改动无关，环境修复后补跑）
+
 ## 0.15.19 (2026-10-08)
 
 UI 修复版（无 DB 变更）：

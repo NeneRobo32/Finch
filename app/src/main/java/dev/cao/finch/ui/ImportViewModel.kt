@@ -297,4 +297,11 @@ class ImportViewModel(app: Application) : AndroidViewModel(app) {
         settings.switchNaId = ""
         _switchLoggedIn.value = false
     }
+
+    /** PSN 登出唯一入口：清 refresh_token 与过期时间 + 置未登录（UI 不直写 _psnLoggedIn） */
+    fun logoutPSN() {
+        settings.psnRefreshToken = ""
+        settings.psnRefreshExpiresAtMillis = 0L
+        _psnLoggedIn.value = false
+    }
 }
