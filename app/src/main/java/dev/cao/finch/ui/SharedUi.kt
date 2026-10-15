@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.TextAutoSize
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Computer
 import androidx.compose.material.icons.filled.DevicesOther
@@ -26,6 +27,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
 import dev.cao.finch.data.Platform
@@ -122,7 +124,16 @@ internal fun StatBox(label: String, value: String, modifier: Modifier = Modifier
         ) {
             Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.height(2.dp))
-            Text(value, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+            // 值单行 + 自适应缩字号：长值（最近游玩的完整日期 "2026-10-04"、"6066h 7m"）在
+            // 1/3 屏宽的格子里按 titleLarge 会折行断字（2026-10-08 用户截图）；
+            // maxFontSize 锁 titleLarge 本值（约 22sp）——短值观感不变，只把长值缩到单行放得下
+            Text(
+                value,
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                autoSize = TextAutoSize.StepBased(minFontSize = 10.sp, maxFontSize = 22.sp, stepSize = 1.sp),
+            )
         }
     }
 }

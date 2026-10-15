@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.15.19 (2026-10-08)
+
+UI 修复版（无 DB 变更）：
+
+- **修复（用户截图）**：详情页三格统计的「最近」显示完整日期（`2026-10-04`）时一行放不下、
+  折行断字——统计格值文本改单行 + 自适应缩字号（`TextAutoSize.StepBased` 10–22sp，
+  上限锁 titleLarge 本值：短值观感不变，长值如完整日期/`6066h 7m` 缩到单行放得下）
+- **API 核验**：`autoSize`/`StepBased(minFontSize, maxFontSize, stepSize)` 形态以本地
+  material3/foundation jar 的 javap + class 元数据核验为准，未凭记忆写签名
+- **测试**：101 个单测 90 通过；MigrationTest 11 个因开发机 Robolectric+sqlite4java
+  运行时故障（建表 SQL 报 SQLITE_CANTOPEN，已排除权限/临时目录/daemon 状态）暂无法执行，
+  与本版纯 UI 改动无关（v0.15.18 发版时同套件全绿），环境修复后补跑
+
 ## 0.15.18 (2026-10-08)
 
 功能版（Nlib 优先、移除机翻，无 DB 变更）：
