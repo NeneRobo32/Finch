@@ -6,6 +6,7 @@ import coil3.SingletonImageLoader
 import coil3.disk.DiskCache
 import coil3.memory.MemoryCache
 import coil3.request.crossfade
+import dev.cao.finch.data.AutoBackupWorker
 import dev.cao.finch.data.FinchDatabase
 import dev.cao.finch.data.SettingsStore
 import dev.cao.finch.notify.ReleaseCheckWorker
@@ -34,5 +35,7 @@ class FinchApp : Application() {
         }
         // 发售提醒每日检查（KEEP：已排过的不重复排）
         runCatching { ReleaseCheckWorker.schedule(this) }
+        // 自动备份每周一次（KEEP；关闭开关后跑到了也直接跳过）
+        runCatching { AutoBackupWorker.schedule(this) }
     }
 }

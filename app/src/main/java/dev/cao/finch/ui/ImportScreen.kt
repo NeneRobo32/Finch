@@ -21,6 +21,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.LightMode
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -266,6 +267,8 @@ fun ImportScreen(
         SwitchImportCard(importViewModel)
         // ============ 备份与恢复 ============
         BackupCard(importViewModel)
+        // ============ 版本与更新 ============
+        UpdateCard(importViewModel)
         Spacer(Modifier.height(24.dp))
     }
 }
@@ -361,10 +364,14 @@ private fun HltbOnlineRow() {
     }
 }
 
-/** 备份与恢复卡片：导出游玩记录 zip（不含密钥）/ 从备份整库恢复（覆盖后重启应用） */
+/** 备份与恢复卡片：导出游玩记录 zip（不含密钥）/ 从备份整库恢复（覆盖后重启应用）；
+ *  v0.16 加自动备份开关（每周整库 zip 落应用私有目录，保留最近 4 份）与恢复入口 */
 @Composable
 private fun BackupCard(importViewModel: ImportViewModel) {
     val backupState by importViewModel.backupState.collectAsState()
+    val autoBackupEnabled by importViewModel.autoBackupEnabled.collectAsState()
+    val lastAutoBackupAt by importViewModel.lastAutoBackupAt.collectAsState()
+    var showAutoRestoreConfirm by remember { mutableStateOf(false) }
     val exportLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/zip")
     ) { uri -> if (uri != null) importViewModel.exportBackup(uri) }
@@ -398,6 +405,101 @@ private fun BackupCard(importViewModel: ImportViewModel) {
                 }
             }
             StateBanner(backupState)
+            HorizontalDivider()
+            // ---- 自动备份（v0.16）----
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("自动备份", style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        "每周自动备份到应用私有目录，保留最近 4 份；卸载应用会一并清除，换机前请手动导出",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                androidx.compose.material3.Switch(
+                    checked = autoBackupEnabled,
+                    onCheckedChange = { importViewModel.setAutoBackupEnabled(it) },
+                )
+            }
+            Text(
+                "上次自动备份：" + if (lastAutoBackupAt <= 0L) "从未" else
+                    java.time.Instant.ofEpochMilli(lastAutoBackupAt)
+                        .atZone(java.time.ZoneId.systemDefault())
+                        .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            TextButton(
+                onClick = { showAutoRestoreConfirm = true },
+                enabled = lastAutoBackupAt > 0L,
+            ) { Text("从最近自动备份恢复") }
+        }
+    }
+
+    if (showAutoRestoreConfirm) {
+        AlertDialog(
+            onDismissRequest = { showAutoRestoreConfirm = false },
+            title = { Text("从自动备份恢复？") },
+            text = { Text("将用最近一份自动备份覆盖当前全部游玩记录并重启应用，此操作不可撤销。") },
+            confirmButton = {
+                TextButton(onClick = {
+                    showAutoRestoreConfirm = false
+                    importViewModel.restoreAutoBackup()
+                }) { Text("恢复") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showAutoRestoreConfirm = false }) { Text("取消") }
+            },
+        )
+    }
+}
+
+/** 版本与更新卡片（v0.16）：点「检查更新」才联网查一次 GitHub Releases，不后台轮询 */
+@Composable
+private fun UpdateCard(importViewModel: ImportViewModel) {
+    val context = LocalContext.current
+    val updateState by importViewModel.updateState.collectAsState()
+    val updateUrl by importViewModel.updateUrl.collectAsState()
+    val currentVersion = remember {
+        runCatching {
+            context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: ""
+        }.getOrDefault("")
+    }
+
+    GlassCard(modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("版本与更新", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.weight(1f))
+                Text("v$currentVersion", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+            }
+            Text(
+                "点「检查更新」才会联网查一次 GitHub Releases（不后台轮询，不上传任何数据）。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    onClick = { importViewModel.checkUpdate() },
+                    enabled = updateState !is ImportViewModel.SyncState.Running,
+                ) {
+                    Text(if (updateState is ImportViewModel.SyncState.Running) "检查中…" else "检查更新")
+                }
+                if (updateUrl.isNotBlank()) {
+                    OutlinedButton(onClick = {
+                        // 去下载：跳浏览器打开 Release 页；无浏览器等异常静默忽略（状态行已给出地址信息）
+                        runCatching {
+                            context.startActivity(
+                                android.content.Intent(
+                                    android.content.Intent.ACTION_VIEW,
+                                    android.net.Uri.parse(updateUrl),
+                                )
+                            )
+                        }
+                    }) { Text("去下载") }
+                }
+            }
+            StateBanner(updateState)
         }
     }
 }

@@ -5,6 +5,7 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.io.File
 
 /** BackupManager 校验决策的纯函数单测（缺核心表 / meta 标识与版本），JVM 直接可跑无需 Android API。
  *  对应修复：任意 SQLite 文件/伪造备份不得通过校验顶掉 finch.db。 */
@@ -45,5 +46,26 @@ class BackupPolicyTest {
         assertNotNull(BackupManager.validateBackupMeta("finch", 17, 16))
         assertNull(BackupManager.validateBackupMeta("finch", 16, 16))
         assertNull(BackupManager.validateBackupMeta("finch", 7, 16))
+    }
+
+    // ---- 自动备份保留策略（v0.16：保留最近 4 份）----
+
+    private fun autoNames(vararg stamps: String) = stamps.map { File("finch-auto-$it.zip") }
+
+    @Test
+    fun `自动备份只删最旧的_保留最近四份`() {
+        val files = autoNames("20261001-000000", "20261002-000000", "20261003-000000", "20261004-000000", "20261005-000000")
+        // 乱序传入也按文件名（时间戳）排序后删最旧
+        val deleted = BackupManager.pruneAutoBackups(files.shuffled(kotlin.random.Random(7)), 4)
+        assertEquals(autoNames("20261001-000000"), deleted)
+    }
+
+    @Test
+    fun `自动备份不足四份不删_零保留全删`() {
+        assertTrue(BackupManager.pruneAutoBackups(autoNames("20261001-000000", "20261002-000000"), 4).isEmpty())
+        assertEquals(
+            autoNames("20261001-000000", "20261002-000000"),
+            BackupManager.pruneAutoBackups(autoNames("20261001-000000", "20261002-000000"), 0),
+        )
     }
 }

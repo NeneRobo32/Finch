@@ -171,4 +171,23 @@ class JsonParseTest {
         assertTrue(!SwitchTitleClient.isTitleId(null))
         assertTrue(!SwitchTitleClient.isTitleId(""))
     }
+
+    // ---- UpdateChecker：GitHub /releases/latest 响应 → Latest ----
+
+    @Test
+    fun `parseLatest_完整响应_版本去掉前导v`() {
+        val l = UpdateChecker.parseLatest(
+            """{"tag_name":"v0.16.0","html_url":"https://github.com/NeneRobo32/Finch/releases/tag/v0.16.0","name":"v0.16.0","draft":false}"""
+        )
+        assertEquals("0.16.0", l.version)
+        assertEquals("https://github.com/NeneRobo32/Finch/releases/tag/v0.16.0", l.url)
+    }
+
+    @Test
+    fun `parseLatest_缺版本号或下载页_抛异常`() {
+        runCatching { UpdateChecker.parseLatest("""{"html_url":"https://x"}""") }.exceptionOrNull()
+            .let { assertTrue(it is java.io.IOException) }
+        runCatching { UpdateChecker.parseLatest("""{"tag_name":"v1"}""") }.exceptionOrNull()
+            .let { assertTrue(it is java.io.IOException) }
+    }
 }

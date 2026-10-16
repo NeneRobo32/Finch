@@ -6,7 +6,9 @@ import android.net.Uri
 import org.json.JSONObject
 import java.io.File
 import java.io.IOException
+import java.io.OutputStream
 import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
 import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
 import java.util.zip.ZipOutputStream
@@ -19,12 +21,17 @@ import java.util.zip.ZipOutputStream
  * - zip 里只有 finch.db + meta.json，**不含** Steam Key / Switch token 等密钥
  *   （它们在 finch_settings.xml，且已被备份规则排除）。
  * - 恢复会覆盖当前全部游玩记录，成功后由调用方重启进程让 Room 重新挂库。
+ * - v0.16 自动备份：同一套打包流程定期写应用私有目录（[autoBackup]），保留最近 4 份。
  */
 object BackupManager {
 
     private const val DB_NAME = "finch.db"
     private const val DB_ENTRY = "finch.db"
     private const val META_ENTRY = "meta.json"
+
+    /** 自动备份目录（filesDir 下，随应用私有；换机/卸载前请手动导出）与保留份数 */
+    private const val AUTO_BACKUP_DIR = "auto_backups"
+    private const val AUTO_BACKUP_KEEP = 4
 
     /** 备份必备核心表全集（release_follows 自 DB 12 起才有） */
     private val CORE_TABLES = listOf("games", "play_sessions", "playtime_snapshots", "release_follows")
@@ -46,6 +53,43 @@ object BackupManager {
 
     /** 导出到 SAF Uri（用户通过系统文件选择器选位置），返回写入的字节数 */
     fun export(context: Context, db: FinchDatabase, target: Uri): Long {
+        val out = context.contentResolver.openOutputStream(target)
+            ?: throw IOException("无法写入所选位置")
+        return out.use { writeBackupZip(context, db, it) }
+    }
+
+    /** 自动备份（v0.16）：整库 zip 写应用私有目录，保留最近 [AUTO_BACKUP_KEEP] 份，返回写入字节数 */
+    fun autoBackup(context: Context, db: FinchDatabase): Long {
+        val dir = File(context.filesDir, AUTO_BACKUP_DIR).apply { mkdirs() }
+        // 文件名含定长时间戳：按名排序即按时间排序（保留策略与最近份选取共用该口径）
+        val stamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss"))
+        val target = File(dir, "finch-auto-$stamp.zip")
+        val bytes = try {
+            target.outputStream().use { writeBackupZip(context, db, it) }
+        } catch (e: Exception) {
+            target.delete() // 半截 zip 不留在备份目录，免得恢复时踩雷
+            throw e
+        }
+        pruneAutoBackups(dir.listFiles()?.toList() ?: emptyList(), AUTO_BACKUP_KEEP).forEach { it.delete() }
+        return bytes
+    }
+
+    /** 自动备份保留策略（纯函数，单测直接调用）：按文件名（含时间戳）排序后返回应删除的旧备份 */
+    internal fun pruneAutoBackups(files: List<File>, keep: Int): List<File> =
+        files.sortedBy { it.name }.dropLast(keep.coerceAtLeast(0))
+
+    /** 最近一份自动备份（没有则 null） */
+    fun latestAutoBackup(context: Context): File? =
+        File(context.filesDir, AUTO_BACKUP_DIR).listFiles()?.maxByOrNull { it.name }
+
+    /** 从最近一份自动备份恢复：校验 → 整库替换 → 重启应用（成功路径不返回） */
+    fun restoreLatestAutoBackup(context: Context, db: FinchDatabase) {
+        val latest = latestAutoBackup(context) ?: throw IOException("还没有自动备份")
+        restoreFromZip(context, db, latest)
+    }
+
+    /** 备份打包主流程：一致性快照 + zip（finch.db + meta.json），返回写入的字节数 */
+    private fun writeBackupZip(context: Context, db: FinchDatabase, out: OutputStream): Long {
         val dbFile = context.getDatabasePath(DB_NAME)
         if (!dbFile.exists()) throw IOException("数据库文件不存在")
         // 一致性快照：优先 VACUUM INTO（SQLite 3.27+），checkpoint 与拷贝之间不会撕裂；
@@ -70,19 +114,17 @@ object BackupManager {
                 .put("schemaVersion", db.openHelper.writableDatabase.version)
                 .put("exportedAt", LocalDateTime.now().toString())
             val metaBytes = meta.toString().toByteArray(Charsets.UTF_8)
-            context.contentResolver.openOutputStream(target)?.use { out ->
-                ZipOutputStream(out).use { zip ->
-                    zip.putNextEntry(ZipEntry(DB_ENTRY))
-                    val src = if (useSnapshot) snapshot else dbFile
-                    src.inputStream().use { it.copyTo(zip) }
-                    zip.closeEntry()
-                    written += src.length()
-                    zip.putNextEntry(ZipEntry(META_ENTRY))
-                    zip.write(metaBytes)
-                    zip.closeEntry()
-                    written += metaBytes.size
-                }
-            } ?: throw IOException("无法写入所选位置")
+            ZipOutputStream(out).use { zip ->
+                zip.putNextEntry(ZipEntry(DB_ENTRY))
+                val src = if (useSnapshot) snapshot else dbFile
+                src.inputStream().use { it.copyTo(zip) }
+                zip.closeEntry()
+                written += src.length()
+                zip.putNextEntry(ZipEntry(META_ENTRY))
+                zip.write(metaBytes)
+                zip.closeEntry()
+                written += metaBytes.size
+            }
             return written
         } finally {
             snapshot.delete()
@@ -100,33 +142,41 @@ object BackupManager {
             tmp.outputStream().use { input.copyTo(it) }
         } ?: throw IOException("无法读取所选文件")
         try {
-            val backupVersion = validate(tmp)
-            if (backupVersion > FINCH_DB_VERSION) {
-                throw IOException("备份来自更新版本的应用（schema v$backupVersion > v$FINCH_DB_VERSION），请先升级 App")
-            }
-            // 先解包（此时失败 Room 仍可用），全部校验通过后才关库替换
-            val extracted = unzipDb(tmp, context.cacheDir)
-            val dbFile = context.getDatabasePath(DB_NAME)
-            db.close()
-            try {
-                dbFile.delete()
-                if (!extracted.renameTo(dbFile)) {
-                    // rename 跨目录可能失败，退化成复制
-                    extracted.copyTo(dbFile, overwrite = true)
-                    extracted.delete()
-                }
-                // 清掉旧 WAL/SHM，避免旧事务日志污染新库
-                File(dbFile.parentFile, "$DB_NAME-wal").delete()
-                File(dbFile.parentFile, "$DB_NAME-shm").delete()
-            } catch (e: Exception) {
-                // 替换阶段失败时 Room 已关死、进程内无法自愈：重启兜底，绝不留半死状态
-                restartApp(context)
-                throw IOException("恢复失败，请重新导入备份", e)
-            }
-            restartApp(context)
+            restoreFromZip(context, db, tmp)
         } finally {
             tmp.delete()
         }
+    }
+
+    /**
+     * 恢复主流程（SAF 导入与自动备份共用）：校验 → 解包 → 关库 → 覆盖 finch.db → 重启进程。
+     * 不删除 [zipFile]（临时文件生命周期归调用方管）；成功路径不返回（进程重启）。
+     */
+    private fun restoreFromZip(context: Context, db: FinchDatabase, zipFile: File) {
+        val backupVersion = validate(zipFile)
+        if (backupVersion > FINCH_DB_VERSION) {
+            throw IOException("备份来自更新版本的应用（schema v$backupVersion > v$FINCH_DB_VERSION），请先升级 App")
+        }
+        // 先解包（此时失败 Room 仍可用），全部校验通过后才关库替换
+        val extracted = unzipDb(zipFile, context.cacheDir)
+        val dbFile = context.getDatabasePath(DB_NAME)
+        db.close()
+        try {
+            dbFile.delete()
+            if (!extracted.renameTo(dbFile)) {
+                // rename 跨目录可能失败，退化成复制
+                extracted.copyTo(dbFile, overwrite = true)
+                extracted.delete()
+            }
+            // 清掉旧 WAL/SHM，避免旧事务日志污染新库
+            File(dbFile.parentFile, "$DB_NAME-wal").delete()
+            File(dbFile.parentFile, "$DB_NAME-shm").delete()
+        } catch (e: Exception) {
+            // 替换阶段失败时 Room 已关死、进程内无法自愈：重启兜底，绝不留半死状态
+            restartApp(context)
+            throw IOException("恢复失败，请重新导入备份", e)
+        }
+        restartApp(context)
     }
 
     /** 校验 zip：meta.json 标识/版本 + finch.db 是含核心表的合法 SQLite 库，返回备份的 schema 版本 */

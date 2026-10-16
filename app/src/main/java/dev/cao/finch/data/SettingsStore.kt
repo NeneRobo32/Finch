@@ -53,6 +53,16 @@ class SettingsStore(context: Context) {
         get() = sp.getBoolean(KEY_AUTO_SYNC_ENABLED, true)
         set(value) = sp.edit().putBoolean(KEY_AUTO_SYNC_ENABLED, value).apply()
 
+    /** 是否开启每周自动备份（v0.16，默认开）：整库 zip 落应用私有目录、保留最近 4 份，不联网 */
+    var autoBackupEnabled: Boolean
+        get() = sp.getBoolean(KEY_AUTO_BACKUP_ENABLED, true)
+        set(value) = sp.edit().putBoolean(KEY_AUTO_BACKUP_ENABLED, value).apply()
+
+    /** 上次自动备份时间戳（epochMillis，0=从未），导入页展示用 */
+    var lastAutoBackupAt: Long
+        get() = sp.getLong(KEY_LAST_AUTO_BACKUP, 0L)
+        set(value) = sp.edit().putLong(KEY_LAST_AUTO_BACKUP, value).apply()
+
     /**
      * 联网获取通关时长（默认开）：
      * 开启后点开无三围的详情页会自动查一次 HLTB 中转服务（只发游戏名/appid，
@@ -115,6 +125,8 @@ class SettingsStore(context: Context) {
         private const val KEY_PSN_REFRESH_EXP = "psn_refresh_expires_at"
         private const val KEY_LAST_AUTO_SYNC = "last_auto_sync_at"
         private const val KEY_AUTO_SYNC_ENABLED = "auto_sync_enabled"
+        private const val KEY_AUTO_BACKUP_ENABLED = "auto_backup_enabled"
+        private const val KEY_LAST_AUTO_BACKUP = "last_auto_backup_at"
         private const val KEY_HLTB_ONLINE = "hltb_online_enabled"
         private const val KEY_THEME_MODE = "theme_mode"
         private const val KEY_FINCH_THEME = "finch_theme"

@@ -14,6 +14,7 @@ import dev.cao.finch.data.SettingsStore
 import dev.cao.finch.data.networkErrorKind
 import dev.cao.finch.data.SwitchClient
 import dev.cao.finch.data.SyncEngine
+import dev.cao.finch.data.UpdateChecker
 import dev.cao.finch.timer.TimerServiceBridge
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -304,4 +305,76 @@ class ImportViewModel(app: Application) : AndroidViewModel(app) {
         settings.psnRefreshExpiresAtMillis = 0L
         _psnLoggedIn.value = false
     }
+
+    // ---- 自动备份（v0.16）----
+
+    private val _autoBackupEnabled = MutableStateFlow(settings.autoBackupEnabled)
+    val autoBackupEnabled: StateFlow<Boolean> = _autoBackupEnabled
+    private val _lastAutoBackupAt = MutableStateFlow(settings.lastAutoBackupAt)
+    val lastAutoBackupAt: StateFlow<Long> = _lastAutoBackupAt
+
+    /** 自动备份开关唯一入口（UI 不直写状态）；后台任务自己按周跑，开关只在运行时生效 */
+    fun setAutoBackupEnabled(enabled: Boolean) {
+        settings.autoBackupEnabled = enabled
+        _autoBackupEnabled.value = enabled
+    }
+
+    /** 从最近一份自动备份恢复：校验后整库替换并重启应用（成功路径不会返回） */
+    fun restoreAutoBackup() {
+        _backupState.value = SyncState.Running
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    BackupManager.restoreLatestAutoBackup(getApplication(), db)
+                }
+                // restore 成功会重启进程，走不到这里
+            } catch (e: Exception) {
+                _backupState.value = SyncState.Failed("恢复失败：" + (e.message ?: e.toString()))
+            }
+        }
+    }
+
+    // ---- 版本检查（v0.16）：点按钮才查一次，不后台轮询 ----
+
+    private val _updateState = MutableStateFlow<SyncState>(SyncState.Idle)
+    val updateState: StateFlow<SyncState> = _updateState
+    /** 有新版本时的 Release 下载页（空串 = 无需下载） */
+    private val _updateUrl = MutableStateFlow("")
+    val updateUrl: StateFlow<String> = _updateUrl
+
+    fun checkUpdate() {
+        _updateState.value = SyncState.Running
+        _updateUrl.value = ""
+        viewModelScope.launch {
+            try {
+                val latest = UpdateChecker.fetchLatest()
+                val current = currentVersionName()
+                _updateState.value = when {
+                    UpdateChecker.isNewerVersion(latest.version, current) -> {
+                        _updateUrl.value = latest.url
+                        SyncState.Done("发现新版本 v${latest.version}（当前 v$current）")
+                    }
+                    latest.version == current -> SyncState.Done("已是最新版本（v$current）")
+                    else -> SyncState.Done("本地 v$current 比线上最新 v${latest.version} 还新（开发版？）")
+                }
+            } catch (e: Exception) {
+                _updateState.value = SyncState.Failed(
+                    when (e.networkErrorKind()) {
+                        dev.cao.finch.data.NetworkErrorKind.DNS,
+                        dev.cao.finch.data.NetworkErrorKind.CONNECT,
+                        dev.cao.finch.data.NetworkErrorKind.TIMEOUT -> "检查失败：连不上 GitHub（部分地区需代理），稍后再试"
+                        dev.cao.finch.data.NetworkErrorKind.SSL,
+                        dev.cao.finch.data.NetworkErrorKind.IO -> "检查失败：网络不稳定，重试一次"
+                        dev.cao.finch.data.NetworkErrorKind.OTHER -> "检查失败：" + (e.message ?: e.toString())
+                    }
+                )
+            }
+        }
+    }
+
+    /** 本机 versionName（打包时写入，检查更新比对用） */
+    private fun currentVersionName(): String = runCatching {
+        val app = getApplication<Application>()
+        app.packageManager.getPackageInfo(app.packageName, 0).versionName ?: ""
+    }.getOrDefault("")
 }

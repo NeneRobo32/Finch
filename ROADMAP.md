@@ -28,7 +28,7 @@ IGDB 已整体移除（国内直连不通）；HLTB 改走 Crashdummy 中转 API
 | v0.15.10 ✅已交付 | 体验修复 | 中文库名跳过直搜（必 404），失败文案列实际关键词 | 15（不变） | 无 |
 | v0.15.11 ✅已交付 | 体验修复 | eShop 只取拉丁英文段（日文词不再污染查询）；删 Bangumi 兜底；无英文词直说文案 | 15（不变） | 无 |
 | v0.15.12 ✅已交付 | 体验修复 | Switch TitleID→英文名联动（Nlib 免配置，命中写回库名） | 15（不变） | 无 |
-| v0.16 | 数据安全与分发 | 自动备份；CSV 导出；私有分发＋应用内版本检查 | 16（不变） | 无（复用 WorkManager） |
+| v0.16 🚧开发中 | 数据安全收尾 | 自动备份＋恢复入口；点按钮检查更新（不轮询）；CSV 不做（zip 导出已覆盖） | 16（不变） | 无（复用 WorkManager） |
 | v0.17 | 留存与趣味 | 成就/连击徽章；游玩预算提醒；小组件扩展 | 16（不变，徽章纯算） | 无 |
 | 远期 / 明确不做 | — | WebDAV 同步（可选）；前台自动识别、账号云同步、国际化明确不做 | — | — |
 
@@ -42,8 +42,8 @@ gantt
     热力图+时段+回本+海报        :a2, after a1, 14d
     section v0.15 日程推送
     关注推送+HLTB               :a3, after a2, 21d
-    section v0.16 安全分发
-    自动备份+CSV+版本检查        :a4, after a3, 14d
+    section v0.16 安全收尾
+    自动备份+点查更新           :a4, after a3, 14d
     section v0.17 留存趣味
     成就+预算+小组件            :a5, after a4, 14d
 ```
@@ -118,16 +118,19 @@ gantt
 
 </details>
 
-## v0.16 —— 数据安全与分发（DB 不变）
+## v0.16 —— 数据安全收尾（DB 不变）🚧 开发中
 
-**为什么**：数据多了以后备份就是命；同时把 README 里“私有分发”遗留项 closes 掉。纯工程版，无 DB 变更，可与 v0.15 并行开发。
+**为什么**：数据多了以后备份就是命。纯工程版，无 DB 变更。
+**范围修订（2026-10-08 拍板）**：导出已有「导出备份」zip 覆盖需求，**CSV 不做**；版本检查改**点按钮才查**，不做每周后台轮询。
 
-- **自动备份**：`SettingsStore` 加 `autoBackupEnabled + lastBackupAt`，复用 `BackupManager.export()` + WorkManager 每周跑一次写到应用私有目录，保留最近 4 份。导入页显示“上次自动备份时间”。
-  改动：`data/BackupManager.kt`（加 `autoBackup()`）、`data/SettingsStore.kt`、新 `AutoBackupWorker`。
-- **CSV 导出**：`sessions.csv`（日期/游戏/平台/起止/时长/来源），用现有 DAO 数据拼，方便丢 Excel/B站动态 pro 分析。
-- **私有分发＋应用内版本检查**：GitHub Releases 页 + `VersionCheckWorker`（每周查一次 `releases/latest`，有新版弹 Snackbar/通知，点开浏览器下载）。版本号以 `versionName` 为准。
-- **验收**：卸载重装后从自动备份恢复分毫不差；CSV 用 Excel 打开不乱码；飞行模式下版本检查静默跳过。
-- **工作量**：S–M（约 2 周）。
+- **自动备份**：`SettingsStore` 加 `autoBackupEnabled + lastAutoBackupAt`，新 `AutoBackupWorker`（WorkManager 每周跑）调 `BackupManager.autoBackup()` 写应用私有目录、保留最近 4 份（失败半截 zip 即删）；导入页「备份与恢复」卡显示「上次自动备份时间」、开关、可从最近自动备份恢复（带确认弹窗）。
+  改动：`data/BackupManager.kt`、`data/SettingsStore.kt`、新 `data/AutoBackupWorker.kt`、`ui/ImportViewModel.kt`、`ui/ImportScreen.kt`。
+- **点查更新**：导入页新增「版本与更新」卡，点「检查更新」才 GET 一次 GitHub `releases/latest`（不后台轮询、不上传任何数据），有新版列出版本号并「去下载」跳浏览器；比对口径 `UpdateChecker.isNewerVersion`（逐段数字比较）。
+  改动：新 `data/UpdateChecker.kt`、`ui/ImportViewModel.kt`、`ui/ImportScreen.kt`。
+- ~~**CSV 导出**~~：不做——「导出备份」zip 已覆盖导出需求。
+- **验收**：自动备份开启后落盘、只留最近 4 份、可一键恢复并重启应用；飞行模式下点检查更新只报网络失败、不崩；版本号逐段比较（0.15.9 < 0.15.20）。
+- **注意**：自动备份在应用私有目录，**卸载即清**——换机/重装前走「导出备份」存外部（文案已提示）。
+- **工作量**：S。
 
 ## v0.17 —— 留存与趣味（DB 不变）
 
@@ -170,5 +173,5 @@ gantt
 1. **v0.13 ✅ 已交付**：状态＋暂停＋编辑，一版让“记”可信。
 2. **v0.14 ✅ 已交付**：热力图＋作息＋战报分享 v1，让“看”值得分享。
 3. **v0.15 ✅ 已交付**：发售关注＋推送、通关进度条，WorkManager 基建一次到位。
-4. v0.16 跟上：自动备份＋CSV＋版本检查（复用 WorkManager），纯工程版。
+4. v0.16 跟上：自动备份＋点查更新（复用 WorkManager），纯工程版。
 4. v0.17 收尾：徽章＋预算，把留存拉起来。
