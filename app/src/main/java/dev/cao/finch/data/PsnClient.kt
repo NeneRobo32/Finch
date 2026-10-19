@@ -37,6 +37,8 @@ object PsnClient {
     private const val AUTH_BASE = "https://ca.account.sony.com/api"
     private const val ACCOUNT_BASE = "https://dms.api.playstation.com/api"
     private const val GAMELIST_BASE = "https://m.np.playstation.com/api/gamelist/v2"
+    // 奖杯概要（v0.17）：与 gamelist 同域同 token；形态按 psn-api 文档，联调时以实测为准
+    private const val TROPHY_BASE = "https://m.np.playstation.com/api/trophy/v1"
 
     private val client get() = HttpClients.shared // 共享客户端（connect 5s / read 10s / call 30s）
 
@@ -60,6 +62,19 @@ object PsnClient {
         val playCount: Int,
         val lastPlayedEpochMillis: Long?,
         val totalMinutes: Long,
+    )
+
+    /** 奖杯概要条目（v0.17 trophyTitles）：一游戏一套奖杯的已获得数与进度 */
+    data class PsnTrophyTitle(
+        val npTitleId: String?,
+        val npCommunicationId: String?,
+        val name: String,
+        val platinum: Int,
+        val gold: Int,
+        val silver: Int,
+        val bronze: Int,
+        val progress: Int,
+        val lastUpdatedEpochMillis: Long?,
     )
 
     /** npsso（64 位）→ tokens。npsso 过期/错误抛 IOException（消息已可读）。 */
@@ -145,6 +160,59 @@ object PsnClient {
             )
         }
         return TitlePage(out, json.optInt("nextOffset", 0))
+    }
+
+    /** 拉奖杯概要（trophy/v1 trophyTitles，自动分页）：每游戏一套奖杯的四围+进度，不逐奖杯展开 */
+    suspend fun fetchTrophyTitles(accessToken: String, accountId: String = "me"): List<PsnTrophyTitle> {
+        val out = ArrayList<PsnTrophyTitle>(64)
+        var offset = 0
+        while (true) {
+            val req = Request.Builder()
+                .url("$TROPHY_BASE/users/$accountId/trophyTitles?limit=200&offset=$offset")
+                .header("Authorization", "Bearer $accessToken")
+                .build()
+            val body = runInterruptible { client.newCall(req).execute() }.use { resp ->
+                val b = resp.body?.string().orEmpty()
+                if (!resp.isSuccessful) throw HttpStatusException(resp.code, "PSN trophyTitles HTTP ${resp.code}")
+                b
+            }
+            val page = parseTrophyTitlePage(body)
+            out += page.titles
+            if (page.titles.isEmpty()) break
+            offset += page.titles.size
+            // totalItemCount 缺失(0)时靠空页判停；有值时到量即停（防死循环）
+            if (page.totalItemCount > 0 && offset >= page.totalItemCount) break
+        }
+        return out
+    }
+
+    /** trophyTitles 单页解析结果：条目 + 总数 */
+    internal data class TrophyTitlePage(val titles: List<PsnTrophyTitle>, val totalItemCount: Int)
+
+    /** trophyTitles 单页 JSON → 奖杯概要（纯函数，单测直测生产口径）：
+     *  npTitleId 文档模型未列（部分响应带），容忍缺失；四围取 earnedTrophies（已获得数） */
+    internal fun parseTrophyTitlePage(body: String): TrophyTitlePage {
+        val json = JSONObject(body)
+        val arr = json.optJSONArray("trophyTitles") ?: return TrophyTitlePage(emptyList(), 0)
+        val out = ArrayList<PsnTrophyTitle>(arr.length())
+        for (i in 0 until arr.length()) {
+            val t = arr.getJSONObject(i)
+            val name = t.optString("trophyTitleName").trim()
+            if (name.isEmpty()) continue
+            val earned = t.optJSONObject("earnedTrophies")
+            out += PsnTrophyTitle(
+                npTitleId = t.optString("npTitleId").takeIf { it.isNotBlank() },
+                npCommunicationId = t.optString("npCommunicationId").takeIf { it.isNotBlank() },
+                name = name,
+                platinum = earned?.optInt("platinum", 0) ?: 0,
+                gold = earned?.optInt("gold", 0) ?: 0,
+                silver = earned?.optInt("silver", 0) ?: 0,
+                bronze = earned?.optInt("bronze", 0) ?: 0,
+                progress = t.optInt("progress", 0),
+                lastUpdatedEpochMillis = parseIsoToMillis(t.optString("lastUpdatedDateTime").takeIf { it.isNotBlank() }),
+            )
+        }
+        return TrophyTitlePage(out, json.optInt("totalItemCount", 0))
     }
 
     // ---- 内部 ----

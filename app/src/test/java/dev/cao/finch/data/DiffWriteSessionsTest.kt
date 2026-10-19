@@ -62,6 +62,7 @@ class DiffWriteSessionsTest {
         override fun observeDailyTotals(fromMillis: Long, toMillis: Long): Flow<List<DailyTotal>> = TODO()
         override fun observePlatformTotals(fromMillis: Long, toMillis: Long): Flow<List<PlatformTotal>> = TODO()
         override fun observeTopGamesWithCover(fromMillis: Long, toMillis: Long): Flow<List<TopGameRow>> = TODO()
+        override suspend fun topGameNameBetween(fromMillis: Long, toMillis: Long): String? = TODO()
         override fun observeSteamTotalMinutes(): Flow<Long?> = TODO()
         override fun observeSessionsForGame(gameId: Long): Flow<List<PlaySession>> = TODO()
         override fun observeStatsForGame(gameId: Long): Flow<GameStatsRow?> = TODO()

@@ -48,6 +48,7 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -330,6 +331,18 @@ fun GameDetailScreen(
                     StatBox("最近", stats.lastPlayedAt?.let { relativeTime(it) } ?: "—", Modifier.weight(1f))
                 }
 
+                // PSN 奖杯（v0.17）：同步过奖杯数据才显示
+                if (game.trophyProgress != null) {
+                    Spacer(Modifier.height(12.dp))
+                    TrophyCard(
+                        platinum = game.trophyPlatinum ?: 0,
+                        gold = game.trophyGold ?: 0,
+                        silver = game.trophySilver ?: 0,
+                        bronze = game.trophyBronze ?: 0,
+                        progress = game.trophyProgress,
+                    )
+                }
+
                 // 通关进度（三段：主线/支线/全收集；点开无数据时自动获取一次）
                 val playedMin = (stats.totalMs ?: 0L) / 60_000
                 val hltbMin = game.hltbMainMin
@@ -592,5 +605,55 @@ fun GameDetailScreen(
                 }
             },
         )
+    }
+}
+
+/** 奖杯四围配色（白金/金/银/铜） */
+private val PlatinumColor = Color(0xFF9CB6D1)
+private val TrophyGoldColor = Color(0xFFE6B422)
+private val TrophySilverColor = Color(0xFFAAB2BD)
+private val TrophyBronzeColor = Color(0xFFB0722E)
+
+/** PSN 奖杯卡（v0.17）：已获得四围 + 完成度条；只有同步过奖杯数据的游戏才显示 */
+@Composable
+private fun TrophyCard(platinum: Int, gold: Int, silver: Int, bronze: Int, progress: Int) {
+    GlassCard(modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("PSN 奖杯", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.weight(1f))
+                Text(
+                    "完成度 $progress%",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                TrophyCount("白金", platinum, PlatinumColor)
+                TrophyCount("金", gold, TrophyGoldColor)
+                TrophyCount("银", silver, TrophySilverColor)
+                TrophyCount("铜", bronze, TrophyBronzeColor)
+            }
+            LinearProgressIndicator(
+                progress = { progress / 100f },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(4.dp)),
+                color = PlatinumColor,
+                trackColor = MaterialTheme.colorScheme.surfaceVariant,
+            )
+        }
+    }
+}
+
+/** 单个奖杯等级计数（色点 + 名称 + 已获得数） */
+@Composable
+private fun TrophyCount(label: String, count: Int, color: Color) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Box(Modifier.size(8.dp).background(color, RoundedCornerShape(50)))
+        Text("$label $count", style = MaterialTheme.typography.labelMedium)
     }
 }

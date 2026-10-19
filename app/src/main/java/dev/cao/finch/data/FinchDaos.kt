@@ -172,6 +172,18 @@ interface SessionDao {
         "GROUP BY g.id ORDER BY totalMs DESC")
     fun observeTopGamesWithCover(fromMillis: Long, toMillis: Long): Flow<List<TopGameRow>>
 
+    /** 区间内时长最高的游戏名（小组件月 Top1 用，一次性 suspend 查询）；无记录返回 null */
+    @Query(
+        """
+        SELECT g.name FROM play_sessions s JOIN games g ON g.id = s.gameId
+        WHERE s.endTime IS NOT NULL AND s.startTime >= :fromMillis AND s.startTime < :toMillis
+        GROUP BY g.id
+        ORDER BY SUM(MAX(0, s.endTime - s.startTime - COALESCE(s.pauseAccumMs, 0))) DESC
+        LIMIT 1
+        """
+    )
+    suspend fun topGameNameBetween(fromMillis: Long, toMillis: Long): String?
+
     /** Steam 同步的终身累计总分钟（只对账展示，不生成会话） */
     @Query("SELECT SUM(steamPlaytimeMin) FROM games WHERE steamPlaytimeMin IS NOT NULL")
     fun observeSteamTotalMinutes(): Flow<Long?>

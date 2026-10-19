@@ -190,4 +190,38 @@ class JsonParseTest {
         runCatching { UpdateChecker.parseLatest("""{"tag_name":"v1"}""") }.exceptionOrNull()
             .let { assertTrue(it is java.io.IOException) }
     }
+
+    // ---- PsnClient：trophyTitles 响应 → 奖杯概要（v0.17） ----
+
+    @Test
+    fun `parseTrophyTitlePage_完整条目_四围与进度正确映射`() {
+        val page = PsnClient.parseTrophyTitlePage(
+            """{"totalItemCount":1,"trophyTitles":[{"npCommunicationId":"PPSA13195_00","npTitleId":"PPSA13195_00","trophyTitleName":"Astro's Playroom","earnedTrophies":{"bronze":10,"silver":2,"gold":1,"platinum":1},"definedTrophies":{"bronze":30,"silver":10,"gold":5,"platinum":1},"progress":67,"lastUpdatedDateTime":"2026-10-01T12:00:00Z"}]}"""
+        )
+        assertEquals(1, page.totalItemCount)
+        val t = page.titles.single()
+        assertEquals("Astro's Playroom", t.name)
+        assertEquals("PPSA13195_00", t.npTitleId)
+        assertEquals(1, t.platinum) // 已获得数，不是 definedTrophies
+        assertEquals(1, t.gold)
+        assertEquals(2, t.silver)
+        assertEquals(10, t.bronze)
+        assertEquals(67, t.progress)
+        assertNotNull(t.lastUpdatedEpochMillis)
+    }
+
+    @Test
+    fun `parseTrophyTitlePage_缺npTitleId与earnedTrophies_容忍并归零`() {
+        val page = PsnClient.parseTrophyTitlePage(
+            """{"totalItemCount":2,"trophyTitles":[{"npCommunicationId":"NPWR00867_00","trophyTitleName":"Red Dead Redemption","progress":25},{"trophyTitleName":""}]}"""
+        )
+        assertEquals(1, page.titles.size) // 空名条目跳过
+        val t = page.titles.single()
+        assertNull(t.npTitleId)
+        assertEquals("NPWR00867_00", t.npCommunicationId)
+        assertEquals(0, t.platinum)
+        assertEquals(0, t.bronze)
+        assertEquals(25, t.progress)
+        assertNull(t.lastUpdatedEpochMillis)
+    }
 }

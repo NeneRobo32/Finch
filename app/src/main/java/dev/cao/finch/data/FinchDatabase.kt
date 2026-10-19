@@ -20,7 +20,7 @@ class Converters {
 }
 
 /** Room schema 版本（迁移与备份校验共用） */
-const val FINCH_DB_VERSION = 16
+const val FINCH_DB_VERSION = 17
 
 @Database(
     entities = [Game::class, PlaySession::class, PlaytimeSnapshot::class, ReleaseFollow::class],
@@ -173,6 +173,13 @@ abstract class FinchDatabase : RoomDatabase() {
                 db.execSQL("ALTER TABLE games ADD COLUMN hltbExtraMin INTEGER")
                 db.execSQL("ALTER TABLE games ADD COLUMN hltb100Min INTEGER")
                 db.execSQL("ALTER TABLE games ADD COLUMN igdbId INTEGER")
+                // v13 起实体声明 release_follows.key 唯一索引（schema 13 有记），但 v12 新装库
+                // 按当时无索引的实体所建（schema 12 未记）——此处补建，否则 v12 一路升上来的库
+                // 过 Room schema 校验会炸（启动崩溃）
+                db.execSQL(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS `index_release_follows_key` " +
+                        "ON `release_follows` (`key`)"
+                )
             }
         }
 
@@ -241,9 +248,29 @@ abstract class FinchDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_16_17 = object : Migration(16, 17) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // PSN 奖杯概要（v0.17）：已获得数四围 + 进度百分比 + 同步时间（null=未同步，不回填）
+                db.execSQL("ALTER TABLE games ADD COLUMN trophyPlatinum INTEGER")
+                db.execSQL("ALTER TABLE games ADD COLUMN trophyGold INTEGER")
+                db.execSQL("ALTER TABLE games ADD COLUMN trophySilver INTEGER")
+                db.execSQL("ALTER TABLE games ADD COLUMN trophyBronze INTEGER")
+                db.execSQL("ALTER TABLE games ADD COLUMN trophyProgress INTEGER")
+                db.execSQL("ALTER TABLE games ADD COLUMN trophyUpdatedAt INTEGER")
+            }
+        }
+
+        /** 全量手写迁移（生产 build 与迁移测试共用一份，避免两处链不同步） */
+        val ALL_MIGRATIONS = arrayOf(
+            MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5,
+            MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9,
+            MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13,
+            MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17,
+        )
+
         fun build(context: Context): FinchDatabase =
             Room.databaseBuilder(context, FinchDatabase::class.java, "finch.db")
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16)
+                .addMigrations(*ALL_MIGRATIONS)
                 .build()
     }
 }

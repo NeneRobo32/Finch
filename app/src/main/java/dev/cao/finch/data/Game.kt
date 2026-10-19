@@ -44,6 +44,13 @@ data class Game(
     // HLTB 三围：支线/全收集分钟数；null=未知
     val hltbExtraMin: Long? = null,
     val hltb100Min: Long? = null,
+    // PSN 奖杯概要（v0.17）：已获得数四围 + 进度百分比；null = 未同步到奖杯
+    val trophyPlatinum: Int? = null,
+    val trophyGold: Int? = null,
+    val trophySilver: Int? = null,
+    val trophyBronze: Int? = null,
+    val trophyProgress: Int? = null,
+    val trophyUpdatedAt: LocalDateTime? = null,
 ) {
     fun platformSet(): Set<Platform> =
         GameRepository.csvToPlatforms(platformsCsv).toSet().ifEmpty { setOf(platform) }

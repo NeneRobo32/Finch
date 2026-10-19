@@ -20,6 +20,9 @@
     <!-- 桌面小组件（系统可见文本） -->
     <string name="widget_elapsed">已玩 %1$d 分钟</string>
     <string name="widget_today">今日 %1$d 分钟</string>
+    <!-- 小组件 v0.17：周累计 + 月 Top1 -->
+    <string name="widget_today_week">今日 %1$d 分钟 · 本周 %2$d 分钟</string>
+    <string name="widget_month_top">月 Top1：%1$s</string>
     <!-- 系统分享面板 chooser 标题 -->
     <string name="share_chooser_title">分享战报</string>
     <!-- 无障碍朗读文本 -->

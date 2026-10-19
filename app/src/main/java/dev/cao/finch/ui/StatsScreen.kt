@@ -60,6 +60,7 @@ import dev.cao.finch.TimeFormatter
 import dev.cao.finch.data.DailyTotal
 import dev.cao.finch.data.PlatformTotal
 import dev.cao.finch.data.TopGameRow
+import dev.cao.finch.data.TrophyTotals
 import java.time.Duration
 import java.time.LocalDate
 import java.time.YearMonth
@@ -73,6 +74,8 @@ private val RankGold = Color(0xFFE8B63C)
 private val RankSilver = Color(0xFFA8B0BD)
 private val RankBronze = Color(0xFFC08A5E)
 private val RankNeutral = Color(0xFFD7DCE2)
+/** 奖杯白金（冷银蓝，区别于榜单银） */
+private val TrophyPlatinum = Color(0xFF9CB6D1)
 private fun rankColor(i: Int) = when (i) {
     0 -> RankGold
     1 -> RankSilver
@@ -119,6 +122,9 @@ fun StatsScreen(viewModel: FinchViewModel) {
     }.collectAsState(initial = emptyList())
     val steamMin by remember { viewModel.steamTotalMinutes() }
         .collectAsState(initial = 0L)
+    // 奖杯汇总（v0.17）：全库 PSN 已获得数
+    val trophyTotals by remember { viewModel.trophyTotals() }
+        .collectAsState(initial = TrophyTotals(0, 0, 0, 0, 0))
     val distinctGames by remember(fromMillis, toMillis) {
         viewModel.distinctGamesInRange(fromMillis, toMillis)
     }.collectAsState(initial = 0)
@@ -186,6 +192,7 @@ fun StatsScreen(viewModel: FinchViewModel) {
             }
         }
         item { HeroTotalCard(total, prevTotal, steamMin) }
+        if (trophyTotals.gamesWithTrophies > 0) item { TrophySummaryCard(trophyTotals) }
         if (total > 0) item { MonthReportCard(total, distinctGames, daily, topGames, mode) }
         if (daily.isNotEmpty()) {
             item {
@@ -236,6 +243,39 @@ fun StatsScreen(viewModel: FinchViewModel) {
             )
             shareRequest = false
         }
+    }
+}
+
+/** 奖杯汇总卡（v0.17）：全库 PSN 已获得四围（仅统计同步过奖杯的游戏） */
+@Composable
+private fun TrophySummaryCard(t: TrophyTotals) {
+    GlassCard(modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("PSN 奖杯", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.weight(1f))
+                Text(
+                    "${t.gamesWithTrophies} 款有奖杯",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                TrophyStat("白金", t.platinum, TrophyPlatinum)
+                TrophyStat("金", t.gold, RankGold)
+                TrophyStat("银", t.silver, RankSilver)
+                TrophyStat("铜", t.bronze, RankBronze)
+            }
+        }
+    }
+}
+
+/** 单个奖杯等级计数（色点 + 名称 + 已获得数） */
+@Composable
+private fun TrophyStat(label: String, count: Int, color: Color) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        Box(Modifier.size(8.dp).background(color, CircleShape))
+        Text("$label $count", style = MaterialTheme.typography.labelMedium)
     }
 }
 

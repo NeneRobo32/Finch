@@ -17,6 +17,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
+import org.robolectric.annotation.SQLiteMode
 
 /**
  * Room 手写迁移链的端到端测试（Robolectric，JVM 可跑，无需设备）。
@@ -25,11 +26,15 @@ import org.robolectric.annotation.Config
  * Room 挂全量 MIGRATION_* 打开（Room 自带 schema 校验，迁移 SQL 与实体不一致会抛
  * IllegalStateException —— v0.15.0 的启动闪退就是这么炸的）→ 断言样例数据保留、列值正确。
  *
- * 覆盖起始版本 7..15 逐版升到 FINCH_DB_VERSION=16。
+ * 覆盖起始版本 7..15 逐版升到 FINCH_DB_VERSION=17。
  * 1..6 无 schema JSON（schemas 从 7 起入库），无法起测，已在报告注明。
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
+// 原生 SQLite（nativeruntime JNI）替代 legacy 的 sqlite4java 解压加载：
+// legacy 路径要把 sqlite4java.dll 解压到临时目录再 load，本开发机沙箱下该写盘被确定性拒绝；
+// 原生模式不走解压，且对迁移测试更接近真机 SQLite 行为
+@SQLiteMode(SQLiteMode.Mode.NATIVE)
 class MigrationTest {
 
     private val context get() = RuntimeEnvironment.getApplication()
@@ -326,19 +331,11 @@ class MigrationTest {
         }
     }
 
-    /** 挂全量手写迁移打开 Room：迁移 SQL 与实体不一致时 Room 校验直接抛异常（测试要的断言点） */
+    /** 挂全量手写迁移打开 Room：迁移 SQL 与实体不一致时 Room 校验直接抛异常（测试要的断言点）。
+     *  迁移链取自生产 [FinchDatabase.ALL_MIGRATIONS]，测试不再自己抄一份（v0.17 曾因两处不同步漏测 16→17） */
     private fun openWithMigrations(): FinchDatabase =
         Room.databaseBuilder(context, FinchDatabase::class.java, dbName)
-            .addMigrations(
-                FinchDatabase.MIGRATION_1_2, FinchDatabase.MIGRATION_2_3,
-                FinchDatabase.MIGRATION_3_4, FinchDatabase.MIGRATION_4_5,
-                FinchDatabase.MIGRATION_5_6, FinchDatabase.MIGRATION_6_7,
-                FinchDatabase.MIGRATION_7_8, FinchDatabase.MIGRATION_8_9,
-                FinchDatabase.MIGRATION_9_10, FinchDatabase.MIGRATION_10_11,
-                FinchDatabase.MIGRATION_11_12, FinchDatabase.MIGRATION_12_13,
-                FinchDatabase.MIGRATION_13_14, FinchDatabase.MIGRATION_14_15,
-                FinchDatabase.MIGRATION_15_16,
-            )
+            .addMigrations(*FinchDatabase.ALL_MIGRATIONS)
             .allowMainThreadQueries()
             .build()
 }

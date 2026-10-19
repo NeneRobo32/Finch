@@ -61,6 +61,15 @@ class FinchWidget : GlanceAppWidget() {
         val runningElapsedMin = running?.effectiveMillis()?.div(60_000) ?: 0L
         // 今日总时长：已完成会话聚合是 DAO 层的（已扣暂停）；进行中这段用 effective 口径
         val todayMinutes = (db.sessionDao().totalBetween(todayStart, todayEnd) ?: 0L) / 60_000
+        // 周累计（周一口径，与总结页一致）与本月 Top1（v0.17 小组件扩展）
+        val today = LocalDateTime.now().toLocalDate()
+        val monday = today.with(java.time.DayOfWeek.MONDAY)
+        val weekStart = monday.atStartOfDay(zone).toInstant().toEpochMilli()
+        val weekEnd = monday.plusWeeks(1).atStartOfDay(zone).toInstant().toEpochMilli()
+        val weekMinutes = (db.sessionDao().totalBetween(weekStart, weekEnd) ?: 0L) / 60_000
+        val monthStart = today.withDayOfMonth(1).atStartOfDay(zone).toInstant().toEpochMilli()
+        val monthEnd = today.withDayOfMonth(1).plusMonths(1).atStartOfDay(zone).toInstant().toEpochMilli()
+        val monthTop = db.sessionDao().topGameNameBetween(monthStart, monthEnd)
 
         // 点击直达：组件名不写死（applicationId 加 suffix 也能开）；正在玩/已暂停时直接打开该游戏详情
         val launchIntent = Intent().setClass(context, MainActivity::class.java).apply {
@@ -75,9 +84,15 @@ class FinchWidget : GlanceAppWidget() {
         }
         val elapsedText = context.getString(dev.cao.finch.R.string.widget_elapsed, runningElapsedMin)
         val todayText = context.getString(dev.cao.finch.R.string.widget_today, todayMinutes)
+        // v0.17：宽格加「今日·本周」合并行与「月 Top1」行
+        val todayWeekText = context.getString(dev.cao.finch.R.string.widget_today_week, todayMinutes, weekMinutes)
+        val monthTopText = monthTop?.let { context.getString(dev.cao.finch.R.string.widget_month_top, it) }
 
         provideContent {
-            Content(titleText, elapsedText, todayText, showElapsed = runningName != null, launchIntent)
+            Content(
+                titleText, elapsedText, todayText, todayWeekText, monthTopText,
+                showElapsed = runningName != null, launchIntent,
+            )
         }
     }
 
@@ -86,11 +101,13 @@ class FinchWidget : GlanceAppWidget() {
         titleText: String,
         elapsedText: String,
         todayText: String,
+        todayWeekText: String,
+        monthTopText: String?,
         showElapsed: Boolean,
         launchIntent: Intent,
     ) {
         val muted = ColorProvider(Color(0xFF9AA4AE))
-        // 窄格（2×1）只放两行：标题 + 单行时长（计时中显「已玩」，否则显「今日」），宽格放全三行
+        // 窄格（2×1）只放两行：标题 + 单行时长（计时中显「已玩」，否则显「今日」），宽格放全四行
         val narrow = LocalSize.current.width <= NARROW_SIZE.width
         Column(
             modifier = GlanceModifier
@@ -115,9 +132,12 @@ class FinchWidget : GlanceAppWidget() {
                 )
             } else {
                 if (showElapsed) {
-                    Text(elapsedText, style = TextStyle(color = muted, fontSize = 12.sp))
+                    Text(elapsedText, style = TextStyle(color = muted, fontSize = 12.sp), maxLines = 1)
                 }
-                Text(todayText, style = TextStyle(color = muted, fontSize = 12.sp))
+                Text(todayWeekText, style = TextStyle(color = muted, fontSize = 12.sp), maxLines = 1)
+                monthTopText?.let {
+                    Text(it, style = TextStyle(color = muted, fontSize = 12.sp), maxLines = 1)
+                }
             }
         }
     }

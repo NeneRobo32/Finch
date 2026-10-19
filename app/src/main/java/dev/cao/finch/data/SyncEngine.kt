@@ -376,6 +376,28 @@ object SyncEngine {
                 ).added
             }
         }
+
+        // 奖杯概要（v0.17）：失败静默隔离——奖杯拉不到不影响时长同步主流程
+        runCatching {
+            withContext(Dispatchers.IO) { PsnClient.fetchTrophyTitles(tokens.accessToken) }
+        }.getOrNull()?.takeIf { it.isNotEmpty() }?.let { trophyTitles ->
+            db.withTransaction {
+                val all = gameDao.all()
+                for (t in trophyTitles) {
+                    val game = claimTrophyGame(all, t) ?: continue
+                    gameDao.update(
+                        game.copy(
+                            trophyPlatinum = t.platinum,
+                            trophyGold = t.gold,
+                            trophySilver = t.silver,
+                            trophyBronze = t.bronze,
+                            trophyProgress = t.progress,
+                            trophyUpdatedAt = now,
+                        )
+                    )
+                }
+            }
+        }
         return PsnResult(
             created, matched, skipped, sessionAdded,
             refreshTokenOut = tokens.refreshToken.ifBlank { refreshToken },
@@ -394,6 +416,21 @@ internal fun shouldRenameSteam(existingSteamAppId: Long?, existingName: String, 
 /** Switch 英文名回填条件（v0.15.9）：同 appId 绑定 + 标题不同 + 新标题非空 → 同一游戏的语言差异改名（纯函数，单测直接调用） */
 internal fun shouldRenameSwitch(existingSwitchAppId: String?, existingName: String, newTitle: String): Boolean =
     !existingSwitchAppId.isNullOrBlank() && !existingName.equals(newTitle, ignoreCase = true) && newTitle.isNotBlank()
+
+/** 奖杯归认（v0.17，纯函数，单测直接调用）：
+ *  npTitleId 精确/剥 `_NN` 后缀等价优先，其次 PS 行名字完全一致且唯一；都不中返回 null（宁漏勿错） */
+internal fun claimTrophyGame(games: List<Game>, t: PsnClient.PsnTrophyTitle): Game? {
+    t.npTitleId?.let { nid ->
+        games.firstOrNull { psnTitleIdEquals(it.psnTitleId, nid) }?.let { return it }
+    }
+    return games.filter { it.platform == Platform.PS && it.name == t.name }.singleOrNull()
+}
+
+/** PSN 标题 ID 等价（纯函数）：精确相同，或剥掉 `_NN` 后缀后相同（gamelist 与 trophy 接口的形态差异） */
+internal fun psnTitleIdEquals(a: String?, b: String?): Boolean {
+    if (a.isNullOrBlank() || b.isNullOrBlank()) return false
+    return a == b || a.substringBefore('_') == b.substringBefore('_')
+}
 
 /**
  * Steam/PSN 增量时长的逐日摊分（纯函数，可单测）。
