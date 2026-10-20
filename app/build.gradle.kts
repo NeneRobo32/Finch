@@ -39,8 +39,8 @@ android {
         applicationId = "dev.cao.finch"
         minSdk = 26
         targetSdk = 36
-        versionCode = 76
-        versionName = "0.17.0"
+        versionCode = 77
+        versionName = "0.18.0"
     }
 
     signingConfigs {
@@ -77,6 +77,10 @@ android {
     lint {
         // 显式 lint 策略：错误阻断构建（CI 跑完整 lint，不再只靠 release 的 lintVital）；
         // 警告先不阻断（无障碍描述等在 G 组逐步补齐后可升 warningsAsErrors）
+        // assembleRelease 不再附带 lintVital：本地只负责出包，完整 lint 由 CI 的 :app:lint
+        // 或手动 `.\gradlew.bat :app:lint` 承担。lintVital 要对 release 变体全量分析，
+        // 在 4 核机器上是 release 构建里最贵的几项之一。
+        checkReleaseBuilds = false
         abortOnError = true
         warningsAsErrors = false
         checkAllWarnings = true

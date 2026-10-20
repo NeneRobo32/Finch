@@ -1,5 +1,41 @@
 # Changelog
 
+## 0.18.0 (2026-10-20)
+
+界面重构版（无 DB 变更，纯前端）：
+
+- **设计系统**：新增 `ui/design`——间距/动效 tokens、连续曲率圆角（`com.kyant.shapes`）、
+  玻璃层级与统一控件（按钮 / 筛选胶囊 / 分段控件 / 输入框 / 开关 / 进度条 / 星级 / FAB /
+  卡片 / 页头 / 空状态 / 弹窗 / 底部弹层 / Snackbar）；屏幕不再直接用 Material 默认控件，
+  圆角、字级、间距、按压动效全 App 一套口径
+- **Liquid Glass 统一**：玻璃分 Chrome / Card / Tile / Hero 四档（Kyant0/backdrop 2.0 的
+  vibrancy + blur + lens 配方）；卡片内部控件改用 InsetSurface 平面玻璃，避免「嵌套玻璃
+  采到根背景」的破洞感；悬浮底栏颜色改为跟主题走（此前写死 iOS 蓝）
+- **官方组件**：控件直接复用 AndroidLiquidGlass catalog——`LiquidButton`（主/危险操作，带按下形变、
+  指针跟随高光）、`LiquidToggle`（设置开关）、`LiquidSlider`（总结页月/年快速拖动）、
+  `LiquidBottomTabs`（底栏）；只把上游写死的 iOS 绿/蓝换成主题色，并补 `enabled` / 紧凑高度参数
+- **氛围背景**：全屏静态三点光斑 + 垂直明暗，作为唯一玻璃采样层；三套主题各自有底色与
+  光斑，滚动/动画时玻璃不闪；状态栏、导航栏图标跟随应用亮暗
+- **逐屏重构**：主页（问候页头 / 本月 hero / 平台分段 / FlowRow 状态筛选 / 横卡 / 圆形 FAB）、
+  详情页（封面沉浸 / 深色顶栏胶囊 / 计时控制台 / 统计格 / 奖杯 / HLTB / 状态评分 / 感想 / 记录）、
+  记录页（按天分组 + 计时中实时走秒）、总结页（月年分段 + 期数卡 + 渐变 hero + 统一图表配色）、
+  日程页（数据源胶囊 + 关注卡 + 分组列表）、设置页（外观 / 同步 / 补录 / 备份 / 更新分区卡片）
+- **修复**：深色模式下未显式指定颜色的文字/图标是黑色、不可读（FinchTheme 补 `LocalContentColor`）；
+  「X 天前」因 Int 溢出恒显示日期；记录页计时中时长不再只在重组时刷新
+- **修复（用户反馈）**：底栏选中玻璃点击 tab 不跟随、只有按住拖拽才移动——根因是
+  `remember(selectedTabIndex)` 在 lambda 身份变化时重建了 `MutableIntState`，而正在收集的
+  `snapshotFlow` 仍盯着旧状态；改为按 `selectedIndex` 的值直接驱动 `animateToValue`，
+  点击与拖拽都会移动。选中态同时改为常驻底色 + 轻折射 + 高光/投影，静止时也看得见；
+  总结页游戏排行行距加大（排名 28dp / 封面 46dp / 行高 8dp）
+- **性能**：玻璃绘制链锁成同一个 Modifier 实例（`drawBackdrop` 每次调用都会新建
+  `ShapeProvider` 且按引用比较，卡片一重组就重建 shader 链、重录 5 个离屏层）；
+  `GlassSurface` 不再为每张卡白建一个 `LayerBackdrop`；玻璃绘制里的渐变 Brush 从「每帧新建」
+  改为常驻；记录页秒级走秒只重组进行中的那一行（原来整列表每秒一起重组）；
+  玻璃默认不再叠 blur——采样源只有平滑的氛围背景，模糊前后几乎无差别，关掉可省一遍全表面
+  像素运算（`GLASS_BLUR` 开关可恢复）
+- **验证**：`:app:assembleDebug` 通过；Robolectric 无头渲染逐屏检查布局与字级
+  （软件画布不支持 RuntimeShader，玻璃以纯色替身渲染，仅用于布局校验）
+
 ## 0.17.0 (2026-10-19)
 
 功能版（PS 奖杯同步 + 小组件扩展，DB 16→17）：

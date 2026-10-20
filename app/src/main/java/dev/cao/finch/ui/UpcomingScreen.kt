@@ -1,9 +1,8 @@
 package dev.cao.finch.ui
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -15,9 +14,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -27,15 +23,9 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarBorder
-import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -47,22 +37,40 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.cao.finch.R
 import dev.cao.finch.data.GameRepository
 import dev.cao.finch.data.Platform
+import dev.cao.finch.ui.design.FinchBadge
+import dev.cao.finch.ui.design.FinchButton
+import dev.cao.finch.ui.design.FinchButtonVariant
+import dev.cao.finch.ui.design.FinchCard
+import dev.cao.finch.ui.design.FinchChip
+import dev.cao.finch.ui.design.FinchEmptyState
+import dev.cao.finch.ui.design.FinchHeader
+import dev.cao.finch.ui.design.FinchIconButton
+import dev.cao.finch.ui.design.FinchLoading
+import dev.cao.finch.ui.design.FinchSectionTitle
+import dev.cao.finch.ui.design.FinchSheet
+import dev.cao.finch.ui.design.FinchSpace
+import dev.cao.finch.ui.design.FinchTextField
+import dev.cao.finch.ui.design.GlassStyle
+import dev.cao.finch.ui.design.GlassSurface
+import dev.cao.finch.ui.theme.FinchShapes
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
 
-@OptIn(ExperimentalMaterial3Api::class)
+/**
+ * 发售日程页（2026-10 UI 重构）：
+ * 页头 → 数据源胶囊 → 搜索 → 我的关注 → 分组列表（玻璃横卡）。
+ * 数据源切换、关注、入库与平台补选逻辑不变。
+ */
 @Composable
 fun UpcomingScreen(
     upcomingViewModel: UpcomingViewModel = viewModel(),
-    backdrop: com.kyant.backdrop.Backdrop? = null,
 ) {
     val state by upcomingViewModel.state.collectAsState()
     var platformPickerFor by remember { mutableStateOf<UpcomingViewModel.UpcomingEntry?>(null) }
@@ -75,183 +83,172 @@ fun UpcomingScreen(
         modifier = Modifier
             .fillMaxSize()
             .statusBarsPadding()
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+            .padding(horizontal = FinchSpace.screen),
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column {
-                Text("发售日程", style = MaterialTheme.typography.headlineSmall)
-                Text(
-                    "数据源：游民星空 / eShop / Steam / Bangumi（可切换，搜索不受大作过滤）",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+        Spacer(Modifier.height(FinchSpace.sm))
+        FinchHeader(
+            title = "发售日程",
+            subtitle = "游民星空 / eShop / Steam / Bangumi 多源聚合",
+            actions = {
+                FinchIconButton(
+                    icon = Icons.Filled.Refresh,
+                    contentDescription = "刷新日程",
+                    onClick = { upcomingViewModel.refresh() },
                 )
-            }
-            TextButton(onClick = { upcomingViewModel.refresh() }) {
-                Icon(Icons.Filled.Refresh, contentDescription = null)
-                Spacer(Modifier.width(4.dp))
-                Text("刷新")
-            }
-        }
-
-        // 数据源切换（横向滚动，防溢出）
+            },
+        )
+        Spacer(Modifier.height(FinchSpace.md))
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(FinchSpace.sm),
         ) {
             UpcomingViewModel.Source.entries.forEach { s ->
-                androidx.compose.material3.FilterChip(
+                FinchChip(
+                    label = s.label,
                     selected = source == s,
                     onClick = { upcomingViewModel.setSource(s) },
-                    label = { Text(s.label) },
                 )
             }
         }
-
-        // 搜索框（对发售日程里的游戏按名字过滤）
-        OutlinedTextField(
+        Spacer(Modifier.height(FinchSpace.sm))
+        FinchTextField(
             value = query,
             onValueChange = { query = it },
-            placeholder = { Text("搜索发售日程…") },
-            leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
-            singleLine = true,
+            placeholder = "搜索发售日程…",
+            leadingIcon = Icons.Filled.Search,
             modifier = Modifier.fillMaxWidth(),
         )
-
-        // 我的关注（置顶，有关注才出现）
-        if (follows.isNotEmpty()) {
-            GlassCard(modifier = Modifier.fillMaxWidth(), backdrop = backdrop) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(
-                        "我的关注（${follows.size}）",
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                    follows.take(10).forEach { f ->
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text(
-                                f.name,
-                                style = MaterialTheme.typography.bodyMedium,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.weight(1f),
-                            )
-                            Spacer(Modifier.width(8.dp))
-                            // 「今天」进 remember key：跨天重组后倒计时不再显示昨天算的陈旧值
-                            val today = LocalDate.now()
-                            val countdown = remember(f.dateIso, today) {
-                                val d = runCatching {
-                                    LocalDate.parse(f.dateIso, DateTimeFormatter.ISO_DATE)
-                                }.getOrNull()
-                                if (d == null) "日期待定"
-                                else dev.cao.finch.notify.ReleaseCheckWorker.countdownText(today, d, f.notifyDays)
-                                    ?: d.format(DateTimeFormatter.ofPattern("M月d日"))
-                            }
-                            Text(
-                                countdown,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.primary,
-                                maxLines = 1,
-                            )
-                        }
-                    }
-                    Text(
-                        "每天检查一次，发售前 3 天发通知（省电模式下可能延迟）",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-        }
+        Spacer(Modifier.height(FinchSpace.md))
 
         val s = state
         when (s) {
             is UpcomingViewModel.LoadState.Failed -> {
-                GlassCard(modifier = Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text("加载失败", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.error)
-                        Text(s.message, style = MaterialTheme.typography.bodySmall)
-                        if (s.hadCache) Text("下拉前先展示的是上次的缓存数据", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        TextButton(onClick = { upcomingViewModel.refresh() }) { Text("重试") }
-                    }
-                }
+                FinchEmptyState(
+                    icon = Icons.Filled.Event,
+                    title = "日程加载失败",
+                    message = s.message,
+                    actionLabel = "重试",
+                    onAction = { upcomingViewModel.refresh() },
+                    modifier = Modifier.padding(top = FinchSpace.sm),
+                )
             }
+
             is UpcomingViewModel.LoadState.Ready -> {
-                if (s.note?.startsWith("缓存") == true) {
-                    Text(
-                        "正在刷新在线数据…",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
                 val q = query.trim().lowercase()
-                // 搜索走全量（不过滤大作），这样小作也能搜到
                 val searchPool = if (q.isEmpty()) s.entries else s.allEntries
                 val filtered = if (q.isEmpty()) searchPool else searchPool.filter {
                     it.name.lowercase().contains(q) || (it.nameCn?.lowercase()?.contains(q) == true)
                 }
-                if (filtered.isEmpty() && q.isEmpty() && s.entries.isEmpty()) {
-                    GlassCard(modifier = Modifier.fillMaxWidth()) {
-                        Column(Modifier.padding(16.dp)) {
-                            Text("没有符合条件的大作发售信息")
-                            Spacer(Modifier.height(4.dp))
-                            Text("数据来自 游民星空 / eShop / Steam / Bangumi，点右上角刷新重试。", style = MaterialTheme.typography.bodySmall)
+                androidx.compose.foundation.lazy.LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    verticalArrangement = Arrangement.spacedBy(FinchSpace.sm),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                        top = FinchSpace.xs,
+                        bottom = FinchSpace.bottomBarClearance,
+                    ),
+                ) {
+                    if (follows.isNotEmpty()) {
+                        item(key = "follows") {
+                            FinchCard(
+                                title = "我的关注",
+                                icon = Icons.Filled.Star,
+                                titleExtra = "${follows.size}",
+                                style = GlassStyle.Card,
+                            ) {
+                                follows.take(10).forEach { f ->
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(vertical = 3.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        Text(
+                                            f.name,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                            modifier = Modifier.weight(1f),
+                                        )
+                                        Spacer(Modifier.width(FinchSpace.sm))
+                                        val today = LocalDate.now()
+                                        val countdown = remember(f.dateIso, today) {
+                                            val d = runCatching {
+                                                LocalDate.parse(f.dateIso, DateTimeFormatter.ISO_DATE)
+                                            }.getOrNull()
+                                            if (d == null) "日期待定"
+                                            else dev.cao.finch.notify.ReleaseCheckWorker.countdownText(today, d, f.notifyDays)
+                                                ?: d.format(DateTimeFormatter.ofPattern("M月d日"))
+                                        }
+                                        FinchBadge(countdown)
+                                    }
+                                }
+                                Spacer(Modifier.height(FinchSpace.xs))
+                                Text(
+                                    "每天检查一次，发售前 3 天发通知（省电模式下可能延迟）",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
                         }
                     }
-                }
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                    contentPadding = PaddingValues(bottom = Dimens.BottomBarOverlap),
-                ) {
-                    val now = LocalDate.now()
-                    if (filtered.isEmpty() && q.isNotEmpty()) {
-                        item {
+                    if (s.note?.startsWith("缓存") == true) {
+                        item(key = "cache_note") {
                             Text(
-                                "没有匹配「$query」的发售日程",
-                                style = MaterialTheme.typography.bodySmall,
+                                "正在刷新在线数据…",
+                                style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                textAlign = TextAlign.Center,
-                                modifier = Modifier.fillMaxWidth().padding(16.dp),
+                                modifier = Modifier.padding(vertical = FinchSpace.xs),
                             )
                         }
                     }
+                    if (filtered.isEmpty() && q.isNotEmpty()) {
+                        item(key = "no_match") {
+                            FinchEmptyState(
+                                icon = Icons.Filled.Search,
+                                title = "没有匹配「$query」",
+                                message = "试试游戏名的英文原名，或换一个数据源。",
+                            )
+                        }
+                    } else if (filtered.isEmpty() && s.entries.isEmpty()) {
+                        item(key = "no_data") {
+                            FinchEmptyState(
+                                icon = Icons.Filled.Event,
+                                title = "没有符合条件的大作发售信息",
+                                message = "数据来自游民星空 / eShop / Steam / Bangumi，点右上角刷新重试。",
+                                actionLabel = "刷新",
+                                onAction = { upcomingViewModel.refresh() },
+                            )
+                        }
+                    }
+                    val now = LocalDate.now()
                     val buckets = filtered.groupBy { e ->
                         val d = e.date
                         when {
-                            d != null && d <= now -> "recent"            // 已发售（含今天）
-                            d != null && d.year == now.year -> "coming"  // 本年度剩余
-                            else -> "later"                              // 更远期/无日期
+                            d != null && d <= now -> "recent"
+                            d != null && d.year == now.year -> "coming"
+                            else -> "later"
                         }
                     }
-                    // 段标题 + 条目（全年不截断）
-                    listOf("recent" to "本年度已发售", "coming" to "本年度待发售", "later" to "更远期").forEach { (key, label) ->
+                    listOf(
+                        "recent" to "本年度已发售",
+                        "coming" to "本年度待发售",
+                        "later" to "更远期",
+                    ).forEach { (key, label) ->
                         val items = buckets[key].orEmpty()
                         if (items.isNotEmpty()) {
                             item(key = "header_$key") {
-                                Text(
-                                    label + "（${items.size}）",
-                                    style = MaterialTheme.typography.titleSmall,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.padding(top = 4.dp),
-                                )
+                                FinchSectionTitle(label, trailing = "${items.size} 款")
                             }
                             items.forEach { entry ->
-                                item(key = "entry_" + (entry.source + ":" + (entry.bangumiId?.toString() ?: entry.steamAppId?.toString() ?: entry.name))) {
+                                item(
+                                    key = "entry_" + (entry.source + ":" +
+                                        (entry.bangumiId?.toString() ?: entry.steamAppId?.toString() ?: entry.name))
+                                ) {
                                     UpcomingRow(
                                         entry = entry,
-                                        backdrop = backdrop,
                                         followed = upcomingViewModel.followKeyOf(entry) in followKeys,
                                         onToggleFollow = { upcomingViewModel.toggleFollow(entry) },
                                         onAdd = {
@@ -268,9 +265,10 @@ fun UpcomingScreen(
                     }
                 }
             }
+
             else -> {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator()
+                    FinchLoading(label = "正在拉取发售日程…")
                 }
             }
         }
@@ -291,106 +289,122 @@ fun UpcomingScreen(
 @Composable
 private fun UpcomingRow(
     entry: UpcomingViewModel.UpcomingEntry,
-    backdrop: com.kyant.backdrop.Backdrop?,
     followed: Boolean,
     onToggleFollow: () -> Unit,
     onAdd: () -> Unit,
 ) {
-    GlassCard(modifier = Modifier.fillMaxWidth(), backdrop = backdrop) {
+    GlassSurface(
+        modifier = Modifier.fillMaxWidth(),
+        style = GlassStyle.Tile,
+        shape = FinchShapes.tile,
+    ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 10.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
+                .padding(FinchSpace.sm),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-                GameCover(
-                    url = entry.coverUrl,
-                    contentDescription = null,
-                    modifier = Modifier
-                        .size(52.dp)
-                        .clip(RoundedCornerShape(8.dp)),
-                    requestSize = 104,
-                    placeholder = {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .background(MaterialTheme.colorScheme.surfaceVariant),
-                            contentAlignment = Alignment.Center,
-                        ) { Icon(Icons.Filled.Event, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant) }
-                    },
-                )
-                Spacer(Modifier.width(12.dp))
-                Column {
-                    Text(entry.name, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    entry.nameCn?.let {
-                        Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            GameCover(
+                url = entry.coverUrl,
+                contentDescription = null,
+                modifier = Modifier
+                    .size(52.dp)
+                    .clip(FinchShapes.thumb),
+                requestSize = 104,
+                placeholder = {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(MaterialTheme.colorScheme.surfaceVariant),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            Icons.Filled.Event,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(20.dp),
+                        )
                     }
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        if (entry.date != null) {
-                            val days = ChronoUnit.DAYS.between(LocalDate.now(), entry.date)
-                            val dateText = entry.date.format(DateTimeFormatter.ofPattern("M月d日"))
-                            val daysText = when {
-                                days == 0L -> "今天发售"
-                                days == 1L -> "明天"
-                                days in 2..30 -> "${days}天后"
-                                else -> dateText
-                            }
-                            Text(
-                                daysText,
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.SemiBold,
-                                color = if (days in 0..7) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                            Spacer(Modifier.width(8.dp))
-                        } else if (entry.releaseText != null) {
-                            Text(
-                                entry.releaseText,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                            Spacer(Modifier.width(8.dp))
+                },
+            )
+            Spacer(Modifier.width(FinchSpace.md))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    entry.name,
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                entry.nameCn?.let {
+                    Text(
+                        it,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                Spacer(Modifier.height(2.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (entry.date != null) {
+                        val days = ChronoUnit.DAYS.between(LocalDate.now(), entry.date)
+                        val dateText = entry.date.format(DateTimeFormatter.ofPattern("M月d日"))
+                        val daysText = when {
+                            days == 0L -> "今天发售"
+                            days == 1L -> "明天"
+                            days in 2..30 -> "${days}天后"
+                            else -> dateText
                         }
-                        val plats = entry.platforms.filter { it != Platform.Multi }
-                        if (plats.isNotEmpty()) {
-                            Text(
-                                GameRepository.labelFor(plats),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
+                        FinchBadge(
+                            daysText,
+                            tint = if (days in 0..7) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Spacer(Modifier.width(FinchSpace.sm))
+                    } else if (entry.releaseText != null) {
+                        Text(
+                            entry.releaseText,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Spacer(Modifier.width(FinchSpace.sm))
+                    }
+                    val plats = entry.platforms.filter { it != Platform.Multi }
+                    if (plats.isNotEmpty()) {
+                        Text(
+                            GameRepository.labelFor(plats),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                        )
                     }
                 }
             }
+            Spacer(Modifier.width(FinchSpace.xs))
             if (entry.added) {
-                Text(
-                    "已在库",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                FinchBadge("已在库")
             } else {
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
-                    TextButton(onClick = onToggleFollow) {
-                        Icon(
-                            if (followed) Icons.Filled.Star else Icons.Filled.StarBorder,
-                            contentDescription = stringResource(
-                                if (followed) R.string.a11y_unfollow else R.string.a11y_follow,
-                            ),
-                        )
-                    }
-                    Button(onClick = onAdd) {
-                        Icon(Icons.Filled.Add, contentDescription = null)
-                        Text("入库")
-                    }
-                }
+                FinchIconButton(
+                    icon = if (followed) Icons.Filled.Star else Icons.Filled.StarBorder,
+                    contentDescription = stringResource(if (followed) R.string.a11y_unfollow else R.string.a11y_follow),
+                    onClick = onToggleFollow,
+                    ghost = true,
+                    tint = if (followed) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                FinchButton(
+                    text = "入库",
+                    icon = Icons.Filled.Add,
+                    variant = FinchButtonVariant.Glass,
+                    compact = true,
+                    onClick = onAdd,
+                )
             }
         }
     }
 }
 
 /** 无平台信息时的勾选底部弹窗 */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun PlatformPickerSheet(
     entryName: String,
@@ -398,25 +412,34 @@ private fun PlatformPickerSheet(
     onDismiss: () -> Unit,
 ) {
     var selected by remember { mutableStateOf(setOf<Platform>()) }
-    ModalBottomSheet(onDismissRequest = onDismiss) {
-        Column(Modifier.padding(horizontal = 20.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("「$entryName」是什么平台？", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf(Platform.PC, Platform.SWITCH, Platform.PS).forEach { p ->
-                    androidx.compose.material3.FilterChip(
-                        selected = p in selected,
-                        onClick = {
-                            selected = if (p in selected) selected - p else selected + p
-                        },
-                        label = { Text(platformLabel(p)) },
-                    )
-                }
+    FinchSheet(
+        title = "「$entryName」是什么平台？",
+        subtitle = "可多选，选完加入游戏库。",
+        onDismiss = onDismiss,
+    ) {
+        Row(horizontalArrangement = Arrangement.spacedBy(FinchSpace.sm)) {
+            listOf(Platform.PC, Platform.SWITCH, Platform.PS).forEach { p ->
+                FinchChip(
+                    label = platformLabel(p),
+                    selected = p in selected,
+                    onClick = {
+                        selected = if (p in selected) selected - p else selected + p
+                    },
+                )
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.align(Alignment.End)) {
-                TextButton(onClick = onDismiss) { Text("取消") }
-                Button(enabled = selected.isNotEmpty(), onClick = { onConfirm(selected) }) { Text("加入游戏库") }
-            }
-            Spacer(Modifier.height(16.dp))
         }
+        Spacer(Modifier.height(FinchSpace.xl))
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(FinchSpace.sm),
+            modifier = Modifier.align(Alignment.End),
+        ) {
+            FinchButton(text = "取消", variant = FinchButtonVariant.Ghost, onClick = onDismiss)
+            FinchButton(
+                text = "加入游戏库",
+                enabled = selected.isNotEmpty(),
+                onClick = { onConfirm(selected) },
+            )
+        }
+        Spacer(Modifier.height(FinchSpace.sm))
     }
 }

@@ -102,6 +102,21 @@ data class ScenePalette(
     val monthGlow: Color,
 )
 
+/**
+ * 氛围背景配色（2026-10 UI 重构）：
+ * 玻璃面板只有叠在「有层次的光」上才看得出折射——纯色底上玻璃等于没效果。
+ * - base：整屏底色（同时是采样层，保证滚动时玻璃不闪）
+ * - glowA/B/C：三团大范围径向光斑，分别从右上 / 左中 / 底部透出
+ * - intensity：光斑整体强度（经典纸感最克制，琉璃玻璃最明显）
+ */
+data class AmbientPalette(
+    val base: Color,
+    val glowA: Color,
+    val glowB: Color,
+    val glowC: Color,
+    val intensity: Float,
+)
+
 private object Iridescent {
     // Google Glazier Glass / Liquid Glass（浅色）：干净玻璃白 + 酸性蓝紫渐变
     val light = lightColorScheme(
@@ -171,6 +186,21 @@ private object Iridescent {
         switchThumb = Color(0xFF1C2025),
         numericGlow = Color(0xFF6E9DFF),
         monthGlow = Color(0xFF8FB8FF),
+    )
+    // 清透蓝紫：像晴天窗边的玻璃
+    val ambientLight = AmbientPalette(
+        base = Color(0xFFF2F5FA),
+        glowA = Color(0xFF8FB8FF),
+        glowB = Color(0xFFC3B2FF),
+        glowC = Color(0xFF8FE6FF),
+        intensity = 0.95f,
+    )
+    val ambientDark = AmbientPalette(
+        base = Color(0xFF090D12),
+        glowA = Color(0xFF2C5BA8),
+        glowB = Color(0xFF4B3A8F),
+        glowC = Color(0xFF0E5C6E),
+        intensity = 0.9f,
     )
 }
 
@@ -244,6 +274,21 @@ private object Midnight {
         numericGlow = Color(0xFF9B87FF),
         monthGlow = Color(0xFF9B87FF),
     )
+    // 深海靛紫：夜色里的一束电光
+    val ambientLight = AmbientPalette(
+        base = Color(0xFFF4F5FB),
+        glowA = Color(0xFF8C7BF0),
+        glowB = Color(0xFF6FA8E8),
+        glowC = Color(0xFFE09AC0),
+        intensity = 0.85f,
+    )
+    val ambientDark = AmbientPalette(
+        base = Color(0xFF070B20),
+        glowA = Color(0xFF3A2F9E),
+        glowB = Color(0xFF1B4E86),
+        glowC = Color(0xFF6A2B5C),
+        intensity = 1f,
+    )
 }
 
 private object Paper {
@@ -316,6 +361,21 @@ private object Paper {
         numericGlow = Color(0xFF5FB3FF),
         monthGlow = Color(0xFF2997FF),
     )
+    // 哑光纸面：光只做极轻的冷暖过渡，不抢内容
+    val ambientLight = AmbientPalette(
+        base = Color(0xFFF4F4F6),
+        glowA = Color(0xFFDCE4F2),
+        glowB = Color(0xFFEDE3F0),
+        glowC = Color(0xFFE2ECEF),
+        intensity = 0.55f,
+    )
+    val ambientDark = AmbientPalette(
+        base = Color(0xFF0F0F11),
+        glowA = Color(0xFF243040),
+        glowB = Color(0xFF2C2436),
+        glowC = Color(0xFF1C2C30),
+        intensity = 0.7f,
+    )
 }
 
 // ============ 主题打包 ============
@@ -324,14 +384,16 @@ data class FinchColorScheme(
     val scheme: androidx.compose.material3.ColorScheme,
     val glass: GlassPalette,
     val scene: ScenePalette,
+    val ambient: AmbientPalette,
+    val isDark: Boolean,
 )
 
-private val IridescentLight = FinchColorScheme(Iridescent.light, Iridescent.glassLight, Iridescent.sceneLight)
-private val IridescentDark = FinchColorScheme(Iridescent.dark, Iridescent.glassDark, Iridescent.sceneDark)
-private val MidnightLight = FinchColorScheme(Midnight.light, Midnight.glassLight, Midnight.sceneLight)
-private val MidnightDark = FinchColorScheme(Midnight.dark, Midnight.glassDark, Midnight.sceneDark)
-private val PaperLight = FinchColorScheme(Paper.light, Paper.glassLight, Paper.sceneLight)
-private val PaperDark = FinchColorScheme(Paper.dark, Paper.glassDark, Paper.sceneDark)
+private val IridescentLight = FinchColorScheme(Iridescent.light, Iridescent.glassLight, Iridescent.sceneLight, Iridescent.ambientLight, false)
+private val IridescentDark = FinchColorScheme(Iridescent.dark, Iridescent.glassDark, Iridescent.sceneDark, Iridescent.ambientDark, true)
+private val MidnightLight = FinchColorScheme(Midnight.light, Midnight.glassLight, Midnight.sceneLight, Midnight.ambientLight, false)
+private val MidnightDark = FinchColorScheme(Midnight.dark, Midnight.glassDark, Midnight.sceneDark, Midnight.ambientDark, true)
+private val PaperLight = FinchColorScheme(Paper.light, Paper.glassLight, Paper.sceneLight, Paper.ambientLight, false)
+private val PaperDark = FinchColorScheme(Paper.dark, Paper.glassDark, Paper.sceneDark, Paper.ambientDark, true)
 
 /** 主题名 → 亮/暗配色 */
 val FinchSchemes: Map<FinchTheme, FinchColorScheme> = mapOf(

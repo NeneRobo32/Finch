@@ -32,13 +32,7 @@ import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
 import dev.cao.finch.data.Platform
 
-/** 跨屏共享的小 UI 工具：尺寸常量 / 游戏封面 / 统计格 / 平台图标 / 平台短名 / 相对时间 */
-
-/** 跨屏统一尺寸常量 */
-internal object Dimens {
-    /** 悬浮底栏（64dp 胶囊 + 抬高留白）压在内容底部，各屏底部让位统一用这个值 */
-    val BottomBarOverlap = 150.dp
-}
+/** 跨屏共享的小 UI 工具：游戏封面 / 时间输入 / 平台图标 / 平台短名 / 相对时间 */
 
 /**
  * 游戏封面统一组件（旧实现只在 url==null 时给占位、加载失败留白）：
@@ -87,56 +81,29 @@ internal fun SessionTimeFields(
     endField: String,
     onEndChange: (String) -> Unit,
 ) {
-    androidx.compose.material3.OutlinedTextField(
+    dev.cao.finch.ui.design.FinchTextField(
         value = dateField,
         onValueChange = onDateChange,
-        label = { Text("日期 2025-8-30") },
+        label = "日期 2025-8-30",
         singleLine = true,
         modifier = Modifier.fillMaxWidth(),
     )
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        androidx.compose.material3.OutlinedTextField(
+        dev.cao.finch.ui.design.FinchTextField(
             value = startField,
             onValueChange = onStartChange,
-            label = { Text("开始 21:30") },
+            label = "开始 21:30",
             singleLine = true,
             modifier = Modifier.weight(1f),
         )
-        androidx.compose.material3.OutlinedTextField(
+        dev.cao.finch.ui.design.FinchTextField(
             value = endField,
             onValueChange = onEndChange,
-            label = { Text("结束 23:05") },
+            label = "结束 23:05",
             singleLine = true,
             modifier = Modifier.weight(1f),
         )
-    }
-}
-
-/** 玻璃小统计格（详情页三格统计等） */
-@Composable
-internal fun StatBox(label: String, value: String, modifier: Modifier = Modifier) {
-    GlassCard(modifier = modifier, shape = RoundedCornerShape(18.dp)) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 14.dp),
-            horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally,
-        ) {
-            Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Spacer(Modifier.height(2.dp))
-            // 值单行 + 自适应缩字号：长值（最近游玩的完整日期 "2026-10-04"、"6066h 7m"）在
-            // 1/3 屏宽的格子里按 titleLarge 会折行断字（2026-10-08 用户截图）；
-            // maxFontSize 锁 titleLarge 本值（约 22sp）——短值观感不变，只把长值缩到单行放得下
-            Text(
-                value,
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                autoSize = TextAutoSize.StepBased(minFontSize = 10.sp, maxFontSize = 22.sp, stepSize = 1.sp),
-            )
-        }
-    }
-}
+    }}
 
 /** 平台 → 图标（卡片占位、详情页无封面时） */
 internal fun platformIcon(platform: Platform): ImageVector = when (platform) {
@@ -162,8 +129,9 @@ internal fun relativeTime(epochMillis: Long): String {
         diff < 60_000 -> "刚刚"
         diff < 3600_000 -> "${diff / 60_000} 分钟前"
         diff < 24 * 3600_000 -> "${diff / 3600_000} 小时前"
-        diff < 48 * 3600_000 -> "昨天"
-        diff < 30 * 24 * 3600_000 -> "${diff / (24 * 3600_000)} 天前"
+        diff < 48 * 3600_000L -> "昨天"
+        // 30 天毫秒数超过 Int.MAX，这里必须用 Long，否则恒溢出为负、永远落到日期分支
+        diff < 30L * 24 * 3600_000 -> "${diff / (24 * 3600_000)} 天前"
         else -> {
             val d = java.time.Instant.ofEpochMilli(epochMillis)
                 .atZone(java.time.ZoneId.systemDefault()).toLocalDate()

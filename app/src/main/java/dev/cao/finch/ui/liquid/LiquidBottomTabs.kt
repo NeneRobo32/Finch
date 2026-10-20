@@ -16,11 +16,8 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
-import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -50,8 +47,6 @@ import com.kyant.backdrop.highlight.Highlight
 import com.kyant.backdrop.shadow.InnerShadow
 import com.kyant.backdrop.shadow.Shadow
 import com.kyant.shapes.Capsule
-import kotlinx.coroutines.flow.collectLatest
-import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
 import kotlin.math.abs
 import kotlin.math.sign
@@ -63,16 +58,13 @@ fun LiquidBottomTabs(
     backdrop: Backdrop,
     tabsCount: Int,
     modifier: Modifier = Modifier,
+    // 颜色由调用方按主题传入（原来这里写死 0xFF0088FF / 0xFFFAFAFA，
+    // 切到暮色玻璃或深色模式时底栏仍是 iOS 蓝，和全 App 的玻璃语言脱节）
+    accentColor: Color = Color(0xFF0088FF),
+    containerColor: Color = Color(0xFFFAFAFA).copy(0.4f),
+    isLightTheme: Boolean = !isSystemInDarkTheme(),
     content: @Composable RowScope.() -> Unit
 ) {
-    val isLightTheme = !isSystemInDarkTheme()
-    val accentColor =
-        if (isLightTheme) Color(0xFF0088FF)
-        else Color(0xFF0091FF)
-    val containerColor =
-        if (isLightTheme) Color(0xFFFAFAFA).copy(0.4f)
-        else Color(0xFF121212).copy(0.4f)
-
     val tabsBackdrop = rememberLayerBackdrop()
 
     BoxWithConstraints(
@@ -83,6 +75,11 @@ fun LiquidBottomTabs(
         val tabWidth = with(density) {
             (constraints.maxWidth.toFloat() - 8f.dp.toPx()) / tabsCount
         }
+        // 每个组合都重新读一次当前选中项；不能把它塞进 remember 的 key 里——
+        // 之前用 remember(selectedTabIndex) 缓存 currentIndex，点击 tab 后 lambda 身份变化会重建
+        // MutableIntState，而正在收集的 snapshotFlow 仍盯着旧 state，永远收不到新值，
+        // 于是选中玻璃只有拖拽时（直接改 Animatable）才会移动。这就是「点击不跟随」的根因。
+        val selectedIndex = selectedTabIndex()
 
         val offsetAnimation = remember { Animatable(0f) }
         // key 带上 constraints.maxWidth：否则旋转/分屏后闭包仍按旧宽度算偏移
@@ -97,13 +94,10 @@ fun LiquidBottomTabs(
 
         val isLtr = LocalLayoutDirection.current == LayoutDirection.Ltr
         val animationScope = rememberCoroutineScope()
-        var currentIndex by remember(selectedTabIndex) {
-            mutableIntStateOf(selectedTabIndex())
-        }
-        val dampedDragAnimation = remember(animationScope) {
+        val dampedDragAnimation = remember(animationScope, tabWidth) {
             DampedDragAnimation(
                 animationScope = animationScope,
-                initialValue = selectedTabIndex().toFloat(),
+                initialValue = selectedIndex.toFloat(),
                 valueRange = 0f..(tabsCount - 1).toFloat(),
                 visibilityThreshold = 0.001f,
                 initialScale = 1f,
@@ -111,8 +105,10 @@ fun LiquidBottomTabs(
                 onDragStarted = {},
                 onDragStopped = {
                     val targetIndex = targetValue.fastRoundToInt().fastCoerceIn(0, tabsCount - 1)
-                    currentIndex = targetIndex
+                    // 拖拽结束：先让玻璃落位，再通知外部切 tab；
+                    // 外部 selectedIndex 变化时下面的 effect 会看到 targetValue 已经一致，不会重复起动画。
                     animateToValue(targetIndex.toFloat())
+                    onTabSelected(targetIndex)
                     animationScope.launch {
                         offsetAnimation.animateTo(
                             0f,
@@ -131,22 +127,18 @@ fun LiquidBottomTabs(
                 }
             )
         }
-        LaunchedEffect(selectedTabIndex) {
-            snapshotFlow { selectedTabIndex() }
-                .collectLatest { index ->
-                    currentIndex = index
-                }
-        }
-        LaunchedEffect(dampedDragAnimation) {
-            snapshotFlow { currentIndex }
-                .drop(1)
-                .collectLatest { index ->
-                    dampedDragAnimation.animateToValue(index.toFloat())
-                    onTabSelected(index)
-                }
+        // 点击 tab（或代码里切换 tab）时，把选中玻璃滑到目标位置。
+        // 首次组合 value 已经等于 selectedIndex，不重复播放入场动画。
+        LaunchedEffect(selectedIndex) {
+            val target = selectedIndex.toFloat()
+            val alreadyThere = abs(dampedDragAnimation.value - target) < 0.01f
+            val animationAlreadyTargetsIt = abs(dampedDragAnimation.targetValue - target) < 0.01f
+            if (!alreadyThere && !animationAlreadyTargetsIt) {
+                dampedDragAnimation.animateToValue(target)
+            }
         }
 
-        val interactiveHighlight = remember(animationScope) {
+        val interactiveHighlight = remember(animationScope, dampedDragAnimation) {
             InteractiveHighlight(
                 animationScope = animationScope,
                 position = { size, offset ->
@@ -244,19 +236,24 @@ fun LiquidBottomTabs(
                     shape = { Capsule() },
                     effects = {
                         val progress = dampedDragAnimation.pressProgress
+                        // 静止时也保留一层轻折射，选中态才「看得见」；
+                        // 按下/拖动时再叠加强折射与色散。
                         lens(
-                            10f.dp.toPx() * progress,
-                            14f.dp.toPx() * progress,
-                            chromaticAberration = true
+                            6f.dp.toPx() + 10f.dp.toPx() * progress,
+                            10f.dp.toPx() + 14f.dp.toPx() * progress,
+                            chromaticAberration = progress > 0.02f
                         )
                     },
                     highlight = {
                         val progress = dampedDragAnimation.pressProgress
-                        Highlight.Default.copy(alpha = progress)
+                        Highlight.Default.copy(alpha = 0.55f + 0.45f * progress)
                     },
                     shadow = {
                         val progress = dampedDragAnimation.pressProgress
-                        Shadow(alpha = progress)
+                        Shadow(
+                            radius = 14f.dp,
+                            alpha = 0.35f + 0.65f * progress
+                        )
                     },
                     innerShadow = {
                         val progress = dampedDragAnimation.pressProgress
@@ -274,12 +271,15 @@ fun LiquidBottomTabs(
                     },
                     onDrawSurface = {
                         val progress = dampedDragAnimation.pressProgress
+                        // 常驻选中底色：浅色主题用白片 + 主题色轻染，深色主题用浅白 + 主题色
                         drawRect(
-                            if (isLightTheme) Color.Black.copy(0.1f)
-                            else Color.White.copy(0.1f),
-                            alpha = 1f - progress
+                            if (isLightTheme) Color.White.copy(alpha = 0.32f)
+                            else Color.White.copy(alpha = 0.12f)
                         )
-                        drawRect(Color.Black.copy(alpha = 0.03f * progress))
+                        drawRect(
+                            accentColor.copy(alpha = if (isLightTheme) 0.10f else 0.16f)
+                        )
+                        drawRect(Color.Black.copy(alpha = 0.05f * progress))
                     }
                 )
                 .height(56f.dp)

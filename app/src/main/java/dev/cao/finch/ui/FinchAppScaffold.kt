@@ -1,29 +1,31 @@
 package dev.cao.finch.ui
 
 import androidx.activity.compose.BackHandler
-import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.spring
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.BarChart
-import androidx.compose.material.icons.filled.CloudDownload
-import androidx.compose.material.icons.filled.Event
+import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Home
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
+import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.outlined.BarChart
+import androidx.compose.material.icons.outlined.CalendarMonth
+import androidx.compose.material.icons.outlined.History
+import androidx.compose.material.icons.outlined.Home
+import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -31,26 +33,37 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.kyant.backdrop.backdrops.layerBackdrop
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
-import dev.cao.finch.ui.liquid.LiquidBottomTab
-import dev.cao.finch.ui.liquid.LiquidBottomTabs
-import dev.cao.finch.ui.theme.FinchTheme
+import dev.cao.finch.ui.design.FinchAurora
+import dev.cao.finch.ui.design.FinchBottomBar
+import dev.cao.finch.ui.design.FinchMotion
+import dev.cao.finch.ui.design.FinchSpace
+import dev.cao.finch.ui.design.FinchTab
+import dev.cao.finch.ui.design.LocalFinchBackdrop
 import dev.cao.finch.ui.theme.FinchThemeState
 import dev.cao.finch.ui.theme.ThemeState
-import dev.cao.finch.ui.theme.glassPalette
 
-enum class Tab(val label: String) {
-    Home("主页"),
-    Upcoming("日程"),
-    History("记录"),
-    Stats("总结"),
-    Import("导入"),
+/**
+ * 底部五个 tab。图标选中态用实心、未选中用描边，和底栏的玻璃胶囊一起形成层级。
+ */
+enum class Tab(val label: String, val icon: androidx.compose.ui.graphics.vector.ImageVector, val selectedIcon: androidx.compose.ui.graphics.vector.ImageVector) {
+    Home("主页", Icons.Outlined.Home, Icons.Filled.Home),
+    Upcoming("日程", Icons.Outlined.CalendarMonth, Icons.Filled.CalendarMonth),
+    History("记录", Icons.Outlined.History, Icons.Filled.History),
+    Stats("总结", Icons.Outlined.BarChart, Icons.Filled.BarChart),
+    Import("设置", Icons.Outlined.Tune, Icons.Filled.Tune),
 }
 
+/**
+ * 应用外壳（2026-10 UI 重构）：
+ * ① 静态氛围背景层（唯一被玻璃采样的层，滚动/动画不闪）
+ * ② 内容层（五 tab 交叉淡入，各屏自己处理状态栏 insets）
+ * ③ 悬浮玻璃底栏（颜色跟主题走）
+ * ④ 通过 [LocalFinchBackdrop] 把采样源下发给所有 GlassSurface，屏幕不再手动传 backdrop。
+ */
 @Composable
 fun FinchAppScaffold(
     viewModel: FinchViewModel = viewModel(),
@@ -59,95 +72,67 @@ fun FinchAppScaffold(
     finchThemeState: FinchThemeState? = null,
     initialGameId: Long? = null,
 ) {
-    // rememberSaveable：旋转/进程重建后仍停留在原 tab（remember 会退回 Home 并丢掉各屏状态）
     var tab by rememberSaveable { mutableStateOf(Tab.Home) }
-    // 返回键/侧滑返回：非 Home tab 先回 Home tab（而不是直接退出 App）
     BackHandler(enabled = tab != Tab.Home) { tab = Tab.Home }
-    // 采样静态背景的 Backdrop（官方语义：玻璃只折射不动层，避免滚动/动画内容让玻璃闪烁）
     val backgroundBackdrop = rememberLayerBackdrop()
 
-    // 全屏容器：背景层(被采样) + 内容层(动态，不被采样) + 悬浮底栏
-    Box(Modifier.fillMaxSize()) {
-        // ① 静态背景层：主题表面色，唯一被 backdrop 采样的层（官方壁纸同语义）
-        Box(
-            Modifier
-                .fillMaxSize()
-                .layerBackdrop(backgroundBackdrop)
-                .background(MaterialTheme.colorScheme.surface),
-        )
-        // ② 内容层：滚动/动画内容（状态栏沉浸：各屏自行处理 insets）
+    CompositionLocalProvider(LocalFinchBackdrop provides backgroundBackdrop) {
         Box(Modifier.fillMaxSize()) {
-            androidx.compose.animation.AnimatedContent(
-                targetState = tab,
-                transitionSpec = {
-                    (androidx.compose.animation.fadeIn(
-                        animationSpec = spring(Spring.DampingRatioNoBouncy, Spring.StiffnessMedium),
-                    ) + androidx.compose.animation.slideInVertically(
-                        animationSpec = spring(Spring.DampingRatioNoBouncy, Spring.StiffnessMediumLow),
-                        initialOffsetY = { it / 24 },
-                    )) togetherWith
-                        (androidx.compose.animation.fadeOut(
-                            animationSpec = spring(Spring.DampingRatioNoBouncy, Spring.StiffnessMedium),
-                        ) + androidx.compose.animation.slideOutVertically(
-                            animationSpec = spring(Spring.DampingRatioNoBouncy, Spring.StiffnessMedium),
-                            targetOffsetY = { -it / 36 },
-                        ))
-                },
-                label = "tabContent",
-            ) { t ->
-                Box(Modifier.fillMaxSize()) {
-                    when (t) {
-                        Tab.Home -> HomeScreen(viewModel, addViewModel, backgroundBackdrop, initialGameId)
-                        Tab.Upcoming -> UpcomingScreen(backdrop = backgroundBackdrop)
-                        Tab.History -> HistoryScreen(viewModel, backgroundBackdrop)
-                        Tab.Stats -> StatsScreen(viewModel)
-                        Tab.Import -> ImportScreen(viewModel, themeState = themeState, finchThemeState = finchThemeState)
-                    }
-                }
-            }
-        }
-        // ③ 悬浮底栏：官方 LiquidBottomTabs（采样静态背景，玻璃折射稳定不闪）
-        Box(
-            Modifier
-                .align(Alignment.BottomCenter)
-                .fillMaxWidth()
-                .navigationBarsPadding()
-                .padding(horizontal = 18.dp, vertical = 12.dp),
-        ) {
-            LiquidBottomTabs(
-                selectedTabIndex = { tab.ordinal },
-                onTabSelected = { tab = Tab.entries[it] },
-                backdrop = backgroundBackdrop,
-                tabsCount = Tab.entries.size,
-                modifier = Modifier.fillMaxWidth(),
+            // ① 背景层：静态氛围光，供全部玻璃采样
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .layerBackdrop(backgroundBackdrop),
             ) {
-                Tab.entries.forEach { t ->
-                    LiquidBottomTab(
-                        onClick = { tab = t },
-                        modifier = Modifier.fillMaxHeight(),
-                    ) {
-                        Icon(
-                            when (t) {
-                                Tab.Home -> Icons.Filled.Home
-                                Tab.Upcoming -> Icons.Filled.Event
-                                Tab.History -> Icons.Filled.History
-                                Tab.Stats -> Icons.Filled.BarChart
-                                Tab.Import -> Icons.Filled.CloudDownload
-                            },
-                            contentDescription = null, // 下方 Text 提供语义，避免双份朗读
-                            modifier = Modifier.size(26.dp),
-                            tint = MaterialTheme.colorScheme.onSurface,
-                        )
-                        Text(
-                            t.label,
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = if (tab == t) FontWeight.SemiBold else FontWeight.Medium,
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f),
-                            maxLines = 1,
-                        )
+                FinchAurora(Modifier.fillMaxSize())
+            }
+
+            // ② 内容层
+            Box(Modifier.fillMaxSize()) {
+                AnimatedContent(
+                    targetState = tab,
+                    transitionSpec = {
+                        (fadeIn(FinchMotion.page<Float>()) + slideInVertically(
+                            animationSpec = FinchMotion.pageOffset(),
+                            initialOffsetY = { it / 60 },
+                        )) togetherWith
+                            (fadeOut(tween(130)) + slideOutVertically(
+                                animationSpec = tween(220),
+                                targetOffsetY = { -it / 80 },
+                            ))
+                    },
+                    label = "tabContent",
+                ) { t ->
+                    Box(Modifier.fillMaxSize()) {
+                        when (t) {
+                            Tab.Home -> HomeScreen(viewModel, addViewModel, initialGameId)
+                            Tab.Upcoming -> UpcomingScreen()
+                            Tab.History -> HistoryScreen(viewModel)
+                            Tab.Stats -> StatsScreen(viewModel)
+                            Tab.Import -> ImportScreen(
+                                viewModel = viewModel,
+                                themeState = themeState,
+                                finchThemeState = finchThemeState,
+                            )
+                        }
                     }
                 }
             }
+
+            // ③ 悬浮玻璃底栏
+            FinchBottomBar(
+                tabs = remember {
+                    Tab.entries.map { FinchTab(it.label, it.icon, it.selectedIcon) }
+                },
+                selectedIndex = tab.ordinal,
+                onSelect = { tab = Tab.entries[it] },
+                backdrop = backgroundBackdrop,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .navigationBarsPadding()
+                    .padding(horizontal = FinchSpace.screen, vertical = 10.dp),
+            )
         }
     }
 }

@@ -93,6 +93,18 @@ private fun AppRoot(store: SettingsStore, initialGameId: Long? = null) {
         ThemeMode.DARK -> true
     }
     FinchTheme(darkTheme = darkTheme, finchTheme = finchThemeState.theme) {
+        // 状态栏/导航栏图标跟随应用主题（而不是系统深浅），
+        // 否则「浅色主题 + 系统深色」时白字压在浅色氛围背景上不可读
+        val view = androidx.compose.ui.platform.LocalView.current
+        if (!view.isInEditMode) {
+            androidx.compose.runtime.SideEffect {
+                val window = (context as? android.app.Activity)?.window ?: return@SideEffect
+                androidx.core.view.WindowCompat.getInsetsController(window, view).apply {
+                    isAppearanceLightStatusBars = !darkTheme
+                    isAppearanceLightNavigationBars = !darkTheme
+                }
+            }
+        }
         FinchAppScaffold(
             themeState = themeState,
             finchThemeState = finchThemeState,

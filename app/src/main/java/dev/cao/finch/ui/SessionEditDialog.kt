@@ -5,16 +5,11 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -26,13 +21,16 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import dev.cao.finch.TimeFormatter
 import dev.cao.finch.data.PlaySession
+import dev.cao.finch.ui.design.FinchDialog
+import dev.cao.finch.ui.design.FinchIconButton
+import dev.cao.finch.ui.design.FinchSpace
 import java.time.Duration
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
 
 /**
- * 会话起止编辑框（详情页与记录页共用——原两份逐行重复的副本收敛于此）：
+ * 会话起止编辑框（详情页与记录页共用）：
  * 日期 + 开始/结束输入；结束早于开始按跨夜自动 +1 天；解析失败静默不提交。
  */
 @Composable
@@ -49,37 +47,36 @@ internal fun SessionEditDialog(
     var endField by remember(session.id) {
         mutableStateOf(session.endTime?.format(timeFmt) ?: session.startTime.format(timeFmt))
     }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("编辑记录") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                SessionTimeFields(
-                    dateField = dateField, onDateChange = { dateField = it },
-                    startField = startField, onStartChange = { startField = it },
-                    endField = endField, onEndChange = { endField = it },
-                )
-                if (error != null) {
-                    Text(error, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
-                }
+    FinchDialog(
+        title = "编辑记录",
+        subtitle = "结束时间早于开始时间会按跨夜处理。",
+        onDismiss = onDismiss,
+        confirmLabel = "保存",
+        scrollable = true,
+        onConfirm = {
+            runCatching {
+                val date = LocalDate.parse(dateField.trim(), dateFmt)
+                val start = LocalTime.parse(startField.trim(), timeFmt)
+                val end = LocalTime.parse(endField.trim(), timeFmt)
+                var s = LocalDateTime.of(date, start)
+                var e = LocalDateTime.of(date, end)
+                if (e.isBefore(s)) e = e.plusDays(1) // 跨夜
+                onConfirm(s, e)
             }
+            // 格式错误静默不提交（与原两份副本行为一致）
         },
-        confirmButton = {
-            TextButton(onClick = {
-                runCatching {
-                    val date = LocalDate.parse(dateField.trim(), dateFmt)
-                    val start = LocalTime.parse(startField.trim(), timeFmt)
-                    val end = LocalTime.parse(endField.trim(), timeFmt)
-                    var s = LocalDateTime.of(date, start)
-                    var e = LocalDateTime.of(date, end)
-                    if (e.isBefore(s)) e = e.plusDays(1) // 跨夜
-                    onConfirm(s, e)
-                }
-                // 格式错误静默不提交（与原两份副本行为一致）
-            }) { Text("保存") }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
-    )
+    ) {
+        SessionTimeFields(
+            dateField = dateField, onDateChange = { dateField = it },
+            startField = startField, onStartChange = { startField = it },
+            endField = endField, onEndChange = { endField = it },
+        )
+        if (error != null) {
+            Column(Modifier.padding(top = FinchSpace.sm)) {
+                Text(error, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+            }
+        }
+    }
 }
 
 /** 单条游玩记录：起止时间 + 时长（扣暂停） + 编辑 + 删除（详情页列表用） */
@@ -90,24 +87,35 @@ internal fun SessionRow(s: PlaySession, onDelete: () -> Unit, onEdit: () -> Unit
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 6.dp),
+            .padding(vertical = FinchSpace.xxs),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
-            Text("${s.startTime.format(fmt)} – ${end.format(fmt)}", style = MaterialTheme.typography.bodyMedium)
+            Text(
+                "${s.startTime.format(fmt)} – ${end.format(fmt)}",
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium,
+            )
             Text(
                 "时长 ${TimeFormatter.hoursMinutes(Duration.ofMillis(s.effectiveMillis()))}",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        TextButton(onClick = onEdit) { Text("编辑") }
-        IconButton(onClick = onDelete, modifier = Modifier.size(32.dp)) {
-            Icon(
-                Icons.Filled.Delete,
-                contentDescription = "删除记录",
-                modifier = Modifier.size(18.dp),
+        Row(horizontalArrangement = Arrangement.spacedBy(FinchSpace.xxs), verticalAlignment = Alignment.CenterVertically) {
+            FinchIconButton(
+                icon = Icons.Filled.Edit,
+                contentDescription = "编辑这条记录",
+                onClick = onEdit,
+                ghost = true,
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            FinchIconButton(
+                icon = Icons.Filled.Delete,
+                contentDescription = "删除记录",
+                onClick = onDelete,
+                ghost = true,
+                tint = MaterialTheme.colorScheme.error.copy(alpha = 0.85f),
             )
         }
     }

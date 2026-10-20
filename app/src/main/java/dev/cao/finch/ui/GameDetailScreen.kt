@@ -1,16 +1,8 @@
 package dev.cao.finch.ui
 
-import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.scaleIn
-import androidx.compose.animation.togetherWith
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -19,7 +11,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -29,30 +20,25 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.EditNote
+import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
+import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Star
-import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.Timer
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.VideogameAsset
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Checkbox
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -64,15 +50,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.cao.finch.R
 import dev.cao.finch.TimeFormatter
@@ -81,11 +65,27 @@ import dev.cao.finch.data.GameRepository
 import dev.cao.finch.data.GameStatsRow
 import dev.cao.finch.data.GameStatus
 import dev.cao.finch.data.PlaySession
+import dev.cao.finch.timer.TimerServiceBridge
+import dev.cao.finch.ui.design.FinchButton
+import dev.cao.finch.ui.design.FinchButtonVariant
+import dev.cao.finch.ui.design.FinchCard
+import dev.cao.finch.ui.design.FinchCheckbox
+import dev.cao.finch.ui.design.FinchChip
+import dev.cao.finch.ui.design.FinchConfirmDialog
+import dev.cao.finch.ui.design.FinchDivider
+import dev.cao.finch.ui.design.FinchInsetDivider
+import dev.cao.finch.ui.design.FinchMotion
+import dev.cao.finch.ui.design.FinchProgressBar
+import dev.cao.finch.ui.design.FinchSpace
+import dev.cao.finch.ui.design.FinchStars
+import dev.cao.finch.ui.design.FinchStatTile
+import dev.cao.finch.ui.design.FinchTextField
+import dev.cao.finch.ui.design.finchClickable
 import dev.cao.finch.ui.gamedetail.ConfettiOverlay
 import dev.cao.finch.ui.gamedetail.HltbAuto
 import dev.cao.finch.ui.gamedetail.HltbEmptyRow
 import dev.cao.finch.ui.gamedetail.HltbProgressCard
-import dev.cao.finch.timer.TimerServiceBridge
+import dev.cao.finch.ui.theme.FinchShapes
 import java.time.Duration
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -94,9 +94,10 @@ import kotlinx.coroutines.launch
 private val StarGold = Color(0xFFF5B301)
 
 /**
- * 游戏详情页：封面全出血沉浸 + 收藏、计时器放旁边（走秒 + 开玩/暂停/停止）、
- * 已通关（勾选有彩带庆祝）、5 星评分、感想、单游戏统计与游玩记录（可编辑可删）。
- * 累计优先展示 Steam / PSN 的官方总时长（本地会话只是 Finch 自己记到的部分）。
+ * 游戏详情页（2026-10 UI 重构）：
+ * 封面全出血 + 悬浮圆形操作按钮；内容区全部走 FinchCard 体系——
+ * 计时控制台 / 三格统计 / PSN 奖杯 / 通关进度 / 状态与评分 / 感想 / 游玩记录。
+ * 所有数据与计时逻辑与原版一致（计时走 TimerService，秒级文本本地刷新）。
  */
 @Composable
 fun GameDetailScreen(
@@ -147,13 +148,10 @@ fun GameDetailScreen(
         }
     }
 
-    // 待删除的会话（弹确认框）
     var pendingDelete by remember { mutableStateOf<PlaySession?>(null) }
-    // 待编辑的会话（弹编辑框）
     var pendingEdit by remember { mutableStateOf<PlaySession?>(null) }
     var sessionEditError by remember { mutableStateOf<String?>(null) }
 
-    // 单游戏统计 + 会话历史
     val stats by remember(game.id) { viewModel.gameStats(game.id) }
         .collectAsState(initial = GameStatsRow(0L, 0L, null))
     val sessions by remember(game.id) { viewModel.sessionsFor(game.id) }
@@ -174,30 +172,43 @@ fun GameDetailScreen(
         Duration.ofMillis(if (showCloudTotal) cloudMinutes * 60_000 else (stats.totalMs ?: 0L)),
     )
 
-    // 封面进场动画：轻缩放 + 淡入（初值 0.96 + animateTo，
-    // animateFloatAsState 初值即目标值、动画永不播放）
-    val coverAnim = remember { Animatable(0.96f) }
+    val coverAnim = remember { Animatable(0.97f) }
     LaunchedEffect(Unit) {
-        coverAnim.animateTo(1f, spring(Spring.DampingRatioMediumBouncy, Spring.StiffnessMediumLow))
+        coverAnim.animateTo(1f, spring(Spring.DampingRatioNoBouncy, Spring.StiffnessMediumLow))
     }
-    // 封面是否真正出图：无封面/加载失败时悬浮顶栏前景改用 onSurface（白色在浅色占位上不可读）
-    var coverOk by remember(game.id) { mutableStateOf(game.coverUrl != null) }
 
-    Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+    // 详情页封面顶到状态栏：浅色主题下把状态栏图标临时切成白色，
+    // 离开页面再恢复（否则浅色主题的深色图标压在深色封面上看不清）
+    val localView = androidx.compose.ui.platform.LocalView.current
+    val hostActivity = androidx.activity.compose.LocalActivity.current
+    androidx.compose.runtime.DisposableEffect(hostActivity) {
+        val window = hostActivity?.window
+        val controller = window?.let {
+            androidx.core.view.WindowCompat.getInsetsController(it, localView)
+        }
+        val previous = controller?.isAppearanceLightStatusBars
+        controller?.isAppearanceLightStatusBars = false
+        onDispose {
+            if (controller != null && previous != null) {
+                controller.isAppearanceLightStatusBars = previous
+            }
+        }
+    }
+
+    Box(Modifier.fillMaxSize()) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .imePadding()
                 .verticalScroll(rememberScrollState())
-                .padding(bottom = Dimens.BottomBarOverlap), // 给悬浮底栏留出空间
-            horizontalAlignment = Alignment.CenterHorizontally,
+                .padding(bottom = FinchSpace.bottomBarClearance),
         ) {
-            // 封面全出血：顶到屏幕最上沿（状态栏后面），底部圆角 + 顶部渐变遮罩
+            // ---- 封面全出血：顶部压暗保证状态栏/按钮可读 ----
             Box(
                 Modifier
                     .fillMaxWidth()
                     .aspectRatio(16f / 9f)
-                    .clip(RoundedCornerShape(bottomStart = 20.dp, bottomEnd = 20.dp))
+                    .clip(RoundedCornerShape(bottomStart = 30.dp, bottomEnd = 30.dp))
                     .graphicsLayer {
                         scaleX = coverAnim.value
                         scaleY = coverAnim.value
@@ -208,132 +219,122 @@ fun GameDetailScreen(
                     url = game.coverUrl,
                     contentDescription = stringResource(R.string.a11y_cover, game.name),
                     modifier = Modifier.fillMaxSize(),
-                    onCoverLoaded = { coverOk = it },
                     placeholder = {
                         Box(
                             Modifier
                                 .fillMaxSize()
-                                .background(MaterialTheme.colorScheme.surfaceVariant),
+                                .background(
+                                    Brush.linearGradient(
+                                        listOf(
+                                            MaterialTheme.colorScheme.primaryContainer,
+                                            MaterialTheme.colorScheme.surfaceVariant,
+                                        )
+                                    )
+                                ),
                             contentAlignment = Alignment.Center,
                         ) {
                             Icon(
                                 platformIcon(game.platform),
                                 contentDescription = null,
                                 modifier = Modifier.size(72.dp),
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
                             )
                         }
                     },
                 )
-                // 顶部渐变遮罩：让状态栏与悬浮顶栏可读
                 Box(
                     Modifier
                         .fillMaxSize()
-                        .background(Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.45f), Color.Transparent))),
+                        .background(
+                            Brush.verticalGradient(
+                                0f to Color.Black.copy(alpha = 0.5f),
+                                0.40f to Color.Transparent,
+                                1f to Color.Black.copy(alpha = 0.12f),
+                            )
+                        )
                 )
             }
 
-            Column(
-                Modifier.padding(horizontal = 20.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                Spacer(Modifier.height(14.dp))
+            Column(Modifier.padding(horizontal = FinchSpace.screen)) {
+                Spacer(Modifier.height(FinchSpace.lg))
 
-                Text(
-                    game.name,
-                    style = MaterialTheme.typography.headlineSmall,
-                    fontWeight = FontWeight.Bold,
-                    textAlign = TextAlign.Center,
-                )
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    GameRepository.labelFor(game.platformSet()),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        game.name,
+                        style = MaterialTheme.typography.headlineMedium,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+                Spacer(Modifier.height(FinchSpace.xs))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        GameRepository.labelFor(game.platformSet()) + " · " + game.statusResolved().label,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    if (game.completed && game.statusResolved() != GameStatus.COMPLETED) {
+                        Text(
+                            "  ·  已通关",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                    }
+                }
 
-                Spacer(Modifier.height(20.dp))
+                Spacer(Modifier.height(FinchSpace.lg))
 
-                // 计时卡：走秒在左、开玩/暂停/停止在旁
-                GlassCard(modifier = Modifier.fillMaxWidth()) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 14.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp),
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Column(Modifier.weight(1f)) {
-                                Text(
-                                    when {
-                                        !running -> "未开始"
-                                        paused -> "已暂停"
-                                        else -> "本次游玩"
-                                    },
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                                // 走秒过渡只跟分钟级 key 走（每秒跑一次弹簧动画太耗电），
-                                // 秒级文字直接重绘
-                                AnimatedContent(
-                                    targetState = elapsedText.substringBeforeLast(':'),
-                                    transitionSpec = {
-                                        (fadeIn(animationSpec = spring<Float>()) +
-                                            scaleIn(
-                                                animationSpec = spring<Float>(Spring.DampingRatioMediumBouncy, Spring.StiffnessMedium),
-                                                initialScale = 0.92f,
-                                            )) togetherWith fadeOut(animationSpec = spring<Float>())
-                                    },
-                                    label = "elapsedPulse",
-                                ) {
-                                    Text(
-                                        elapsedText,
-                                        style = MaterialTheme.typography.headlineMedium,
-                                        fontWeight = FontWeight.Bold,
-                                        color = MaterialTheme.colorScheme.primary,
-                                    )
-                                }
-                            }
-                            Button(
-                                onClick = { if (running) onStop() else onStart() },
-                                shape = RoundedCornerShape(50),
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = if (running) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
-                                ),
-                            ) {
-                                Icon(if (running) Icons.Filled.Stop else Icons.Filled.PlayArrow, contentDescription = null)
-                                Spacer(Modifier.width(6.dp))
-                                Text(if (running) "停止" else "开玩", fontWeight = FontWeight.SemiBold)
-                            }
-                        }
+                // ---- 计时控制台 ----
+                FinchCard(
+                    title = when {
+                        !running -> "计时"
+                        paused -> "已暂停"
+                        else -> "本次游玩"
+                    },
+                    icon = Icons.Filled.Timer,
+                    titleExtra = if (running) (if (paused) "暂停中" else "计时中") else null,
+                ) {
+                    Text(
+                        elapsedText,
+                        style = MaterialTheme.typography.displaySmall,
+                        fontWeight = FontWeight.Bold,
+                        color = if (paused) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.primary,
+                    )
+                    Spacer(Modifier.height(FinchSpace.md))
+                    Row(horizontalArrangement = Arrangement.spacedBy(FinchSpace.sm)) {
+                        FinchButton(
+                            text = if (running) "停止" else "开玩",
+                            icon = if (running) Icons.Filled.Stop else Icons.Filled.PlayArrow,
+                            variant = if (running) FinchButtonVariant.Danger else FinchButtonVariant.Primary,
+                            onClick = { if (running) onStop() else onStart() },
+                            modifier = Modifier.weight(1f),
+                        )
                         if (running) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.End,
-                            ) {
-                                TextButton(onClick = { if (paused) onResume() else onPause() }) {
-                                    Text(if (paused) "继续" else "暂停")
-                                }
-                            }
+                            FinchButton(
+                                text = if (paused) "继续" else "暂停",
+                                icon = if (paused) Icons.Filled.PlayArrow else Icons.Filled.Pause,
+                                variant = FinchButtonVariant.Glass,
+                                onClick = { if (paused) onResume() else onPause() },
+                                modifier = Modifier.weight(1f),
+                            )
                         }
                     }
                 }
 
-                Spacer(Modifier.height(12.dp))
+                Spacer(Modifier.height(FinchSpace.md))
 
-                // 单游戏统计（累计优先用 Steam/PSN 官方总时长）
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    StatBox(totalLabel, totalValue, Modifier.weight(1f))
-                    StatBox("会话", "${stats.sessionCount}", Modifier.weight(1f))
-                    StatBox("最近", stats.lastPlayedAt?.let { relativeTime(it) } ?: "—", Modifier.weight(1f))
+                // ---- 三格统计 ----
+                Row(horizontalArrangement = Arrangement.spacedBy(FinchSpace.sm)) {
+                    FinchStatTile(totalLabel, totalValue, Modifier.weight(1f))
+                    FinchStatTile("会话", "${stats.sessionCount}", Modifier.weight(1f))
+                    FinchStatTile("最近", stats.lastPlayedAt?.let { relativeTime(it) } ?: "—", Modifier.weight(1f))
                 }
 
-                // PSN 奖杯（v0.17）：同步过奖杯数据才显示
+                // ---- PSN 奖杯 ----
                 if (game.trophyProgress != null) {
-                    Spacer(Modifier.height(12.dp))
+                    Spacer(Modifier.height(FinchSpace.md))
                     TrophyCard(
                         platinum = game.trophyPlatinum ?: 0,
                         gold = game.trophyGold ?: 0,
@@ -343,10 +344,9 @@ fun GameDetailScreen(
                     )
                 }
 
-                // 通关进度（三段：主线/支线/全收集；点开无数据时自动获取一次）
+                // ---- 通关进度（HLTB） ----
                 val playedMin = (stats.totalMs ?: 0L) / 60_000
                 val hltbMin = game.hltbMainMin
-                // 点开卡片自动获取：无三围时触发一次；已有任一段不再自动抓
                 var hltbAutoState by remember(game.id) { mutableStateOf(HltbAuto.IDLE) }
                 var hltbFailReason by remember(game.id) { mutableStateOf<String?>(null) }
                 LaunchedEffect(game.id) {
@@ -358,11 +358,11 @@ fun GameDetailScreen(
                             hltbFailReason = r.exceptionOrNull()?.message
                         }
                     } else {
-                        hltbAutoState = HltbAuto.DONE // 已有数据：不自动抓
+                        hltbAutoState = HltbAuto.DONE
                     }
                 }
+                Spacer(Modifier.height(FinchSpace.md))
                 if (hltbMin != null && hltbMin > 0) {
-                    Spacer(Modifier.height(12.dp))
                     HltbProgressCard(
                         playedMin = playedMin,
                         hltbMin = hltbMin,
@@ -374,7 +374,6 @@ fun GameDetailScreen(
                         onEdit = { viewModel.setHltb(game.id, it) },
                     )
                 } else {
-                    Spacer(Modifier.height(12.dp))
                     HltbEmptyRow(
                         viewModel = viewModel,
                         gameId = game.id,
@@ -392,198 +391,192 @@ fun GameDetailScreen(
                     )
                 }
 
-                Spacer(Modifier.height(12.dp))
+                Spacer(Modifier.height(FinchSpace.md))
 
-                // 状态卡：游戏状态 + 已通关 + 评分
-                GlassCard(modifier = Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
-                        // 状态选择（想玩/在玩/搁置/通关/全成就，横滑防挤爆）
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .horizontalScroll(androidx.compose.foundation.rememberScrollState())
-                                .padding(vertical = 4.dp),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            val cur = game.statusResolved()
-                            GameStatus.values().forEach { s ->
-                                androidx.compose.material3.FilterChip(
-                                    selected = cur == s,
-                                    onClick = { viewModel.setStatus(game.id, s) },
-                                    label = { Text(s.label, maxLines = 1, softWrap = false) },
-                                )
-                            }
-                            Spacer(Modifier.width(4.dp))
-                        }
-                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Checkbox(
-                                checked = game.completed,
-                                onCheckedChange = { viewModel.setCompleted(game.id, it) },
+                // ---- 状态 / 已通关 / 评分 ----
+                FinchCard(title = "状态与评分", icon = Icons.Filled.Tune) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(FinchSpace.sm),
+                    ) {
+                        val cur = game.statusResolved()
+                        GameStatus.values().forEach { s ->
+                            FinchChip(
+                                label = s.label,
+                                selected = cur == s,
+                                onClick = { viewModel.setStatus(game.id, s) },
                             )
-                            Text("已通关", style = MaterialTheme.typography.bodyLarge)
-                            game.completedAt?.let {
-                                Text(
-                                    " · ${it.format(TimeFormatter.DATE_YMD)}",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
                         }
-                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text("评分", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
-                            (1..5).forEach { star ->
-                                val starOn = game.rating != null && star <= game.rating
-                                IconButton(
-                                    onClick = { viewModel.setRating(game.id, if (game.rating == star) null else star) },
-                                    modifier = Modifier.size(38.dp),
-                                ) {
-                                    Icon(
-                                        if (starOn) Icons.Filled.Star else Icons.Filled.StarBorder,
-                                        contentDescription = stringResource(
-                                            if (starOn) R.string.a11y_star_on else R.string.a11y_star_off,
-                                            star,
-                                        ),
-                                        tint = if (starOn) StarGold
-                                        else MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier.size(30.dp),
-                                    )
-                                }
-                            }
-                            if (game.rating != null && game.rating > 0) {
-                                Text(
-                                    "${game.rating}",
-                                    style = MaterialTheme.typography.labelLarge,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = StarGold,
-                                    modifier = Modifier.width(20.dp),
-                                )
-                            }
-                        }
+                        Spacer(Modifier.width(FinchSpace.xs))
                     }
-                }
-
-                Spacer(Modifier.height(12.dp))
-
-                // 感想卡
-                GlassCard(modifier = Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(16.dp)) {
-                        Row(
-                            Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text("感想", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-                            if (thoughtSaved) {
-                                Text("已保存 ✓", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
-                            }
-                        }
-                        Spacer(Modifier.height(8.dp))
-                        OutlinedTextField(
-                            value = thoughts,
-                            onValueChange = {
-                                thoughts = it
-                                thoughtSaved = false
-                            },
-                            placeholder = { Text("写点游玩感受、攻略笔记、剧透提醒…") },
-                            minLines = 3,
-                            maxLines = 8,
-                            modifier = Modifier.fillMaxWidth(),
+                    Spacer(Modifier.height(FinchSpace.md))
+                    FinchDivider()
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .finchClickable(onClick = { viewModel.setCompleted(game.id, !game.completed) })
+                            .padding(vertical = FinchSpace.sm),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        FinchCheckbox(
+                            checked = game.completed,
+                            onCheckedChange = null,
                         )
-                        Spacer(Modifier.height(6.dp))
-                        Row(
-                            Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
+                        Text("已通关", style = MaterialTheme.typography.bodyLarge)
+                        game.completedAt?.let {
                             Text(
-                                "${thoughts.length} 字",
+                                "  ·  ${it.format(TimeFormatter.DATE_YMD)}",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
-                            TextButton(
-                                onClick = {
-                                    viewModel.setThoughts(game.id, thoughts)
-                                    thoughtSaved = true
-                                },
-                            ) { Text("保存") }
                         }
+                    }
+                    FinchDivider()
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = FinchSpace.xs),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text("评分", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+                        FinchStars(
+                            rating = game.rating,
+                            onRate = { viewModel.setRating(game.id, it) },
+                            starSize = 26.dp,
+                            starDescription = { star, on ->
+                                stringResource(
+                                    if (on) R.string.a11y_star_on else R.string.a11y_star_off,
+                                    star,
+                                )
+                            },
+                        )
                     }
                 }
 
-                Spacer(Modifier.height(12.dp))
+                Spacer(Modifier.height(FinchSpace.md))
 
-                // 游玩记录卡
-                GlassCard(modifier = Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(16.dp)) {
-                        Text("游玩记录（${sessions.size}）", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-                        Spacer(Modifier.height(4.dp))
-                        if (sessions.isEmpty()) {
-                            Text(
-                                "还没有记录，点上面的开玩开始第一次计时",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                // ---- 感想 ----
+                FinchCard(
+                    title = "感想",
+                    icon = Icons.Filled.EditNote,
+                    titleExtra = if (thoughtSaved) "已保存 ✓" else null,
+                ) {
+                    FinchTextField(
+                        value = thoughts,
+                        onValueChange = {
+                            thoughts = it
+                            thoughtSaved = false
+                        },
+                        placeholder = "写点游玩感受、攻略笔记、剧透提醒…",
+                        singleLine = false,
+                        minLines = 3,
+                        maxLines = 8,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(top = FinchSpace.sm),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            "${thoughts.length} 字",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        FinchButton(
+                            text = "保存",
+                            variant = FinchButtonVariant.Glass,
+                            onClick = {
+                                viewModel.setThoughts(game.id, thoughts)
+                                thoughtSaved = true
+                            },
+                        )
+                    }
+                }
+
+                Spacer(Modifier.height(FinchSpace.md))
+
+                // ---- 游玩记录 ----
+                FinchCard(
+                    title = "游玩记录",
+                    subtitle = if (sessions.isEmpty()) null else "共 ${sessions.size} 条",
+                    icon = Icons.Filled.History,
+                ) {
+                    if (sessions.isEmpty()) {
+                        Text(
+                            "还没有记录，点上面的「开玩」开始第一次计时",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    } else {
+                        sessions.forEachIndexed { index, s ->
+                            SessionRow(
+                                s,
+                                onDelete = { pendingDelete = s },
+                                onEdit = { pendingEdit = s },
                             )
-                        } else {
-                            sessions.forEach { s ->
-                                SessionRow(s, onDelete = { pendingDelete = s }, onEdit = { pendingEdit = s })
-                            }
+                            if (index != sessions.lastIndex) FinchInsetDivider()
                         }
                     }
                 }
 
-                Spacer(Modifier.height(24.dp))
+                Spacer(Modifier.height(FinchSpace.xxl))
             }
         }
 
-        // 悬浮顶栏（压在封面上，状态栏沉浸）；无封面/封面失败时前景改用 onSurface 保证浅底可读
-        val topBarFg = if (coverOk) Color.White else MaterialTheme.colorScheme.onSurface
+        // ---- 悬浮顶栏（压在封面上）：深色圆底 + 白图标，滚过封面后仍可读 ----
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .statusBarsPadding()
-                .padding(horizontal = 8.dp, vertical = 2.dp),
+                .padding(horizontal = FinchSpace.md, vertical = FinchSpace.sm),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            TextButton(onClick = onBack) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回", tint = topBarFg)
-            }
-            Text(
-                "游戏详情",
-                style = MaterialTheme.typography.labelMedium,
-                color = topBarFg,
+            CoverCircleButton(
+                icon = Icons.AutoMirrored.Filled.ArrowBack,
+                contentDescription = "返回",
+                onClick = onBack,
             )
-            IconButton(onClick = { viewModel.toggleFavorite(game.id) }) {
-                Icon(
-                    if (game.favorite) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
-                    contentDescription = if (game.favorite) "取消收藏" else "收藏",
-                    tint = if (game.favorite) Color(0xFFE05565) else topBarFg,
+            Box(
+                Modifier
+                    .clip(FinchShapes.pill)
+                    .background(Color.Black.copy(alpha = 0.28f))
+                    .padding(horizontal = FinchSpace.md, vertical = 5.dp),
+            ) {
+                Text(
+                    "游戏详情",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = Color.White,
                 )
             }
+            CoverCircleButton(
+                icon = if (game.favorite) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
+                contentDescription = if (game.favorite) "取消收藏" else "收藏",
+                tint = if (game.favorite) Color(0xFFFF6B81) else Color.White,
+                onClick = { viewModel.toggleFavorite(game.id) },
+            )
         }
 
-        // 通关彩带
         if (celebrate) {
             ConfettiOverlay(Modifier.fillMaxSize(), onDone = { celebrate = false })
         }
     }
 
     pendingDelete?.let { s ->
-        AlertDialog(
-            onDismissRequest = { pendingDelete = null },
-            title = { Text("删除这条记录？") },
-            text = { Text("删除后无法恢复。") },
-            confirmButton = {
-                TextButton(onClick = { viewModel.deleteSession(s.id); pendingDelete = null }) { Text("删除") }
+        FinchConfirmDialog(
+            title = "删除这条记录？",
+            message = "删除后无法恢复。",
+            confirmLabel = "删除",
+            onConfirm = {
+                viewModel.deleteSession(s.id)
+                pendingDelete = null
             },
-            dismissButton = { TextButton(onClick = { pendingDelete = null }) { Text("取消") } },
+            onDismiss = { pendingDelete = null },
         )
     }
 
@@ -608,52 +601,59 @@ fun GameDetailScreen(
     }
 }
 
+/** 封面上的圆形按钮：深色半透明底 + 白图标，保证任意封面上都可读 */
+@Composable
+private fun CoverCircleButton(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    contentDescription: String,
+    onClick: () -> Unit,
+    tint: Color = Color.White,
+) {
+    Box(
+        Modifier
+            .size(40.dp)
+            .clip(CircleShape)
+            .background(Color.Black.copy(alpha = 0.28f))
+            .finchClickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(icon, contentDescription = contentDescription, tint = tint, modifier = Modifier.size(22.dp))
+    }
+}
+
 /** 奖杯四围配色（白金/金/银/铜） */
 private val PlatinumColor = Color(0xFF9CB6D1)
 private val TrophyGoldColor = Color(0xFFE6B422)
 private val TrophySilverColor = Color(0xFFAAB2BD)
 private val TrophyBronzeColor = Color(0xFFB0722E)
 
-/** PSN 奖杯卡（v0.17）：已获得四围 + 完成度条；只有同步过奖杯数据的游戏才显示 */
+/** PSN 奖杯卡：已获得四围 + 完成度条 */
 @Composable
 private fun TrophyCard(platinum: Int, gold: Int, silver: Int, bronze: Int, progress: Int) {
-    GlassCard(modifier = Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("PSN 奖杯", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-                Spacer(Modifier.weight(1f))
-                Text(
-                    "完成度 $progress%",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.primary,
-                )
-            }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                TrophyCount("白金", platinum, PlatinumColor)
-                TrophyCount("金", gold, TrophyGoldColor)
-                TrophyCount("银", silver, TrophySilverColor)
-                TrophyCount("铜", bronze, TrophyBronzeColor)
-            }
-            LinearProgressIndicator(
-                progress = { progress / 100f },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(4.dp)),
-                color = PlatinumColor,
-                trackColor = MaterialTheme.colorScheme.surfaceVariant,
-            )
+    FinchCard(
+        title = "PSN 奖杯",
+        icon = Icons.Filled.EmojiEvents,
+        titleExtra = "完成度 $progress%",
+    ) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            TrophyCount("白金", platinum, PlatinumColor)
+            TrophyCount("金", gold, TrophyGoldColor)
+            TrophyCount("银", silver, TrophySilverColor)
+            TrophyCount("铜", bronze, TrophyBronzeColor)
         }
+        Spacer(Modifier.height(FinchSpace.md))
+        FinchProgressBar(
+            progress = progress / 100f,
+            color = PlatinumColor,
+            height = 8.dp,
+        )
     }
 }
 
-/** 单个奖杯等级计数（色点 + 名称 + 已获得数） */
 @Composable
 private fun TrophyCount(label: String, count: Int, color: Color) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
-    ) {
-        Box(Modifier.size(8.dp).background(color, RoundedCornerShape(50)))
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        Box(Modifier.size(8.dp).background(color, CircleShape))
         Text("$label $count", style = MaterialTheme.typography.labelMedium)
     }
 }

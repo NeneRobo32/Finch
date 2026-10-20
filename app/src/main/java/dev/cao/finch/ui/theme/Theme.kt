@@ -72,6 +72,9 @@ val LocalScenePalette = compositionLocalOf { finchScheme(FinchTheme.IRIDESCENT, 
 /** 当前整套配色（主题+亮暗）：ColorScheme + GlassPalette + ScenePalette */
 val LocalFinchBundle = compositionLocalOf { finchScheme(FinchTheme.IRIDESCENT, false) }
 
+/** 当前是否为深色（供不读 MaterialTheme 的绘制逻辑使用） */
+val LocalFinchDark = compositionLocalOf { false }
+
 /** 主题根：按亮暗 + 风格主题取整套配色，注入 CompositionLocal 并设置 MaterialTheme */
 @Composable
 fun FinchTheme(
@@ -83,10 +86,19 @@ fun FinchTheme(
     CompositionLocalProvider(
         LocalFinchBundle provides bundle,
         LocalFinchTheme provides finchTheme,
+        LocalFinchDark provides darkTheme,
         LocalGlassPalette provides bundle.glass,
         LocalScenePalette provides bundle.scene,
+        // 关键：MaterialTheme 本身不提供内容色，外层没有 Surface/Scaffold 时
+        // LocalContentColor 默认是黑色——深色模式下所有未显式指定颜色的文字/图标都会看不见。
+        androidx.compose.material3.LocalContentColor provides bundle.scheme.onBackground,
     ) {
-        MaterialTheme(colorScheme = bundle.scheme, content = content)
+        MaterialTheme(
+            colorScheme = bundle.scheme,
+            typography = FinchTypography,
+            shapes = FinchMaterialShapes,
+            content = content,
+        )
     }
 }
 
