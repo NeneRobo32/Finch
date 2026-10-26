@@ -191,37 +191,59 @@ class JsonParseTest {
             .let { assertTrue(it is java.io.IOException) }
     }
 
-    // ---- PsnClient：trophyTitles 响应 → 奖杯概要（v0.17） ----
+    // ---- PsnClient：/titles/trophyTitles 映射响应 → 奖杯集（v0.18.1 实测口径） ----
 
     @Test
-    fun `parseTrophyTitlePage_完整条目_四围与进度正确映射`() {
-        val page = PsnClient.parseTrophyTitlePage(
-            """{"totalItemCount":1,"trophyTitles":[{"npCommunicationId":"PPSA13195_00","npTitleId":"PPSA13195_00","trophyTitleName":"Astro's Playroom","earnedTrophies":{"bronze":10,"silver":2,"gold":1,"platinum":1},"definedTrophies":{"bronze":30,"silver":10,"gold":5,"platinum":1},"progress":67,"lastUpdatedDateTime":"2026-10-01T12:00:00Z"}]}"""
+    fun `parseTrophiesByTitleIds_多奖杯集_四围与定义数正确映射`() {
+        val list = PsnClient.parseTrophiesByTitleIds(
+            """{"titles":[{"npTitleId":"CUSA01399_00","trophyTitles":[
+                {"npServiceName":"trophy","npCommunicationId":"NPWR09799_00","trophyTitleName":"Uncharted 2: Among Thieves™ Remastered","progress":0,"definedTrophies":{"bronze":38,"silver":10,"gold":4,"platinum":1},"earnedTrophies":{"bronze":0,"silver":0,"gold":0,"platinum":0},"lastUpdatedDateTime":"2026-10-26T04:47:17Z"},
+                {"npServiceName":"trophy","npCommunicationId":"NPWR09798_00","trophyTitleName":"Uncharted: Drake’s Fortune™ Remastered","progress":24,"definedTrophies":{"bronze":41,"silver":8,"gold":4,"platinum":1},"earnedTrophies":{"bronze":18,"silver":1,"gold":0,"platinum":0},"lastUpdatedDateTime":"2026-10-26T04:43:09Z"}
+            ]}]}"""
         )
-        assertEquals(1, page.totalItemCount)
-        val t = page.titles.single()
-        assertEquals("Astro's Playroom", t.name)
-        assertEquals("PPSA13195_00", t.npTitleId)
-        assertEquals(1, t.platinum) // 已获得数，不是 definedTrophies
-        assertEquals(1, t.gold)
-        assertEquals(2, t.silver)
-        assertEquals(10, t.bronze)
-        assertEquals(67, t.progress)
-        assertNotNull(t.lastUpdatedEpochMillis)
+        assertEquals(1, list.size)
+        val t = list.single()
+        assertEquals("CUSA01399_00", t.npTitleId)
+        assertEquals(2, t.trophies.size)
+        val second = t.trophies[1]
+        assertEquals("Uncharted: Drake’s Fortune™ Remastered", second.name)
+        assertEquals(18, second.bronze)
+        assertEquals(41, second.definedBronze)
+        assertEquals(24, second.progress)
+        assertNotNull(second.updatedEpochMillis)
     }
 
     @Test
-    fun `parseTrophyTitlePage_缺npTitleId与earnedTrophies_容忍并归零`() {
-        val page = PsnClient.parseTrophyTitlePage(
-            """{"totalItemCount":2,"trophyTitles":[{"npCommunicationId":"NPWR00867_00","trophyTitleName":"Red Dead Redemption","progress":25},{"trophyTitleName":""}]}"""
+    fun `parseTrophiesByTitleIds_缺npTitleId或奖杯集条目的跳过`() {
+        val list = PsnClient.parseTrophiesByTitleIds(
+            """{"titles":[{"npTitleId":"","trophyTitles":[]},{"trophyTitles":[]},{"npTitleId":"PPSA34547_00","trophyTitles":[{"npCommunicationId":"NPWR57724_00","trophyTitleName":"CONTROL Resonant","progress":18}]}]}"""
         )
-        assertEquals(1, page.titles.size) // 空名条目跳过
-        val t = page.titles.single()
-        assertNull(t.npTitleId)
-        assertEquals("NPWR00867_00", t.npCommunicationId)
-        assertEquals(0, t.platinum)
-        assertEquals(0, t.bronze)
-        assertEquals(25, t.progress)
-        assertNull(t.lastUpdatedEpochMillis)
+        assertEquals(1, list.size)
+        val set = list.single().trophies.single()
+        assertEquals("CONTROL Resonant", set.name)
+        assertEquals(0, set.platinum)
+        assertEquals(18, set.progress)
+    }
+
+    @Test
+    fun `aggregateTrophySets_多集合计与完成度折算`() {
+        val sets = listOf(
+            PsnClient.PsnTrophySet(null, "A", 0, 0, 1, 18, 1, 4, 8, 41, 0, null),
+            PsnClient.PsnTrophySet(null, "B", 0, 0, 0, 0, 1, 4, 10, 38, 0, null),
+        )
+        val e = PsnClient.aggregateTrophySets(sets)!!
+        assertEquals(0, e.platinum)
+        assertEquals(0, e.gold)
+        assertEquals(1, e.silver)
+        assertEquals(18, e.bronze)
+        // 已获得 19 / 总数 (1+4+8+41)+(1+4+10+38)=107 → 17.8% → 18
+        assertEquals(18, e.progress)
+    }
+
+    @Test
+    fun `aggregateTrophySets_单集直接取progress_空集返回null`() {
+        val one = listOf(PsnClient.PsnTrophySet(null, "A", 1, 2, 3, 4, 1, 5, 9, 40, 42, null))
+        assertEquals(42, PsnClient.aggregateTrophySets(one)!!.progress)
+        assertNull(PsnClient.aggregateTrophySets(emptyList()))
     }
 }

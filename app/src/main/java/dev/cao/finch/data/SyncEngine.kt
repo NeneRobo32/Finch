@@ -38,6 +38,9 @@ object SyncEngine {
         val refreshExpiresAtMillis: Long,
     )
 
+    /** 每次同步最多查奖杯的标题数（每批 5 个 → 最多 20 次请求，控制请求预算） */
+    private const val MAX_TROPHY_TITLES = 100
+
     // ---- Steam / PSN 共用的快照差分积木 ----
 
     /** 存一条快照（同 (source, refKey) REPLACE） */
@@ -377,24 +380,35 @@ object SyncEngine {
             }
         }
 
-        // 奖杯概要（v0.17）：失败静默隔离——奖杯拉不到不影响时长同步主流程
-        runCatching {
-            withContext(Dispatchers.IO) { PsnClient.fetchTrophyTitles(tokens.accessToken) }
-        }.getOrNull()?.takeIf { it.isNotEmpty() }?.let { trophyTitles ->
-            db.withTransaction {
-                val all = gameDao.all()
-                for (t in trophyTitles) {
-                    val game = claimTrophyGame(all, t) ?: continue
-                    gameDao.update(
-                        game.copy(
-                            trophyPlatinum = t.platinum,
-                            trophyGold = t.gold,
-                            trophySilver = t.silver,
-                            trophyBronze = t.bronze,
-                            trophyProgress = t.progress,
-                            trophyUpdatedAt = now,
+        // 奖杯（v0.18.1 实测口径）：trophyTitles 概要接口没有 npTitleId，无法精确归认；
+        // 改为按 games.psnTitleId 批量映射（/titles/trophyTitles，每批 5 个），失败静默跳过
+        val trophyGames = gameDao.all()
+            .filter { !it.psnTitleId.isNullOrBlank() }
+            // 请求预算：最多 MAX_TROPHY_TITLES 个标题，按官方时长降序优先大游戏
+            .sortedByDescending { it.psnPlaytimeMin ?: 0L }
+            .take(MAX_TROPHY_TITLES)
+        if (trophyGames.isNotEmpty()) {
+            val byTitle = runCatching {
+                withContext(Dispatchers.IO) {
+                    PsnClient.fetchTrophiesForTitles(tokens.accessToken, trophyGames.mapNotNull { it.psnTitleId })
+                }
+            }.getOrNull().orEmpty()
+            if (byTitle.isNotEmpty()) {
+                db.withTransaction {
+                    for (g in trophyGames) {
+                        val sets = byTitle[g.psnTitleId ?: ""] ?: continue
+                        val earned = PsnClient.aggregateTrophySets(sets) ?: continue
+                        gameDao.update(
+                            g.copy(
+                                trophyPlatinum = earned.platinum,
+                                trophyGold = earned.gold,
+                                trophySilver = earned.silver,
+                                trophyBronze = earned.bronze,
+                                trophyProgress = earned.progress,
+                                trophyUpdatedAt = now,
+                            )
                         )
-                    )
+                    }
                 }
             }
         }
@@ -416,21 +430,6 @@ internal fun shouldRenameSteam(existingSteamAppId: Long?, existingName: String, 
 /** Switch 英文名回填条件（v0.15.9）：同 appId 绑定 + 标题不同 + 新标题非空 → 同一游戏的语言差异改名（纯函数，单测直接调用） */
 internal fun shouldRenameSwitch(existingSwitchAppId: String?, existingName: String, newTitle: String): Boolean =
     !existingSwitchAppId.isNullOrBlank() && !existingName.equals(newTitle, ignoreCase = true) && newTitle.isNotBlank()
-
-/** 奖杯归认（v0.17，纯函数，单测直接调用）：
- *  npTitleId 精确/剥 `_NN` 后缀等价优先，其次 PS 行名字完全一致且唯一；都不中返回 null（宁漏勿错） */
-internal fun claimTrophyGame(games: List<Game>, t: PsnClient.PsnTrophyTitle): Game? {
-    t.npTitleId?.let { nid ->
-        games.firstOrNull { psnTitleIdEquals(it.psnTitleId, nid) }?.let { return it }
-    }
-    return games.filter { it.platform == Platform.PS && it.name == t.name }.singleOrNull()
-}
-
-/** PSN 标题 ID 等价（纯函数）：精确相同，或剥掉 `_NN` 后缀后相同（gamelist 与 trophy 接口的形态差异） */
-internal fun psnTitleIdEquals(a: String?, b: String?): Boolean {
-    if (a.isNullOrBlank() || b.isNullOrBlank()) return false
-    return a == b || a.substringBefore('_') == b.substringBefore('_')
-}
 
 /**
  * Steam/PSN 增量时长的逐日摊分（纯函数，可单测）。
