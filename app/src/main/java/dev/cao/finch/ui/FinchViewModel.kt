@@ -11,7 +11,6 @@ import dev.cao.finch.data.GameStatus
 import dev.cao.finch.data.SessionWithGame
 import dev.cao.finch.data.SwitchTitleClient
 import dev.cao.finch.data.SyncEngine
-import dev.cao.finch.data.TrophyTotals
 import dev.cao.finch.data.buildNameVariants
 import dev.cao.finch.data.hasKana
 import dev.cao.finch.data.hasLatin
@@ -19,7 +18,6 @@ import dev.cao.finch.data.isHltbSearchable
 import dev.cao.finch.data.snapRefForCompleted
 import dev.cao.finch.data.stripPlatformTails
 import dev.cao.finch.timer.TimerServiceBridge
-import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -57,17 +55,6 @@ class FinchViewModel(app: Application) : AndroidViewModel(app) {
     fun platformTotals(fromMillis: Long, toMillis: Long) = sessionDao.observePlatformTotals(fromMillis, toMillis)
     fun topGamesWithCover(fromMillis: Long, toMillis: Long) = sessionDao.observeTopGamesWithCover(fromMillis, toMillis)
     fun steamTotalMinutes() = sessionDao.observeSteamTotalMinutes().map { it ?: 0L }
-
-    /** 奖杯汇总（v0.17）：全库已获得四围 + 已同步奖杯的游戏数（零成本聚合，不建表） */
-    fun trophyTotals(): Flow<TrophyTotals> = gameDao.observeAll().map { games ->
-        TrophyTotals(
-            platinum = games.sumOf { it.trophyPlatinum ?: 0 },
-            gold = games.sumOf { it.trophyGold ?: 0 },
-            silver = games.sumOf { it.trophySilver ?: 0 },
-            bronze = games.sumOf { it.trophyBronze ?: 0 },
-            gamesWithTrophies = games.count { it.trophyProgress != null },
-        )
-    }
 
     fun deleteGame(id: Long) {
         viewModelScope.launch { gameDao.deleteById(id) }

@@ -55,12 +55,3 @@ data class BucketTotal(
     val bucket: Int,
     val totalMs: Long?,
 )
-
-/** PSN 奖杯汇总（v0.17）：全库已获得四围 + 已同步过奖杯的游戏数 */
-data class TrophyTotals(
-    val platinum: Int,
-    val gold: Int,
-    val silver: Int,
-    val bronze: Int,
-    val gamesWithTrophies: Int,
-)

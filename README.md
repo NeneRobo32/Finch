@@ -20,7 +20,7 @@
   - Switch 家长监护 Moon API（PKCE OAuth，逐日游玩记录，日粒度）
   - PSN（npsso 授权，gamelist 官方总时长 PS4/PS5，快照差分；顺带同步奖杯概要）
   - 启动手动同步（下拉刷新三源齐跑），可关
-- **PS 奖杯**：PSN 同步按 `psnTitleId`（gamelist 的 titleId，如 `CUSA01399_00`）批量映射奖杯集（每批 5 个，接口 `/trophy/v1/users/me/titles/trophyTitles`），白金/金/银/铜已获得数 + 完成度（多奖杯集合集求和、按已获得/总数折算）；详情页奖杯卡、总结页全库奖杯汇总；只发游戏/奖杯请求，不发记录与密钥
+- **PS 奖杯**：PSN 同步按 `psnTitleId`（gamelist 的 titleId，如 `CUSA01399_00`）批量映射奖杯集（每批 5 个，接口 `/trophy/v1/users/me/titles/trophyTitles`），白金/金/银/铜已获得数 + 完成度（多奖杯集合集求和、按已获得/总数折算）；详情页奖杯卡；只发游戏/奖杯请求，不发记录与密钥
 - **桌面小组件**：正在玩/已暂停的游戏 + 已玩时长（扣暂停）/ 今日+本周累计 / 本月 Top1，点击直达
 - **Live Update 计时通知**：Android 16+ 开玩前请求 Live Update 授权（`POST_PROMOTED_NOTIFICATIONS` 运行时权限），计时通知可被系统提升为实时卡片（暂停/继续按钮随状态切换），低版本自动退化为普通常驻通知
 - 会话数据落 Room 数据库（`play_sessions`，暂停累计 `pauseAccumMs`），服务被杀后重启自动恢复计时（含暂停态）

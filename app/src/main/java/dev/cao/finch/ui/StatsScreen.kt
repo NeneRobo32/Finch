@@ -35,7 +35,6 @@ import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.TrendingDown
 import androidx.compose.material.icons.automirrored.filled.TrendingUp
 import androidx.compose.material.icons.filled.BarChart
-import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.IosShare
 import androidx.compose.material.icons.filled.Leaderboard
@@ -68,7 +67,6 @@ import dev.cao.finch.TimeFormatter
 import dev.cao.finch.data.DailyTotal
 import dev.cao.finch.data.PlatformTotal
 import dev.cao.finch.data.TopGameRow
-import dev.cao.finch.data.TrophyTotals
 import dev.cao.finch.ui.design.FinchCard
 import dev.cao.finch.ui.design.FinchHeader
 import dev.cao.finch.ui.design.FinchIconButton
@@ -90,9 +88,6 @@ private val RankGold = Color(0xFFE8B63C)
 private val RankSilver = Color(0xFFA8B0BD)
 private val RankBronze = Color(0xFFC08A5E)
 private val RankNeutral = Color(0xFFD7DCE2)
-
-/** 奖杯白金（冷银蓝，区别于榜单银） */
-private val TrophyPlatinum = Color(0xFF9CB6D1)
 
 private fun rankColor(i: Int) = when (i) {
     0 -> RankGold
@@ -139,8 +134,6 @@ fun StatsScreen(viewModel: FinchViewModel) {
     val topGames by remember(fromMillis, toMillis) { viewModel.topGamesWithCover(fromMillis, toMillis) }
         .collectAsState(initial = emptyList())
     val steamMin by remember { viewModel.steamTotalMinutes() }.collectAsState(initial = 0L)
-    val trophyTotals by remember { viewModel.trophyTotals() }
-        .collectAsState(initial = TrophyTotals(0, 0, 0, 0, 0))
     val distinctGames by remember(fromMillis, toMillis) { viewModel.distinctGamesInRange(fromMillis, toMillis) }
         .collectAsState(initial = 0)
     val weekday by remember(fromMillis, toMillis) { viewModel.weekdayTotals(fromMillis, toMillis) }
@@ -248,7 +241,6 @@ fun StatsScreen(viewModel: FinchViewModel) {
 
         item { HeroTotalCard(total, prevTotal, steamMin, mode) }
 
-        if (trophyTotals.gamesWithTrophies > 0) item { TrophySummaryCard(trophyTotals) }
         if (total > 0) item { MonthReportCard(distinctGames, daily, topGames, mode) }
         if (daily.isNotEmpty()) {
             item { HeatmapCard(daily = daily, mode = mode, anchorMonth = anchorMonth) }
@@ -395,31 +387,6 @@ private fun HeroTotalCard(totalMs: Long, prevMs: Long, steamMin: Long, mode: Sta
                 }
             }
         }
-    }
-}
-
-/** 奖杯汇总卡：全库 PSN 已获得四围（仅统计同步过奖杯的游戏） */
-@Composable
-private fun TrophySummaryCard(t: TrophyTotals) {
-    FinchCard(
-        title = "PSN 奖杯",
-        icon = Icons.Filled.EmojiEvents,
-        titleExtra = "${t.gamesWithTrophies} 款有奖杯",
-    ) {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            TrophyStat("白金", t.platinum, TrophyPlatinum)
-            TrophyStat("金", t.gold, RankGold)
-            TrophyStat("银", t.silver, RankSilver)
-            TrophyStat("铜", t.bronze, RankBronze)
-        }
-    }
-}
-
-@Composable
-private fun TrophyStat(label: String, count: Int, color: Color) {
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-        Box(Modifier.size(8.dp).background(color, CircleShape))
-        Text("$label $count", style = MaterialTheme.typography.labelMedium)
     }
 }
 
