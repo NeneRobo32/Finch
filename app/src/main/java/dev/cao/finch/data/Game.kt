@@ -55,6 +55,26 @@ data class Game(
     fun platformSet(): Set<Platform> =
         GameRepository.csvToPlatforms(platformsCsv).toSet().ifEmpty { setOf(platform) }
 
+    /**
+     * 云平台官方累计时长的来源标签（v0.18.3）：PS 游戏以 PSN 同步值优先，其次 Steam；
+     * null = 没有云数据，累计口径回退本地会话。
+     */
+    fun cloudPlaytimeSource(): String? = when {
+        (psnPlaytimeMin ?: 0L) > 0L -> "PSN"
+        (steamPlaytimeMin ?: 0L) > 0L -> "Steam"
+        else -> null
+    }
+
+    /**
+     * 单款游戏「累计时长」的唯一显示口径（v0.18.3）：有云平台官方累计就以官方为准
+     * （PS 游戏统一按 PSN 同步时间），本地会话只当历史明细，避免主页卡片与详情页出现两个矛盾的数字。
+     */
+    fun effectivePlaytimeMin(sessionMinutes: Long): Long = when {
+        (psnPlaytimeMin ?: 0L) > 0L -> psnPlaytimeMin!!
+        (steamPlaytimeMin ?: 0L) > 0L -> steamPlaytimeMin!!
+        else -> sessionMinutes
+    }
+
     /** 有效状态：status 为空的老数据按 completed 回填（通关→COMPLETED，否则在玩） */
     fun statusResolved(): GameStatus =
         status ?: if (completed) GameStatus.COMPLETED else GameStatus.PLAYING

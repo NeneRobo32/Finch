@@ -144,6 +144,10 @@ interface SessionDao {
     )
     suspend fun at(gameId: Long, startMillis: Long, source: SessionSource): PlaySession?
 
+    /** 某游戏最早一条已完成会话的起点（云端时长对账补历史用，历史会话排在它之前） */
+    @Query("SELECT MIN(startTime) FROM play_sessions WHERE gameId = :gameId AND endTime IS NOT NULL")
+    suspend fun earliestStartForGame(gameId: Long): Long?
+
     @Query(
         """
         SELECT strftime('%Y-%m-%d', startTime / 1000, 'unixepoch', 'localtime') AS day,

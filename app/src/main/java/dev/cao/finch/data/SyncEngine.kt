@@ -62,11 +62,11 @@ object SyncEngine {
 
     /**
      * 快照差分写会话（Steam / PSN 共用，须在事务内调用）：
-     *  - prev == null：首次见到，只建档不回溯（避免把历史时长当成一次增量）
-     *  - 无增量：只更新快照（REPLACE 同一行，作为下次差分的时间基准）
-     *  - 有增量：逐日摊分写会话；同游戏同来源同开始时间视为同一条占位会话，已存在则不重写
-     *  - 快照只推进实际入账的量（prev.totalMin + writtenMin）：被跳过/被防御丢弃的份额
-     *    留在下次差分里补写，不会像旧版那样「基线已推进、会话被丢弃」造成时长永久丢失
+     *  ① 差分：上次快照之后的增量逐日摊分写会话；同游戏同来源同开始时间视为同一条占位会话，
+     *     已存在则不重写
+     *  ② 对账（v0.18.3）：把「官方累计 − 本地记录合计」的差额补成历史会话，
+     *     使游玩记录合计与云端同步时间一致（首次同步、早于安装的历史都走这一步）
+     * 最后快照基线与官方累计对齐。
      * 返回本次写入的会话条数与入账分钟。
      */
     internal suspend fun diffWriteSessions(
@@ -83,30 +83,72 @@ object SyncEngine {
         now: LocalDateTime,
         zone: ZoneId,
     ): DiffWrite {
-        if (prev == null) {
-            saveSnapshot(snapshotDao, source, refKey, refName, totalMin, now)
-            return DiffWrite(0, 0)
-        }
-        val deltaMin = totalMin - prev.totalMin
-        if (deltaMin <= 0) {
-            saveSnapshot(snapshotDao, source, refKey, refName, totalMin, now)
-            return DiffWrite(0, 0)
-        }
         var added = 0
         var writtenMin = 0L
-        for (s in allocateSteamSessions(deltaMin, prev.at, now, zone, lastPlayedEpoch)) {
-            val startMs = s.start.atZone(zone).toInstant().toEpochMilli()
-            // 精确去重：同游戏同来源同开始时间 = 同一条占位会话（旧版按区间计数，同日二次同步会误判重复）
-            if (sessionDao.at(gameId, startMs, sessionSource) != null) continue
-            val endMs = s.end.atZone(zone).toInstant().toEpochMilli()
-            sessionDao.insert(
-                PlaySession(gameId = gameId, startTime = s.start, endTime = s.end, source = sessionSource)
-            )
-            added++
-            writtenMin += (endMs - startMs) / 60_000
+        // ① 差分：上次快照之后新产生的时长
+        val deltaMin = if (prev == null) 0L else totalMin - prev.totalMin
+        if (deltaMin > 0) {
+            for (s in allocateSteamSessions(deltaMin, prev!!.at, now, zone, lastPlayedEpoch)) {
+                val startMs = s.start.atZone(zone).toInstant().toEpochMilli()
+                // 精确去重：同游戏同来源同开始时间 = 同一条占位会话（旧版按区间计数，同日二次同步会误判重复）
+                if (sessionDao.at(gameId, startMs, sessionSource) != null) continue
+                val endMs = s.end.atZone(zone).toInstant().toEpochMilli()
+                sessionDao.insert(
+                    PlaySession(gameId = gameId, startTime = s.start, endTime = s.end, source = sessionSource)
+                )
+                added++
+                writtenMin += (endMs - startMs) / 60_000
+            }
         }
-        saveSnapshot(snapshotDao, source, refKey, refName, prev.totalMin + writtenMin, now)
+        // ② 对账：官方累计与本地记录合计的差额补历史会话（无差额则跳过，幂等）
+        val localMin = sessionDao.totalMsForGame(gameId) / 60_000
+        val missingMin = totalMin - localMin
+        if (missingMin > 0) {
+            // 历史会话排在既有会话之前：既不与本次增量重叠，也避开同起点去重吞掉
+            val earliest = sessionDao.earliestStartForGame(gameId)
+                ?.let { Instant.ofEpochMilli(it).atZone(zone).toLocalDateTime() }
+                ?.takeIf { it.isBefore(now) }
+            for (s in allocateHistorySessions(missingMin, earliest ?: now)) {
+                val startMs = s.start.atZone(zone).toInstant().toEpochMilli()
+                if (sessionDao.at(gameId, startMs, sessionSource) != null) continue
+                val endMs = s.end.atZone(zone).toInstant().toEpochMilli()
+                sessionDao.insert(
+                    PlaySession(gameId = gameId, startTime = s.start, endTime = s.end, source = sessionSource)
+                )
+                added++
+                writtenMin += (endMs - startMs) / 60_000
+            }
+        }
+        saveSnapshot(snapshotDao, source, refKey, refName, totalMin, now)
         return DiffWrite(added, writtenMin)
+    }
+
+    /** 历史占位每条最多 8 小时（避免一口气写出一条 100 小时的假会话） */
+    private const val HISTORY_MAX_PER_DAY_MIN = 480L
+
+    /** 历史占位最多回溯 60 天（再长就摊到每天更多小时） */
+    private const val HISTORY_MAX_DAYS = 60
+
+    /**
+     * 把「官方累计 − 本地记录合计」的差额摊成若干条历史会话，合计分钟严格等于 minutes：
+     *  - 条数 = ceil(minutes / 480)，最多 60 条
+     *  - 第 0 条结束于 [endAnchor]，之后每条再往前一天，相邻条目互不重叠
+     *  - 单向纯函数，便于单测
+     */
+    internal fun allocateHistorySessions(minutes: Long, endAnchor: LocalDateTime): List<AllocatedSession> {
+        if (minutes <= 0) return emptyList()
+        val days = ((minutes + HISTORY_MAX_PER_DAY_MIN - 1) / HISTORY_MAX_PER_DAY_MIN)
+            .coerceIn(1L, HISTORY_MAX_DAYS.toLong())
+            .toInt()
+        val per = minutes / days
+        val out = ArrayList<AllocatedSession>(days)
+        for (i in 0 until days) {
+            val end = if (i == 0) endAnchor else endAnchor.minusDays(i.toLong())
+            val mins = if (i == days - 1) minutes - per * (days - 1) else per
+            if (mins <= 0) continue
+            out += AllocatedSession(end.minusMinutes(mins), end)
+        }
+        return out
     }
 
     /** 拉 Steam 库并按快照差分写入会话。 */

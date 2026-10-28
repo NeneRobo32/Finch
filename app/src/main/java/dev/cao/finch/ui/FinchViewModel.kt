@@ -132,7 +132,7 @@ class FinchViewModel(app: Application) : AndroidViewModel(app) {
     internal suspend fun snapProgressToCompleted(game: Game): Game {
         val ref = game.hltbMainMin ?: return game
         if (ref <= 0) return game
-        val playedMin = sessionDao.totalMsForGame(game.id) / 60_000
+        val playedMin = game.effectivePlaytimeMin(sessionDao.totalMsForGame(game.id) / 60_000)
         return game.copy(hltbMainMin = snapRefForCompleted(playedMin, game.hltbMainMin))
     }
 

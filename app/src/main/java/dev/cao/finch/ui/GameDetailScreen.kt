@@ -157,20 +157,12 @@ fun GameDetailScreen(
     val sessions by remember(game.id) { viewModel.sessionsFor(game.id) }
         .collectAsState(initial = emptyList())
 
-    // 累计：云平台（Steam/PSN）官方总时长 > 本地会话时，以官方为准
+    // 累计口径（v0.18.3）：云平台官方总时长优先（PS 游戏统一按 PSN 同步时间），
+    // 本地会话只做「游玩记录」明细，不再与官方累计各显示一个数
     val sessionMinutes = (stats.totalMs ?: 0L) / 60_000
-    val steamMinutes = game.steamPlaytimeMin ?: 0L
-    val psnMinutes = game.psnPlaytimeMin ?: 0L
-    val cloudMinutes = maxOf(steamMinutes, psnMinutes)
-    val showCloudTotal = cloudMinutes > sessionMinutes
-    val totalLabel = if (showCloudTotal) {
-        "累计 · " + if (steamMinutes >= psnMinutes) "Steam" else "PSN"
-    } else {
-        "累计"
-    }
-    val totalValue = TimeFormatter.hoursMinutes(
-        Duration.ofMillis(if (showCloudTotal) cloudMinutes * 60_000 else (stats.totalMs ?: 0L)),
-    )
+    val totalMinutes = game.effectivePlaytimeMin(sessionMinutes)
+    val totalLabel = game.cloudPlaytimeSource()?.let { "累计 · $it" } ?: "累计"
+    val totalValue = TimeFormatter.hoursMinutes(Duration.ofMinutes(totalMinutes))
 
     val coverAnim = remember { Animatable(0.97f) }
     LaunchedEffect(Unit) {
@@ -344,8 +336,8 @@ fun GameDetailScreen(
                     )
                 }
 
-                // ---- 通关进度（HLTB） ----
-                val playedMin = (stats.totalMs ?: 0L) / 60_000
+                // ---- 通关进度（HLTB）：已玩与顶部「累计」同一口径，避免两个数打架 ----
+                val playedMin = totalMinutes
                 val hltbMin = game.hltbMainMin
                 var hltbAutoState by remember(game.id) { mutableStateOf(HltbAuto.IDLE) }
                 var hltbFailReason by remember(game.id) { mutableStateOf<String?>(null) }
@@ -657,3 +649,4 @@ private fun TrophyCount(label: String, count: Int, color: Color) {
         Text("$label $count", style = MaterialTheme.typography.labelMedium)
     }
 }
+

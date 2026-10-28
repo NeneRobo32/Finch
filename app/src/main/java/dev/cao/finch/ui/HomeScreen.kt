@@ -145,6 +145,11 @@ fun HomeScreen(
     val games by viewModel.games.collectAsState()
     val lastPlayedMap by viewModel.lastPlayedMap.collectAsState()
     val totalsMap by viewModel.totalsMap.collectAsState()
+    // 累计口径（v0.18.3）：有云平台官方累计的游戏（PS→PSN、PC→Steam）用官方值，
+    // 与详情页、HLTB 进度保持一致，不再出现「卡片 42h / 详情 210h」两个数字
+    val effectiveTotals = remember(games, totalsMap) {
+        games.associate { g -> g.id to g.effectivePlaytimeMin((totalsMap[g.id] ?: 0L) / 60_000) * 60_000 }
+    }
     val runningGameId by viewModel.runningGameId.collectAsState()
     val runningPaused by dev.cao.finch.timer.TimerServiceBridge.isPaused.collectAsState()
     val syncing by viewModel.syncing.collectAsState()
@@ -236,7 +241,7 @@ fun HomeScreen(
             HomeLibrary(
                 games = games,
                 lastPlayedMap = lastPlayedMap,
-                totalsMap = totalsMap,
+                totalsMap = effectiveTotals,
                 runningGameId = runningGameId,
                 runningPaused = runningPaused,
                 syncing = syncing,
