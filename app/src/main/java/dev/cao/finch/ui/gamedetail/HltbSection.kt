@@ -89,7 +89,9 @@ internal fun HltbProgressCard(
     var fetching by remember { mutableStateOf(false) }
     var fetchMsg by remember { mutableStateOf<String?>(null) }
     val frac = dev.cao.finch.data.progressFraction(playedMin, hltbMin)
-    val done = completed || playedMin >= hltbMin
+    // 通关状态只认手动勾选：已玩到达主线参考 ≠ 真的通关（云同步累计一到参考就标「已通关」是错的）
+    val reached = playedMin >= hltbMin
+    val done = completed
 
     FinchCard(
         title = "通关进度",
@@ -116,6 +118,14 @@ internal fun HltbProgressCard(
                 "（${(frac * 100).toInt()}%）",
             style = MaterialTheme.typography.bodyMedium,
         )
+        if (!done && reached) {
+            Spacer(Modifier.height(FinchSpace.xxs))
+            Text(
+                "已达主线参考时长，是否通关以你的勾选为准",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
         if ((hltbExtraMin ?: 0) > 0 || (hltb100Min ?: 0) > 0) {
             Spacer(Modifier.height(FinchSpace.xxs))
             Text(
