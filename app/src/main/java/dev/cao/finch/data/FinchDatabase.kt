@@ -20,7 +20,7 @@ class Converters {
 }
 
 /** Room schema 版本（迁移与备份校验共用） */
-const val FINCH_DB_VERSION = 17
+const val FINCH_DB_VERSION = 18
 
 @Database(
     entities = [Game::class, PlaySession::class, PlaytimeSnapshot::class, ReleaseFollow::class],
@@ -260,12 +260,23 @@ abstract class FinchDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_17_18 = object : Migration(17, 18) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // v0.18.6：play_sessions 加 estimated 标记（1 = 云端累计对账摊出的历史会话，
+                // 日期是推算的，不计入区间统计）。列必须带 DEFAULT 0，与实体 default value 对齐。
+                db.execSQL("ALTER TABLE play_sessions ADD COLUMN estimated INTEGER NOT NULL DEFAULT 0")
+                // 历史遗留：v0.18.3–v0.18.5 写进来的云端会话把整份终身累计摊进了最近 60 天，
+                // 正是「本月几千小时」的来源；旧行无法区分增量/历史，统一按估算处理（不清数据）
+                db.execSQL("UPDATE play_sessions SET estimated = 1 WHERE source IN ('STEAM', 'SWITCH', 'PS')")
+            }
+        }
+
         /** 全量手写迁移（生产 build 与迁移测试共用一份，避免两处链不同步） */
         val ALL_MIGRATIONS = arrayOf(
             MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5,
             MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9,
             MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13,
-            MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17,
+            MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17, MIGRATION_17_18,
         )
 
         fun build(context: Context): FinchDatabase =

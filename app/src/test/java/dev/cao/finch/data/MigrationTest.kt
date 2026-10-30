@@ -26,7 +26,7 @@ import org.robolectric.annotation.SQLiteMode
  * Room 挂全量 MIGRATION_* 打开（Room 自带 schema 校验，迁移 SQL 与实体不一致会抛
  * IllegalStateException —— v0.15.0 的启动闪退就是这么炸的）→ 断言样例数据保留、列值正确。
  *
- * 覆盖起始版本 7..15 逐版升到 FINCH_DB_VERSION=17。
+ * 覆盖起始版本 7..17 逐版升到 FINCH_DB_VERSION=18。
  * 1..6 无 schema JSON（schemas 从 7 起入库），无法起测，已在报告注明。
  */
 @RunWith(RobolectricTestRunner::class)
@@ -79,6 +79,60 @@ class MigrationTest {
     @Test
     fun `v15升级到当前_数据保留`() = checkFrom(15)
 
+    @Test
+    fun `v16升级到当前_数据保留`() = checkFrom(16)
+
+    @Test
+    fun `v17升级到当前_数据保留`() = checkFrom(17)
+
+    // ---- 专项：17→18 加 estimated 列并回标旧云端会话 ----
+
+    @Test
+    fun `v17到18_estimated列默认0_旧云端会话回标为估算`() {
+        createOldDb(17)
+        // 追加一条 v0.18.3–0.18.5 写下的 PSN 历史会话（旧库还没有 estimated 列）
+        val file = context.getDatabasePath(dbName)
+        val raw = SQLiteDatabase.openOrCreateDatabase(file, null)
+        try {
+            insertRow(
+                raw, "play_sessions", mapOf(
+                    "id" to 2L, "gameId" to 1L,
+                    "startTime" to 1698000000000L, "endTime" to 1698003600000L,
+                    "source" to "PS", "pauseAccumMs" to 0L,
+                )
+            )
+        } finally {
+            raw.close()
+        }
+        val room = openWithMigrations()
+        try {
+            val db = room.openHelper.writableDatabase
+            var dflt: String? = null
+            db.query("PRAGMA table_info(`play_sessions`)").use { c ->
+                val nameIdx = c.getColumnIndex("name")
+                val dfltIdx = c.getColumnIndex("dflt_value")
+                while (c.moveToNext()) {
+                    if (c.getString(nameIdx) == "estimated") {
+                        dflt = if (c.isNull(dfltIdx)) null else c.getString(dfltIdx)
+                    }
+                }
+            }
+            assertEquals("estimated 的 DEFAULT 应为 0", "0", dflt)
+            runBlocking {
+                val sessions = room.sessionDao()
+                assertEquals(false, sessions.byId(1L)!!.estimated) // 本机计时会话不受影响
+                assertEquals(true, sessions.byId(2L)!!.estimated) // 旧云端会话统一按估算处理
+                // 估算标记只影响区间统计，累计口径仍含它（记录合计＝云端累计的前提）
+                assertEquals(
+                    3_600_000L - 42L + 3_600_000L,
+                    sessions.totalMsForGame(1L),
+                )
+            }
+        } finally {
+            room.close()
+        }
+    }
+
     // ---- 专项：15→16 重建 play_sessions 的 DDL 与索引 ----
 
     @Test
@@ -120,13 +174,19 @@ class MigrationTest {
     }
 
     @Test
-    fun `新装库直接建v16_可正常读写`() {
-        // 无旧文件：Room 直接按实体建 v16（与迁移结果同构是 Room 校验口径统一的前提）
+    fun `新装库直接建v18_可正常读写`() {
+        // 无旧文件：Room 直接按实体建 v18（与迁移结果同构是 Room 校验口径统一的前提）
         val room = openWithMigrations()
         try {
             runBlocking {
                 assertEquals(0, room.gameDao().count())
                 assertTrue(room.sessionDao().totalMsForGame(1L) == 0L)
+                // 新装库的 estimated 列默认 false（外键先建游戏）
+                val gid = room.gameDao().insert(Game(name = "新装样例", platform = Platform.PC))
+                room.sessionDao().insert(
+                    PlaySession(gameId = gid, startTime = java.time.LocalDateTime.now())
+                )
+                assertEquals(false, room.sessionDao().byId(1L)!!.estimated)
             }
         } finally {
             room.close()

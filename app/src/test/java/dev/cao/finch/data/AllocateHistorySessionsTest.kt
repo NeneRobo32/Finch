@@ -50,10 +50,30 @@ class AllocateHistorySessionsTest {
     }
 
     @Test
-    fun `超长历史最多摊六十条`() {
-        val sessions = SyncEngine.allocateHistorySessions(60L * 480 + 120, anchor)
-        assertEquals(60, sessions.size)
+    fun `超长历史最多摊到上限条数`() {
+        // 上限 400 条（v0.18.6）：60 天封顶会把 2000 小时的游戏压成每天 33 小时
+        val sessions = SyncEngine.allocateHistorySessions(200L * 480 + 120, anchor)
+        assertEquals(201, sessions.size)
+        sessions.forEach { assertTrue(Duration.between(it.start, it.end).toMinutes() <= 480) }
         val sum = sessions.sumOf { Duration.between(it.start, it.end).toMinutes() }
-        assertEquals(60L * 480 + 120, sum)
+        assertEquals(200L * 480 + 120, sum)
+        // 超过上限按 400 条封顶，合计仍严格守恒
+        val huge = SyncEngine.allocateHistorySessions(500L * 480, anchor)
+        assertEquals(400, huge.size)
+        assertEquals(500L * 480, huge.sumOf { Duration.between(it.start, it.end).toMinutes() })
+    }
+
+    @Test
+    fun `锚点不早于上个月末_避免推算历史落进当月`() {
+        val now = LocalDateTime.parse("2026-10-30T09:13:00")
+        // 无既有会话：锚点 = 上个月最后一天（月末 23:00）
+        val fallback = SyncEngine.historyAnchor(null, now)
+        assertEquals(LocalDateTime.parse("2026-09-30T23:00:00"), fallback)
+        // 既有会话更早：贴着它之前放
+        val early = LocalDateTime.parse("2026-03-01T20:00:00")
+        assertEquals(early, SyncEngine.historyAnchor(early, now))
+        // 既有会话就在本月：仍然退回上个月末
+        val thisMonth = LocalDateTime.parse("2026-10-02T20:00:00")
+        assertEquals(LocalDateTime.parse("2026-09-30T23:00:00"), SyncEngine.historyAnchor(thisMonth, now))
     }
 }

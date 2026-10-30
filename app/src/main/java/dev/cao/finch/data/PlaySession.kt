@@ -30,6 +30,10 @@ data class PlaySession(
     @ColumnInfo(defaultValue = "0")
     val pauseAccumMs: Long = 0,
     val pauseStartedAt: LocalDateTime? = null,
+    // v0.18.6（DB 18）：云端累计对账摊出来的「历史会话」——起止日期是推算的，
+    // 只让游玩记录合计＝云同步累计，不计入本月/今年/热力图/作息/平台分布等区间统计
+    @ColumnInfo(defaultValue = "0")
+    val estimated: Boolean = false,
 ) {
     /**
      * 本次会话实际游玩时长（毫秒，扣掉暂停）。

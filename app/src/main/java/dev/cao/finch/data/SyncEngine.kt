@@ -127,17 +127,33 @@ object SyncEngine {
             ?.takeIf { it.isBefore(now) }
         var added = 0
         var writtenMin = 0L
-        for (s in allocateHistorySessions(missingMin, earliest ?: now)) {
+        for (s in allocateHistorySessions(missingMin, historyAnchor(earliest, now))) {
             val startMs = s.start.atZone(zone).toInstant().toEpochMilli()
             if (sessionDao.at(gameId, startMs, sessionSource) != null) continue
             val endMs = s.end.atZone(zone).toInstant().toEpochMilli()
             sessionDao.insert(
-                PlaySession(gameId = gameId, startTime = s.start, endTime = s.end, source = sessionSource)
+                PlaySession(
+                    gameId = gameId,
+                    startTime = s.start,
+                    endTime = s.end,
+                    source = sessionSource,
+                    estimated = true,
+                )
             )
             added++
             writtenMin += (endMs - startMs) / 60_000
         }
         return DiffWrite(added, writtenMin)
+    }
+
+    /**
+     * 历史占位段的终点锚点（v0.18.6）：一律排在「上个月结束之前」。
+     * 云端只给终身累计、不给日期，推算出来的历史会话若落在当月会把「本月时长」撑到几千小时；
+     * 已有会话更早时贴着它之前放，既不与增量段重叠，也不会被同起点去重吞掉。
+     */
+    internal fun historyAnchor(earliest: LocalDateTime?, now: LocalDateTime): LocalDateTime {
+        val lastMonthEnd = now.toLocalDate().withDayOfMonth(1).atStartOfDay().minusDays(1).withHour(23)
+        return if (earliest != null && earliest.isBefore(lastMonthEnd)) earliest else lastMonthEnd
     }
 
     /**
@@ -170,13 +186,14 @@ object SyncEngine {
     /** 历史占位每条最多 8 小时（避免一口气写出一条 100 小时的假会话） */
     private const val HISTORY_MAX_PER_DAY_MIN = 480L
 
-    /** 历史占位最多回溯 60 天（再长就摊到每天更多小时） */
-    private const val HISTORY_MAX_DAYS = 60
+    /** 历史占位最多回溯 400 天（再长就摊到每天更多小时；PSN 里 1000+ 小时的游戏也不会爆成一条） */
+    private const val HISTORY_MAX_DAYS = 400
 
     /**
      * 把「官方累计 − 本地记录合计」的差额摊成若干条历史会话，合计分钟严格等于 minutes：
-     *  - 条数 = ceil(minutes / 480)，最多 60 条
+     *  - 条数 = ceil(minutes / 480)，最多 [HISTORY_MAX_DAYS] 条（超过上限时每条会超过 8 小时）
      *  - 第 0 条结束于 [endAnchor]，之后每条再往前一天，相邻条目互不重叠
+     *  - 余数逐天 +1 分摊，保证每条 ≤ 480 分钟且合计守恒
      *  - 单向纯函数，便于单测
      */
     internal fun allocateHistorySessions(minutes: Long, endAnchor: LocalDateTime): List<AllocatedSession> {
@@ -185,10 +202,12 @@ object SyncEngine {
             .coerceIn(1L, HISTORY_MAX_DAYS.toLong())
             .toInt()
         val per = minutes / days
+        // 余数逐天 +1 分摊（全倾到最后一条会让它越过 480 分钟上限，也把当天的时长写得过分集中）
+        val remainder = (minutes % days).toInt()
         val out = ArrayList<AllocatedSession>(days)
         for (i in 0 until days) {
             val end = if (i == 0) endAnchor else endAnchor.minusDays(i.toLong())
-            val mins = if (i == days - 1) minutes - per * (days - 1) else per
+            val mins = per + if (i < remainder) 1L else 0L
             if (mins <= 0) continue
             out += AllocatedSession(end.minusMinutes(mins), end)
         }
