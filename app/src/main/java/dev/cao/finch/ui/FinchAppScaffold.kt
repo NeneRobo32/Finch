@@ -36,6 +36,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.kyant.backdrop.backdrops.layerBackdrop
+import com.kyant.backdrop.backdrops.rememberCombinedBackdrop
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import dev.cao.finch.ui.design.FinchAurora
 import dev.cao.finch.ui.design.FinchBottomBar
@@ -74,7 +75,12 @@ fun FinchAppScaffold(
 ) {
     var tab by rememberSaveable { mutableStateOf(Tab.Home) }
     BackHandler(enabled = tab != Tab.Home) { tab = Tab.Home }
+    // 两个采样源：
+    // · backgroundBackdrop 只录静态氛围光，给卡片玻璃用（卡片在内容层里，若也采样内容层会自采样递归）
+    // · glassBackdrop = 氛围光 + 内容层，只给底栏用，这样底栏能真正透出滚动到它身后的卡片
     val backgroundBackdrop = rememberLayerBackdrop()
+    val contentBackdrop = rememberLayerBackdrop()
+    val glassBackdrop = rememberCombinedBackdrop(backgroundBackdrop, contentBackdrop)
 
     CompositionLocalProvider(LocalFinchBackdrop provides backgroundBackdrop) {
         Box(Modifier.fillMaxSize()) {
@@ -88,7 +94,11 @@ fun FinchAppScaffold(
             }
 
             // ② 内容层
-            Box(Modifier.fillMaxSize()) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .layerBackdrop(contentBackdrop),
+            ) {
                 AnimatedContent(
                     targetState = tab,
                     transitionSpec = {
@@ -126,7 +136,7 @@ fun FinchAppScaffold(
                 },
                 selectedIndex = tab.ordinal,
                 onSelect = { tab = Tab.entries[it] },
-                backdrop = backgroundBackdrop,
+                backdrop = glassBackdrop,
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .fillMaxWidth()
