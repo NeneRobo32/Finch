@@ -101,26 +101,70 @@ object SyncEngine {
             }
         }
         // ② 对账：官方累计与本地记录合计的差额补历史会话（无差额则跳过，幂等）
-        val localMin = sessionDao.totalMsForGame(gameId) / 60_000
-        val missingMin = totalMin - localMin
-        if (missingMin > 0) {
-            // 历史会话排在既有会话之前：既不与本次增量重叠，也避开同起点去重吞掉
-            val earliest = sessionDao.earliestStartForGame(gameId)
-                ?.let { Instant.ofEpochMilli(it).atZone(zone).toLocalDateTime() }
-                ?.takeIf { it.isBefore(now) }
-            for (s in allocateHistorySessions(missingMin, earliest ?: now)) {
-                val startMs = s.start.atZone(zone).toInstant().toEpochMilli()
-                if (sessionDao.at(gameId, startMs, sessionSource) != null) continue
-                val endMs = s.end.atZone(zone).toInstant().toEpochMilli()
-                sessionDao.insert(
-                    PlaySession(gameId = gameId, startTime = s.start, endTime = s.end, source = sessionSource)
-                )
-                added++
-                writtenMin += (endMs - startMs) / 60_000
-            }
-        }
+        val rec = reconcileGame(sessionDao, gameId, totalMin, sessionSource, now, zone)
+        added += rec.added
+        writtenMin += rec.writtenMin
         saveSnapshot(snapshotDao, source, refKey, refName, totalMin, now)
         return DiffWrite(added, writtenMin)
+    }
+
+    /**
+     * 单游戏对账（须在事务内调用）：把「官方累计 − 本地记录合计」的差额补成历史会话。
+     * 历史会话排在既有会话之前（不与增量重叠、不被同起点去重吞掉）；无差额时直接返回零。
+     */
+    private suspend fun reconcileGame(
+        sessionDao: SessionDao,
+        gameId: Long,
+        totalMin: Long,
+        sessionSource: SessionSource,
+        now: LocalDateTime,
+        zone: ZoneId,
+    ): DiffWrite {
+        val missingMin = totalMin - sessionDao.totalMsForGame(gameId) / 60_000
+        if (missingMin <= 0) return DiffWrite(0, 0)
+        val earliest = sessionDao.earliestStartForGame(gameId)
+            ?.let { Instant.ofEpochMilli(it).atZone(zone).toLocalDateTime() }
+            ?.takeIf { it.isBefore(now) }
+        var added = 0
+        var writtenMin = 0L
+        for (s in allocateHistorySessions(missingMin, earliest ?: now)) {
+            val startMs = s.start.atZone(zone).toInstant().toEpochMilli()
+            if (sessionDao.at(gameId, startMs, sessionSource) != null) continue
+            val endMs = s.end.atZone(zone).toInstant().toEpochMilli()
+            sessionDao.insert(
+                PlaySession(gameId = gameId, startTime = s.start, endTime = s.end, source = sessionSource)
+            )
+            added++
+            writtenMin += (endMs - startMs) / 60_000
+        }
+        return DiffWrite(added, writtenMin)
+    }
+
+    /**
+     * 本地对账（不联网）：把所有有云官方累计的游戏补成历史会话，让游玩记录合计跟上累计。
+     * 同步内对账同一口径、同一幂等规则；App 启动与每次下拉刷新都会跑一遍，
+     * 所以即使某次云同步失败/没配，记录页也不会继续空白。
+     * @return 本次补写的会话条数
+     */
+    suspend fun reconcileRecordsLocally(db: FinchDatabase): Int {
+        val gameDao = db.gameDao()
+        val sessionDao = db.sessionDao()
+        val games = gameDao.all()
+        if (games.isEmpty()) return 0
+        val now = LocalDateTime.now()
+        val zone = ZoneId.systemDefault()
+        var added = 0
+        db.withTransaction {
+            for (g in games) {
+                val psnMin = g.psnPlaytimeMin?.takeIf { it > 0 }
+                val steamMin = g.steamPlaytimeMin?.takeIf { it > 0 }
+                val totalMin = psnMin ?: steamMin ?: continue
+                val source = if (psnMin != null) SessionSource.PS else SessionSource.STEAM
+                val rec = reconcileGame(sessionDao, g.id, totalMin, source, now, zone)
+                added += rec.added
+            }
+        }
+        return added
     }
 
     /** 历史占位每条最多 8 小时（避免一口气写出一条 100 小时的假会话） */
@@ -198,7 +242,7 @@ object SyncEngine {
                 }
                 if (existing == null) {
                     val cover = "https://cdn.cloudflare.steamstatic.com/steam/apps/${g.appid}/header.jpg"
-                    gameDao.insert(
+                    val newId = gameDao.insert(
                         Game(
                             name = g.name,
                             platform = Platform.PC,
@@ -209,23 +253,31 @@ object SyncEngine {
                         )
                     )
                     created++
-                    // 新建的游戏：首次拉取只建档不差分
-                    saveSnapshot(snapshotDao, "steam", "steam:${g.appid}", g.name, g.playtimeMinutes, now)
-                    continue
+                    // 新建的游戏：差分基线为空，但官方累计要按对账补成历史会话（v0.18.4：
+                    // 旧版这里只建档不写记录，导致「官方有累计、游玩记录空白」）
+                    sessionAdded += diffWriteSessions(
+                        sessionDao, snapshotDao,
+                        source = "steam", refKey = "steam:${g.appid}", refName = g.name,
+                        gameId = newId, totalMin = g.playtimeMinutes,
+                        prev = null, lastPlayedEpoch = g.lastPlayedEpoch,
+                        sessionSource = SessionSource.STEAM,
+                        now = now, zone = zone,
+                    ).added
+                } else {
+                    // 已有 PC 游戏：与上次快照差分
+                    val refKey = "steam:${g.appid}"
+                    // 与上面 allByName 匹配到的同一行；若已有别的行占着该 appid 则以它为准
+                    val gameId = gameDao.bySteamAppId(g.appid)?.id ?: existing.id
+                    sessionAdded += diffWriteSessions(
+                        sessionDao, snapshotDao,
+                        source = "steam", refKey = refKey, refName = g.name,
+                        gameId = gameId, totalMin = g.playtimeMinutes,
+                        prev = snapshotDao.byKey("steam", refKey),
+                        lastPlayedEpoch = g.lastPlayedEpoch,
+                        sessionSource = SessionSource.STEAM,
+                        now = now, zone = zone,
+                    ).added
                 }
-                // 已有 PC 游戏：与上次快照差分
-                val refKey = "steam:${g.appid}"
-                // 与上面 allByName 匹配到的同一行；若已有别的行占着该 appid 则以它为准
-                val gameId = gameDao.bySteamAppId(g.appid)?.id ?: existing.id
-                sessionAdded += diffWriteSessions(
-                    sessionDao, snapshotDao,
-                    source = "steam", refKey = refKey, refName = g.name,
-                    gameId = gameId, totalMin = g.playtimeMinutes,
-                    prev = snapshotDao.byKey("steam", refKey),
-                    lastPlayedEpoch = g.lastPlayedEpoch,
-                    sessionSource = SessionSource.STEAM,
-                    now = now, zone = zone,
-                ).added
             }
         }
         return SteamResult(created, matched, skipped, sessionAdded)
@@ -393,7 +445,7 @@ object SyncEngine {
                     matched++
                 }
                 if (existing == null) {
-                    gameDao.insert(
+                    val newId = gameDao.insert(
                         Game(
                             name = t.name,
                             platform = Platform.PS,
@@ -404,21 +456,29 @@ object SyncEngine {
                         )
                     )
                     created++
-                    // 新建的游戏：首次拉取只建档不差分
-                    saveSnapshot(snapshotDao, "psn", "psn:${t.titleId ?: t.name}", t.name, t.totalMinutes, now)
-                    continue
+                    // 新建的游戏：差分基线为空，但官方累计要按对账补成历史会话（v0.18.4：
+                    // 旧版这里只建档不写记录，导致「PSN 有累计、游玩记录空白」）
+                    sessionAdded += diffWriteSessions(
+                        sessionDao, snapshotDao,
+                        source = "psn", refKey = "psn:${t.titleId ?: t.name}", refName = t.name,
+                        gameId = newId, totalMin = t.totalMinutes,
+                        prev = null, lastPlayedEpoch = t.lastPlayedEpochMillis?.let { it / 1000 },
+                        sessionSource = SessionSource.PS,
+                        now = now, zone = zone,
+                    ).added
+                } else {
+                    // 已有 PS 游戏：与上次快照差分（PSN 有真实 lastPlayedDateTime，容易落到真实起点）
+                    val refKey = "psn:${t.titleId ?: t.name}"
+                    sessionAdded += diffWriteSessions(
+                        sessionDao, snapshotDao,
+                        source = "psn", refKey = refKey, refName = t.name,
+                        gameId = existing.id, totalMin = t.totalMinutes,
+                        prev = snapshotDao.byKey("psn", refKey),
+                        lastPlayedEpoch = t.lastPlayedEpochMillis?.let { it / 1000 },
+                        sessionSource = SessionSource.PS,
+                        now = now, zone = zone,
+                    ).added
                 }
-                // 已有 PS 游戏：与上次快照差分（PSN 有真实 lastPlayedDateTime，容易落到真实起点）
-                val refKey = "psn:${t.titleId ?: t.name}"
-                sessionAdded += diffWriteSessions(
-                    sessionDao, snapshotDao,
-                    source = "psn", refKey = refKey, refName = t.name,
-                    gameId = existing.id, totalMin = t.totalMinutes,
-                    prev = snapshotDao.byKey("psn", refKey),
-                    lastPlayedEpoch = t.lastPlayedEpochMillis?.let { it / 1000 },
-                    sessionSource = SessionSource.PS,
-                    now = now, zone = zone,
-                ).added
             }
         }
 

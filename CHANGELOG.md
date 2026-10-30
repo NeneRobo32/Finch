@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.18.5 (2026-10-30)
+
+游玩记录一定跟得上云端累计（无 DB 变更）：
+
+- **修复**：新建游戏（Steam/PSN 首次同步建档）旧代码只写快照、不写游玩记录，导致「累计有 PSN 时间、记录页空白」。
+  现在建档后同样按差额补历史会话（`SyncEngine.runSteam`/`runPSN` 的 created 分支改走 diffWriteSessions）
+- **新增**：App 启动时做一次**本地对账**（不联网，`SyncEngine.reconcileRecordsLocally`，`FinchViewModel` init 调用）——
+  凡有云官方累计的游戏，按「官方累计 − 本地记录合计」的差额补历史会话；云同步失败或没配也能补齐，且幂等无差额不写
+- 对账抽成 `reconcileGame` 单一实现，同步内与本地启动共用同一口径
+
 ## 0.18.4 (2026-10-29)
 
 通关进度不再被游玩时长自动标成通关（无 DB 变更）：

@@ -32,6 +32,12 @@ class FinchViewModel(app: Application) : AndroidViewModel(app) {
     private val sessionDao = db.sessionDao()
     private val settings = (app as FinchApp).settings
 
+    init {
+        // 本地对账（不联网，v0.18.5）：启动即补齐「官方累计 → 游玩记录」的差额，
+        // 避免云同步失败/未配置时记录页一直空白（幂等，无差额时不写）
+        viewModelScope.launch { runCatching { SyncEngine.reconcileRecordsLocally(db) } }
+    }
+
     val games: StateFlow<List<Game>> = gameDao.observeAllByRecentPlay()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
