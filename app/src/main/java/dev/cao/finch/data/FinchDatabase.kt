@@ -20,7 +20,7 @@ class Converters {
 }
 
 /** Room schema 版本（迁移与备份校验共用） */
-const val FINCH_DB_VERSION = 18
+const val FINCH_DB_VERSION = 19
 
 @Database(
     entities = [Game::class, PlaySession::class, PlaytimeSnapshot::class, ReleaseFollow::class],
@@ -271,12 +271,42 @@ abstract class FinchDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_18_19 = object : Migration(18, 19) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // v0.18.8：取消「云端累计 − 本地记录」对账摊出的历史会话。
+                // estimated=1 的行日期是推算出来的（v0.18.3–v0.18.5 摊出，v0.18.6 迁移时又回标了
+                // 更早的云端行），正是「本月几千小时」的来源；先删干净，再把标记列移除，
+                // 让记录页与本月/热力图/平台统计都只反映真实发生过的会话。
+                db.execSQL("DELETE FROM play_sessions WHERE estimated = 1")
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `play_sessions_new` (" +
+                        "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "`gameId` INTEGER NOT NULL, " +
+                        "`startTime` INTEGER NOT NULL, " +
+                        "`endTime` INTEGER, " +
+                        "`source` TEXT NOT NULL, " +
+                        "`pauseAccumMs` INTEGER NOT NULL DEFAULT 0, " +
+                        "`pauseStartedAt` INTEGER, " +
+                        "FOREIGN KEY(`gameId`) REFERENCES `games`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE)"
+                )
+                db.execSQL(
+                    "INSERT INTO play_sessions_new (id, gameId, startTime, endTime, source, pauseAccumMs, pauseStartedAt) " +
+                        "SELECT id, gameId, startTime, endTime, source, pauseAccumMs, pauseStartedAt FROM play_sessions"
+                )
+                db.execSQL("DROP TABLE play_sessions")
+                db.execSQL("ALTER TABLE play_sessions_new RENAME TO play_sessions")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_play_sessions_gameId` ON `play_sessions` (`gameId`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_play_sessions_startTime` ON `play_sessions` (`startTime`)")
+            }
+        }
+
         /** 全量手写迁移（生产 build 与迁移测试共用一份，避免两处链不同步） */
         val ALL_MIGRATIONS = arrayOf(
             MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5,
             MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9,
             MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13,
             MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17, MIGRATION_17_18,
+            MIGRATION_18_19,
         )
 
         fun build(context: Context): FinchDatabase =

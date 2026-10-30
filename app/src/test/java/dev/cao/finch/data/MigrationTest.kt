@@ -26,7 +26,7 @@ import org.robolectric.annotation.SQLiteMode
  * Room 挂全量 MIGRATION_* 打开（Room 自带 schema 校验，迁移 SQL 与实体不一致会抛
  * IllegalStateException —— v0.15.0 的启动闪退就是这么炸的）→ 断言样例数据保留、列值正确。
  *
- * 覆盖起始版本 7..17 逐版升到 FINCH_DB_VERSION=18。
+ * 覆盖起始版本 7..18 逐版升到 FINCH_DB_VERSION=19。
  * 1..6 无 schema JSON（schemas 从 7 起入库），无法起测，已在报告注明。
  */
 @RunWith(RobolectricTestRunner::class)
@@ -85,20 +85,23 @@ class MigrationTest {
     @Test
     fun `v17升级到当前_数据保留`() = checkFrom(17)
 
-    // ---- 专项：17→18 加 estimated 列并回标旧云端会话 ----
+    @Test
+    fun `v18升级到当前_数据保留`() = checkFrom(18)
+
+    // ---- 专项：18→19 删掉推算会话并移除 estimated 列 ----
 
     @Test
-    fun `v17到18_estimated列默认0_旧云端会话回标为估算`() {
-        createOldDb(17)
-        // 追加一条 v0.18.3–0.18.5 写下的 PSN 历史会话（旧库还没有 estimated 列）
+    fun `v18到19_推算会话被清掉_estimated列移除_真实会话保留`() {
+        createOldDb(18)
+        // v18 库里追加一条 estimated=1 的推算会话（云端累计摊出来的历史，日期是编的）
         val file = context.getDatabasePath(dbName)
         val raw = SQLiteDatabase.openOrCreateDatabase(file, null)
         try {
             insertRow(
                 raw, "play_sessions", mapOf(
                     "id" to 2L, "gameId" to 1L,
-                    "startTime" to 1698000000000L, "endTime" to 1698003600000L,
-                    "source" to "PS", "pauseAccumMs" to 0L,
+                    "startTime" to 1698000000000L, "endTime" to 1718438400000L,
+                    "source" to "PS", "pauseAccumMs" to 0L, "estimated" to 1L,
                 )
             )
         } finally {
@@ -107,26 +110,24 @@ class MigrationTest {
         val room = openWithMigrations()
         try {
             val db = room.openHelper.writableDatabase
-            var dflt: String? = null
+            // estimated 列必须已从表结构里消失
+            var hasEstimated = false
             db.query("PRAGMA table_info(`play_sessions`)").use { c ->
                 val nameIdx = c.getColumnIndex("name")
-                val dfltIdx = c.getColumnIndex("dflt_value")
                 while (c.moveToNext()) {
-                    if (c.getString(nameIdx) == "estimated") {
-                        dflt = if (c.isNull(dfltIdx)) null else c.getString(dfltIdx)
-                    }
+                    if (c.getString(nameIdx) == "estimated") hasEstimated = true
                 }
             }
-            assertEquals("estimated 的 DEFAULT 应为 0", "0", dflt)
+            assertEquals("estimated 列应已移除", false, hasEstimated)
             runBlocking {
                 val sessions = room.sessionDao()
-                assertEquals(false, sessions.byId(1L)!!.estimated) // 本机计时会话不受影响
-                assertEquals(true, sessions.byId(2L)!!.estimated) // 旧云端会话统一按估算处理
-                // 估算标记只影响区间统计，累计口径仍含它（记录合计＝云端累计的前提）
-                assertEquals(
-                    3_600_000L - 42L + 3_600_000L,
-                    sessions.totalMsForGame(1L),
-                )
+                // 推算会话被删除；本机真实计时会话原样保留
+                assertEquals(null, sessions.byId(2L))
+                val real = sessions.byId(1L)
+                assertNotNull(real)
+                assertEquals(42L, real!!.pauseAccumMs)
+                // 累计口径现在只含真实会话，不再被推算历史撑大
+                assertEquals(3_600_000L - 42L, sessions.totalMsForGame(1L))
             }
         } finally {
             room.close()
@@ -174,19 +175,19 @@ class MigrationTest {
     }
 
     @Test
-    fun `新装库直接建v18_可正常读写`() {
-        // 无旧文件：Room 直接按实体建 v18（与迁移结果同构是 Room 校验口径统一的前提）
+    fun `新装库直接建v19_可正常读写`() {
+        // 无旧文件：Room 直接按实体建 v19（与迁移结果同构是 Room 校验口径统一的前提）
         val room = openWithMigrations()
         try {
             runBlocking {
                 assertEquals(0, room.gameDao().count())
                 assertTrue(room.sessionDao().totalMsForGame(1L) == 0L)
-                // 新装库的 estimated 列默认 false（外键先建游戏）
+                // 新装库直接可用（外键先建游戏）：会话能写能读
                 val gid = room.gameDao().insert(Game(name = "新装样例", platform = Platform.PC))
                 room.sessionDao().insert(
                     PlaySession(gameId = gid, startTime = java.time.LocalDateTime.now())
                 )
-                assertEquals(false, room.sessionDao().byId(1L)!!.estimated)
+                assertNotNull(room.sessionDao().byId(1L))
             }
         } finally {
             room.close()

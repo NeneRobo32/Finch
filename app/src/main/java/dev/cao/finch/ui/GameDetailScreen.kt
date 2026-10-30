@@ -163,6 +163,12 @@ fun GameDetailScreen(
     val totalMinutes = game.effectivePlaytimeMin(sessionMinutes)
     val totalLabel = game.cloudPlaytimeSource()?.let { "累计 · $it" } ?: "累计"
     val totalValue = TimeFormatter.hoursMinutes(Duration.ofMinutes(totalMinutes))
+    // 云端累计 vs 本地记录的差额（v0.18.8）：云端只给终身累计、不给日期，所以差额不再
+    // 用「推算的历史会话」补满——补出来的日期是编的，会把本月/热力图撑出几千小时。
+    // 这里如实展示差额，让用户知道记录页为什么比累计少。
+    val recordValue = TimeFormatter.hoursMinutes(Duration.ofMinutes(sessionMinutes))
+    val recordGapMin = totalMinutes - sessionMinutes
+    val showRecordGap = game.cloudPlaytimeSource() != null && recordGapMin >= 30
 
     val coverAnim = remember { Animatable(0.97f) }
     LaunchedEffect(Unit) {
@@ -322,6 +328,17 @@ fun GameDetailScreen(
                     FinchStatTile(totalLabel, totalValue, Modifier.weight(1f))
                     FinchStatTile("会话", "${stats.sessionCount}", Modifier.weight(1f))
                     FinchStatTile("最近", stats.lastPlayedAt?.let { relativeTime(it) } ?: "—", Modifier.weight(1f))
+                }
+
+                // ---- 累计与记录的差额说明（v0.18.8）----
+                if (showRecordGap) {
+                    Spacer(Modifier.height(FinchSpace.sm))
+                    Text(
+                        "本地记录 $recordValue · 差额 ${TimeFormatter.hoursMinutes(Duration.ofMinutes(recordGapMin))}" +
+                            "（同步只记新增时长，官方历史累计不摊成记录）",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
 
                 // ---- PSN 奖杯 ----

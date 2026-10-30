@@ -57,16 +57,20 @@ object SyncEngine {
         )
     }
 
-    /** 差分写入结果：写入条数 + 实际入账分钟（未入账份额留待下次差分补写，时长不丢） */
+    /** 差分写入结果：写入条数 + 实际入账分钟（与既有占位同起点的份额会被跳过，避免重复计时长） */
     internal data class DiffWrite(val added: Int, val writtenMin: Long)
 
     /**
      * 快照差分写会话（Steam / PSN 共用，须在事务内调用）：
-     *  ① 差分：上次快照之后的增量逐日摊分写会话；同游戏同来源同开始时间视为同一条占位会话，
-     *     已存在则不重写
-     *  ② 对账（v0.18.3）：把「官方累计 − 本地记录合计」的差额补成历史会话，
-     *     使游玩记录合计与云端同步时间一致（首次同步、早于安装的历史都走这一步）
-     * 最后快照基线与官方累计对齐。
+     *  ① 差分：上次快照之后新产生的增量，在「上次快照 → 现在」这个真实区间内逐日摊分写会话；
+     *     同游戏同来源同开始时间视为同一条占位会话，已存在则不重写
+     *  最后快照基线与官方累计对齐。
+     *
+     * v0.18.8 起不再做「官方累计 − 本地记录合计」的对账补写：云端只给终身累计、不给日期，
+     * 摊出来的历史会话日期是编的，会把「本月/今年/热力图/平台分布」撑出几千小时，
+     * 也让记录页混进用户从没玩过的日子。累计与记录的差额改为在详情页显式说明，不再造假数据。
+     *
+     * @param lastPlayedEpoch 数据源返回的真实「上次游玩时间」（秒），用于把今天的份额放到真实时刻
      * 返回本次写入的会话条数与入账分钟。
      */
     internal suspend fun diffWriteSessions(
@@ -85,7 +89,7 @@ object SyncEngine {
     ): DiffWrite {
         var added = 0
         var writtenMin = 0L
-        // ① 差分：上次快照之后新产生的时长
+        // 差分：上次快照之后新产生的时长（首次同步没有基线，只有累计值可对账，不写记录）
         val deltaMin = if (prev == null) 0L else totalMin - prev.totalMin
         if (deltaMin > 0) {
             for (s in allocateSteamSessions(deltaMin, prev!!.at, now, zone, lastPlayedEpoch)) {
@@ -100,118 +104,8 @@ object SyncEngine {
                 writtenMin += (endMs - startMs) / 60_000
             }
         }
-        // ② 对账：官方累计与本地记录合计的差额补历史会话（无差额则跳过，幂等）
-        val rec = reconcileGame(sessionDao, gameId, totalMin, sessionSource, now, zone)
-        added += rec.added
-        writtenMin += rec.writtenMin
         saveSnapshot(snapshotDao, source, refKey, refName, totalMin, now)
         return DiffWrite(added, writtenMin)
-    }
-
-    /**
-     * 单游戏对账（须在事务内调用）：把「官方累计 − 本地记录合计」的差额补成历史会话。
-     * 历史会话排在既有会话之前（不与增量重叠、不被同起点去重吞掉）；无差额时直接返回零。
-     */
-    private suspend fun reconcileGame(
-        sessionDao: SessionDao,
-        gameId: Long,
-        totalMin: Long,
-        sessionSource: SessionSource,
-        now: LocalDateTime,
-        zone: ZoneId,
-    ): DiffWrite {
-        val missingMin = totalMin - sessionDao.totalMsForGame(gameId) / 60_000
-        if (missingMin <= 0) return DiffWrite(0, 0)
-        val earliest = sessionDao.earliestStartForGame(gameId)
-            ?.let { Instant.ofEpochMilli(it).atZone(zone).toLocalDateTime() }
-            ?.takeIf { it.isBefore(now) }
-        var added = 0
-        var writtenMin = 0L
-        for (s in allocateHistorySessions(missingMin, historyAnchor(earliest, now))) {
-            val startMs = s.start.atZone(zone).toInstant().toEpochMilli()
-            if (sessionDao.at(gameId, startMs, sessionSource) != null) continue
-            val endMs = s.end.atZone(zone).toInstant().toEpochMilli()
-            sessionDao.insert(
-                PlaySession(
-                    gameId = gameId,
-                    startTime = s.start,
-                    endTime = s.end,
-                    source = sessionSource,
-                    estimated = true,
-                )
-            )
-            added++
-            writtenMin += (endMs - startMs) / 60_000
-        }
-        return DiffWrite(added, writtenMin)
-    }
-
-    /**
-     * 历史占位段的终点锚点（v0.18.6）：一律排在「上个月结束之前」。
-     * 云端只给终身累计、不给日期，推算出来的历史会话若落在当月会把「本月时长」撑到几千小时；
-     * 已有会话更早时贴着它之前放，既不与增量段重叠，也不会被同起点去重吞掉。
-     */
-    internal fun historyAnchor(earliest: LocalDateTime?, now: LocalDateTime): LocalDateTime {
-        val lastMonthEnd = now.toLocalDate().withDayOfMonth(1).atStartOfDay().minusDays(1).withHour(23)
-        return if (earliest != null && earliest.isBefore(lastMonthEnd)) earliest else lastMonthEnd
-    }
-
-    /**
-     * 本地对账（不联网）：把所有有云官方累计的游戏补成历史会话，让游玩记录合计跟上累计。
-     * 同步内对账同一口径、同一幂等规则；App 启动与每次下拉刷新都会跑一遍，
-     * 所以即使某次云同步失败/没配，记录页也不会继续空白。
-     * @return 本次补写的会话条数
-     */
-    suspend fun reconcileRecordsLocally(db: FinchDatabase): Int {
-        val gameDao = db.gameDao()
-        val sessionDao = db.sessionDao()
-        val games = gameDao.all()
-        if (games.isEmpty()) return 0
-        val now = LocalDateTime.now()
-        val zone = ZoneId.systemDefault()
-        var added = 0
-        db.withTransaction {
-            for (g in games) {
-                val psnMin = g.psnPlaytimeMin?.takeIf { it > 0 }
-                val steamMin = g.steamPlaytimeMin?.takeIf { it > 0 }
-                val totalMin = psnMin ?: steamMin ?: continue
-                val source = if (psnMin != null) SessionSource.PS else SessionSource.STEAM
-                val rec = reconcileGame(sessionDao, g.id, totalMin, source, now, zone)
-                added += rec.added
-            }
-        }
-        return added
-    }
-
-    /** 历史占位每条最多 8 小时（避免一口气写出一条 100 小时的假会话） */
-    private const val HISTORY_MAX_PER_DAY_MIN = 480L
-
-    /** 历史占位最多回溯 400 天（再长就摊到每天更多小时；PSN 里 1000+ 小时的游戏也不会爆成一条） */
-    private const val HISTORY_MAX_DAYS = 400
-
-    /**
-     * 把「官方累计 − 本地记录合计」的差额摊成若干条历史会话，合计分钟严格等于 minutes：
-     *  - 条数 = ceil(minutes / 480)，最多 [HISTORY_MAX_DAYS] 条（超过上限时每条会超过 8 小时）
-     *  - 第 0 条结束于 [endAnchor]，之后每条再往前一天，相邻条目互不重叠
-     *  - 余数逐天 +1 分摊，保证每条 ≤ 480 分钟且合计守恒
-     *  - 单向纯函数，便于单测
-     */
-    internal fun allocateHistorySessions(minutes: Long, endAnchor: LocalDateTime): List<AllocatedSession> {
-        if (minutes <= 0) return emptyList()
-        val days = ((minutes + HISTORY_MAX_PER_DAY_MIN - 1) / HISTORY_MAX_PER_DAY_MIN)
-            .coerceIn(1L, HISTORY_MAX_DAYS.toLong())
-            .toInt()
-        val per = minutes / days
-        // 余数逐天 +1 分摊（全倾到最后一条会让它越过 480 分钟上限，也把当天的时长写得过分集中）
-        val remainder = (minutes % days).toInt()
-        val out = ArrayList<AllocatedSession>(days)
-        for (i in 0 until days) {
-            val end = if (i == 0) endAnchor else endAnchor.minusDays(i.toLong())
-            val mins = per + if (i < remainder) 1L else 0L
-            if (mins <= 0) continue
-            out += AllocatedSession(end.minusMinutes(mins), end)
-        }
-        return out
     }
 
     /** 拉 Steam 库并按快照差分写入会话。 */
@@ -475,8 +369,8 @@ object SyncEngine {
                         )
                     )
                     created++
-                    // 新建的游戏：差分基线为空，但官方累计要按对账补成历史会话（v0.18.4：
-                    // 旧版这里只建档不写记录，导致「PSN 有累计、游玩记录空白」）
+                    // 新建的游戏：差分基线为空 → 本次只落快照基线，不写任何记录
+                    // （v0.18.8：官方历史累计不再摊成假会话，差额在详情页如实说明）
                     sessionAdded += diffWriteSessions(
                         sessionDao, snapshotDao,
                         source = "psn", refKey = "psn:${t.titleId ?: t.name}", refName = t.name,

@@ -39,8 +39,8 @@ android {
         applicationId = "dev.cao.finch"
         minSdk = 26
         targetSdk = 36
-        versionCode = 84
-        versionName = "0.18.7"
+        versionCode = 85
+        versionName = "0.18.8"
     }
 
     signingConfigs {

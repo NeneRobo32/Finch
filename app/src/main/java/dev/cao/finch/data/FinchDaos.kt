@@ -111,7 +111,7 @@ interface SessionDao {
     /** 某区间内玩过的不同游戏数 */
     @Query(
         "SELECT COUNT(DISTINCT gameId) FROM play_sessions " +
-            "WHERE endTime IS NOT NULL AND startTime >= :fromMillis AND startTime < :toMillis AND estimated = 0"
+            "WHERE endTime IS NOT NULL AND startTime >= :fromMillis AND startTime < :toMillis"
     )
     fun observeDistinctGamesInRange(fromMillis: Long, toMillis: Long): Flow<Int>
 
@@ -125,7 +125,7 @@ interface SessionDao {
     @Query(
         """
         SELECT SUM(MAX(0, endTime - startTime - COALESCE(pauseAccumMs, 0))) FROM play_sessions
-        WHERE endTime IS NOT NULL AND startTime >= :fromMillis AND startTime < :toMillis AND estimated = 0
+        WHERE endTime IS NOT NULL AND startTime >= :fromMillis AND startTime < :toMillis
         """
     )
     fun observeTotalBetween(fromMillis: Long, toMillis: Long): Flow<Long?>
@@ -133,7 +133,7 @@ interface SessionDao {
     @Query(
         """
         SELECT SUM(MAX(0, endTime - startTime - COALESCE(pauseAccumMs, 0))) FROM play_sessions
-        WHERE endTime IS NOT NULL AND startTime >= :fromMillis AND startTime < :toMillis AND estimated = 0
+        WHERE endTime IS NOT NULL AND startTime >= :fromMillis AND startTime < :toMillis
         """
     )
     suspend fun totalBetween(fromMillis: Long, toMillis: Long): Long?
@@ -144,16 +144,12 @@ interface SessionDao {
     )
     suspend fun at(gameId: Long, startMillis: Long, source: SessionSource): PlaySession?
 
-    /** 某游戏最早一条已完成会话的起点（云端时长对账补历史用，历史会话排在它之前） */
-    @Query("SELECT MIN(startTime) FROM play_sessions WHERE gameId = :gameId AND endTime IS NOT NULL")
-    suspend fun earliestStartForGame(gameId: Long): Long?
-
     @Query(
         """
         SELECT strftime('%Y-%m-%d', startTime / 1000, 'unixepoch', 'localtime') AS day,
                SUM(MAX(0, endTime - startTime - COALESCE(pauseAccumMs, 0))) AS totalMs
         FROM play_sessions
-        WHERE endTime IS NOT NULL AND startTime >= :fromMillis AND startTime < :toMillis AND estimated = 0
+        WHERE endTime IS NOT NULL AND startTime >= :fromMillis AND startTime < :toMillis
         GROUP BY day ORDER BY day
         """
     )
@@ -163,7 +159,7 @@ interface SessionDao {
         """
         SELECT g.platform AS platform, SUM(MAX(0, s.endTime - s.startTime - COALESCE(s.pauseAccumMs, 0))) AS totalMs
         FROM play_sessions s JOIN games g ON g.id = s.gameId
-        WHERE s.endTime IS NOT NULL AND s.startTime >= :fromMillis AND s.startTime < :toMillis AND s.estimated = 0
+        WHERE s.endTime IS NOT NULL AND s.startTime >= :fromMillis AND s.startTime < :toMillis
         GROUP BY g.platform
         """
     )
@@ -172,7 +168,7 @@ interface SessionDao {
     @Query("SELECT g.id AS gameId, g.name AS name, g.platform AS platform, g.coverUrl AS coverUrl,\n" +
         "       g.steamPlaytimeMin AS steamPlaytimeMin, SUM(MAX(0, s.endTime - s.startTime - COALESCE(s.pauseAccumMs, 0))) AS totalMs, COUNT(s.id) AS sessionCount\n" +
         "FROM play_sessions s JOIN games g ON g.id = s.gameId\n" +
-        "WHERE s.endTime IS NOT NULL AND s.startTime >= :fromMillis AND s.startTime < :toMillis AND s.estimated = 0\n" +
+        "WHERE s.endTime IS NOT NULL AND s.startTime >= :fromMillis AND s.startTime < :toMillis\n" +
         "GROUP BY g.id ORDER BY totalMs DESC")
     fun observeTopGamesWithCover(fromMillis: Long, toMillis: Long): Flow<List<TopGameRow>>
 
@@ -180,7 +176,7 @@ interface SessionDao {
     @Query(
         """
         SELECT g.name FROM play_sessions s JOIN games g ON g.id = s.gameId
-        WHERE s.endTime IS NOT NULL AND s.startTime >= :fromMillis AND s.startTime < :toMillis AND s.estimated = 0
+        WHERE s.endTime IS NOT NULL AND s.startTime >= :fromMillis AND s.startTime < :toMillis
         GROUP BY g.id
         ORDER BY SUM(MAX(0, s.endTime - s.startTime - COALESCE(s.pauseAccumMs, 0))) DESC
         LIMIT 1
@@ -220,7 +216,7 @@ interface SessionDao {
         SELECT CAST(strftime('%w', startTime / 1000, 'unixepoch', 'localtime') AS INTEGER) AS bucket,
                SUM(MAX(0, endTime - startTime - COALESCE(pauseAccumMs, 0))) AS totalMs
         FROM play_sessions
-        WHERE endTime IS NOT NULL AND startTime >= :fromMillis AND startTime < :toMillis AND estimated = 0
+        WHERE endTime IS NOT NULL AND startTime >= :fromMillis AND startTime < :toMillis
         GROUP BY bucket ORDER BY bucket
         """
     )
@@ -232,7 +228,7 @@ interface SessionDao {
         SELECT CAST(strftime('%H', startTime / 1000, 'unixepoch', 'localtime') AS INTEGER) AS bucket,
                SUM(MAX(0, endTime - startTime - COALESCE(pauseAccumMs, 0))) AS totalMs
         FROM play_sessions
-        WHERE endTime IS NOT NULL AND startTime >= :fromMillis AND startTime < :toMillis AND estimated = 0
+        WHERE endTime IS NOT NULL AND startTime >= :fromMillis AND startTime < :toMillis
         GROUP BY bucket ORDER BY bucket
         """
     )

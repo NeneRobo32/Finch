@@ -46,8 +46,8 @@ fun FinchBottomBar(
         tabsCount = tabs.size,
         modifier = modifier,
         accentColor = scheme.primary,
-        // 透明玻璃：底栏现在采样「氛围光 + 内容层」，遮罩 alpha 压低才能真正透出背后的卡片
-        containerColor = scheme.surface.copy(alpha = if (bundle.isDark) 0.18f else 0.26f),
+        // 透明玻璃：底栏采样「氛围光 + 内容层」，遮罩 alpha 压到最低一档才真透出背后的卡片
+        containerColor = scheme.surface.copy(alpha = if (bundle.isDark) 0.10f else 0.16f),
         isLightTheme = !bundle.isDark,
     ) {
         tabs.forEachIndexed { index, tab ->

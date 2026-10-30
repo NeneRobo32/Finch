@@ -1,6 +1,6 @@
 # Finch 路线图
 
-基线：`v0.18.7`（DB v18，versionCode 84）。
+基线：`v0.18.8`（DB v19，versionCode 85）。
 IGDB 已整体移除（国内直连不通）；HLTB 改走 Crashdummy 中转 API（Steam 直查+Nlib 英文名+按名搜，默认开、可一键关）；非英文库名走英文名解析链换英文线索再搜（Steam 中文反查/Bangumi 原名/eShop 英文段/游民星空/机翻已移除，v0.15.15–0.15.18）。
 下阶段主题：**让记录更细 → 让表达更强**（v0.19 候选，见文末）。
 
@@ -38,6 +38,7 @@ IGDB 已整体移除（国内直连不通）；HLTB 改走 Crashdummy 中转 API
 | v0.18.5 ✅热修 | 记录补齐 | 新建游戏建档即补历史会话；新增本地对账（不联网、启动时跑），云同步失败也不空记录 | 17（不变） | 无 |
 | v0.18.6 ✅热修 | 本月时长修正 | 推算的历史会话加 `estimated` 标记（DB 18），本月/今年/热力图/作息/平台/Top 等区间统计一律排除；锚点改到上个月末之前、上限 400 天；旧云端来源会话迁移回标 | 17→18 | 无 |
 | v0.18.7 ✅热修 | 底栏透明玻璃 | 内容层单独挂 `contentBackdrop`，底栏采样源改为「氛围光 ＋ 内容层」合成，真正透出滚动内容；遮罩 alpha 0.34/0.46 → 0.18/0.26 | 不变 | 无 |
+| v0.18.8 ✅热修 | 记录只存真实 | 删掉「按官方累计差额摊历史会话」的对账逻辑与推算行，`play_sessions.estimated` 列移除（DB 19）；同步只写真实新增，首次同步仅落基线；详情页显示「本地记录 X · 差额 Y」；底栏去 vibrancy＋blur 8→3dp | 18→19 | 无 |
 | 远期 / 明确不做 | — | WebDAV 同步（可选）；前台自动识别、账号云同步、国际化明确不做 | — | — |
 
 ```mermaid
@@ -185,6 +186,7 @@ gantt
 | 16 | v0.15.13+（已交付） | 重建 `play_sessions` 统一 `pauseAccumMs` DDL（实体补 `defaultValue="0"`，升级装/新装一致） |
 | 17 | v0.17.0（已交付） | `games` 加奖杯 6 列（`trophyPlatinum/Gold/Silver/Bronze/Progress/UpdatedAt`）；`MIGRATION_12_13` 补建 `index_release_follows_key`（v12 新装库升级崩溃修复） |
 | 18 | v0.18.6（已交付） | `play_sessions.estimated`（0=真实/1=云端对账摊出的推算历史）；`MIGRATION_17_18` 回标旧 STEAM/SWITCH/PS 会话为估算，区间统计加 `estimated = 0` 过滤 |
+| 19 | v0.18.8（已交付） | 移除 `play_sessions.estimated`（`MIGRATION_18_19` 先 `DELETE ... WHERE estimated = 1` 清推算行，再重建表去列）；取消「按官方累计差额摊历史会话」，记录只存真实会话 |
 
 备份恢复逻辑（`BackupManager.validate()`）按 `FINCH_DB_VERSION` 校验，跨版恢复走 Room 自动迁移，老备份可读。
 

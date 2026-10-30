@@ -160,8 +160,9 @@ fun LiquidBottomTabs(
                     backdrop = backdrop,
                     shape = { Capsule() },
                     effects = {
-                        vibrancy()
-                        blur(8f.dp.toPx())
+                        // v0.18.8：去掉 vibrancy（会整体提亮/压暗背景，玻璃感变成「磨砂白板」），
+                        // blur 从 8dp 降到 3dp——保留一点点柔化，让底下的卡片轮廓还能看见
+                        blur(3f.dp.toPx())
                         lens(24f.dp.toPx(), 24f.dp.toPx())
                     },
                     layerBlock = {

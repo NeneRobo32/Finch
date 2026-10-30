@@ -10,10 +10,12 @@ import java.time.LocalDateTime
 import java.time.ZoneId
 
 /**
- * SyncEngine.diffWriteSessions 快照差分 + 云端时长对账口径单测（假 DAO 内存实现）。
- * 口径（v0.18.3）：游玩记录合计必须等于云端官方累计——
- *  ① 快照差分写增量（同起点去重，撞占位不丢时长）
- *  ② 官方累计 − 本地记录合计 = 差额，补成历史会话（排在既有会话之前，幂等）
+ * SyncEngine.diffWriteSessions 快照差分口径单测（假 DAO 内存实现）。
+ * 口径（v0.18.8）：只写「上次快照之后真实新增」的时长，**不再**按云端终身累计补历史会话——
+ *  ① 首次同步没有基线，不写任何记录（只有累计值、没有日期，摊出来就是造假数据）
+ *  ② 有基线时按「上次快照 → 现在」逐日摊分写增量会话
+ *  ③ 同游戏同来源同起点已有会话则跳过，不重复计时长
+ *  ④ 无论是否写记录，快照都对当前官方累计对齐
  */
 class DiffWriteSessionsTest {
 
@@ -72,9 +74,6 @@ class DiffWriteSessionsTest {
             rows.filter { it.gameId == gameId && it.endTime != null }
                 .sumOf { Duration.between(it.startTime, it.endTime).toMillis() - it.pauseAccumMs }
                 .coerceAtLeast(0L)
-        override suspend fun earliestStartForGame(gameId: Long): Long? =
-            rows.filter { it.gameId == gameId && it.endTime != null }
-                .minOfOrNull { it.startTime.atZone(zone).toInstant().toEpochMilli() }
         override fun observeWeekdayTotals(fromMillis: Long, toMillis: Long): Flow<List<BucketTotal>> = TODO()
         override fun observeHourTotals(fromMillis: Long, toMillis: Long): Flow<List<BucketTotal>> = TODO()
     }
@@ -101,20 +100,20 @@ class DiffWriteSessionsTest {
         rows.sumOf { Duration.between(it.startTime, it.endTime).toMinutes() }
 
     @Test
-    fun `首次同步补历史会话_记录合计等于云端累计`() = runBlocking {
+    fun `首次同步不写记录_只落快照基线`() = runBlocking {
         val sessions = FakeSessionDao(zone)
         val snaps = FakeSnapshotDao()
         val now = LocalDateTime.parse("2026-09-13T22:00:00")
         val r = diff(sessions, snaps, totalMin = 500, prev = null, now = now)
-        assertEquals(2, r.added) // 500 分钟 / 每日上限 480 → 2 条
-        assertEquals(500L, r.writtenMin)
-        assertEquals(500L, sessions.totalMin()) // 记录合计 = 同步时间
-        assertTrue(sessions.rows.all { !it.endTime!!.isAfter(now) })
+        assertEquals(0, r.added)
+        assertEquals(0L, r.writtenMin)
+        assertTrue("首次同步不该凭空造出游玩记录", sessions.rows.isEmpty())
+        // 基线仍要对齐官方累计，下次同步才能算出差分
         assertEquals(500L, snaps.byKey("steam", "steam:1")!!.totalMin)
     }
 
     @Test
-    fun `记录合计已等于累计时不补历史`() = runBlocking {
+    fun `无增量时不写记录`() = runBlocking {
         val sessions = FakeSessionDao(zone)
         val snaps = FakeSnapshotDao()
         sessions.rows += PlaySession(
@@ -134,7 +133,7 @@ class DiffWriteSessionsTest {
     }
 
     @Test
-    fun `增量入账后差额补历史_合计仍等于累计`() = runBlocking {
+    fun `增量按区间摊分写入_只记新增的十分钟`() = runBlocking {
         val sessions = FakeSessionDao(zone)
         val snaps = FakeSnapshotDao()
         val r = diff(
@@ -142,14 +141,15 @@ class DiffWriteSessionsTest {
             prev = snapshot(100, LocalDateTime.parse("2026-09-13T21:00:00")),
             now = LocalDateTime.parse("2026-09-13T22:00:00"),
         )
-        assertEquals(2, r.added) // 1 条增量（10 分钟）+ 1 条历史（100 分钟）
-        assertEquals(110L, r.writtenMin)
-        assertEquals(110L, sessions.totalMin())
+        assertEquals(1, r.added) // 只有 10 分钟增量，不再补 100 分钟历史
+        assertEquals(10L, r.writtenMin)
+        assertEquals(10L, sessions.totalMin())
+        assertTrue(sessions.rows.all { !it.endTime!!.isAfter(LocalDateTime.parse("2026-09-13T22:00:00")) })
         assertEquals(110L, snaps.byKey("steam", "steam:1")!!.totalMin)
     }
 
     @Test
-    fun `多日摊分_合计仍等于累计`() = runBlocking {
+    fun `多日增量逐日摊分_合计等于增量`() = runBlocking {
         val sessions = FakeSessionDao(zone)
         val snaps = FakeSnapshotDao()
         val r = diff(
@@ -157,26 +157,27 @@ class DiffWriteSessionsTest {
             prev = snapshot(100, LocalDateTime.parse("2026-09-10T21:00:00")),
             now = LocalDateTime.parse("2026-09-13T22:00:00"),
         )
-        assertEquals(280L, r.writtenMin)
-        assertEquals(280L, sessions.totalMin())
+        assertEquals(180L, r.writtenMin) // 280 − 100
+        assertEquals(180L, sessions.totalMin())
         assertEquals(280L, snaps.byKey("steam", "steam:1")!!.totalMin)
     }
 
     @Test
-    fun `负增量跟随回落_按回落后的累计对账`() = runBlocking {
+    fun `负增量不写记录_快照跟随回落`() = runBlocking {
         val sessions = FakeSessionDao(zone)
         val snaps = FakeSnapshotDao()
-        diff(
+        val r = diff(
             sessions, snaps, totalMin = 90,
             prev = snapshot(100, LocalDateTime.parse("2026-09-10T21:00:00")),
             now = LocalDateTime.parse("2026-09-13T22:00:00"),
         )
-        assertEquals(90L, sessions.totalMin())
+        assertEquals(0, r.added) // 平台数据回落（退款/统计口径变化）不该倒扣记录
+        assertTrue(sessions.rows.isEmpty())
         assertEquals(90L, snaps.byKey("steam", "steam:1")!!.totalMin)
     }
 
     @Test
-    fun `撞旧占位的份额不丢_对账补齐且不重复补`() = runBlocking {
+    fun `撞旧占位同起点跳过_不重复计时长`() = runBlocking {
         val sessions = FakeSessionDao(zone)
         val snaps = FakeSnapshotDao()
         // 预置一条与本次分配同起点（21:00）的旧占位会话 → 本批份额被去重跳过
@@ -191,15 +192,17 @@ class DiffWriteSessionsTest {
             prev = snapshot(100, LocalDateTime.parse("2026-09-13T21:00:00")),
             now = LocalDateTime.parse("2026-09-13T22:00:00"),
         )
-        // 增量 10 分钟撞占位被跳过，但差额 105 分钟按对账补成历史会话 → 合计仍等于 110
-        assertEquals(1, r1.added)
-        assertEquals(105L, r1.writtenMin) // 只有新增的历史会话算「新写入」
-        assertEquals(110L, sessions.totalMin())
+        assertEquals(0, r1.added)
+        assertEquals(0L, r1.writtenMin)
+        assertEquals(1, sessions.rows.size)
         assertEquals(110L, snaps.byKey("steam", "steam:1")!!.totalMin)
-        // 再次同步（平台总量仍 110）：没有差额，不重复写
-        val r2 = diff(sessions, snaps, totalMin = 110, prev = snaps.byKey("steam", "steam:1"), now = LocalDateTime.parse("2026-09-13T23:00:00"))
+        // 再次同步（平台总量仍 110）：没有增量，不再写
+        val r2 = diff(
+            sessions, snaps, totalMin = 110,
+            prev = snaps.byKey("steam", "steam:1"),
+            now = LocalDateTime.parse("2026-09-13T23:00:00"),
+        )
         assertEquals(0, r2.added)
-        assertEquals(2, sessions.rows.size)
-        assertEquals(110L, sessions.totalMin())
+        assertEquals(1, sessions.rows.size)
     }
 }
