@@ -49,6 +49,9 @@ class FinchViewModel(app: Application) : AndroidViewModel(app) {
     fun totalBetween(fromMillis: Long, toMillis: Long) =
         sessionDao.observeTotalBetween(fromMillis, toMillis).map { it ?: 0L }
     fun weekdayTotals(fromMillis: Long, toMillis: Long) = sessionDao.observeWeekdayTotals(fromMillis, toMillis)
+
+    /** 区间内按月聚合（1..12）：年视图「按月」用（v0.19.2） */
+    fun monthTotals(fromMillis: Long, toMillis: Long) = sessionDao.observeMonthTotals(fromMillis, toMillis)
     fun hourTotals(fromMillis: Long, toMillis: Long) = sessionDao.observeHourTotals(fromMillis, toMillis)
     fun distinctGamesInRange(fromMillis: Long, toMillis: Long) =
         sessionDao.observeDistinctGamesInRange(fromMillis, toMillis)

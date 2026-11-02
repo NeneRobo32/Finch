@@ -81,6 +81,7 @@ class DiffWriteSessionsTest {
                 .sumOf { Duration.between(it.startTime, it.endTime).toMillis() - it.pauseAccumMs }
                 .coerceAtLeast(0L)
         override fun observeWeekdayTotals(fromMillis: Long, toMillis: Long): Flow<List<BucketTotal>> = TODO()
+        override fun observeMonthTotals(fromMillis: Long, toMillis: Long): Flow<List<BucketTotal>> = TODO()
         override fun observeHourTotals(fromMillis: Long, toMillis: Long): Flow<List<BucketTotal>> = TODO()
     }
 

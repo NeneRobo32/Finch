@@ -138,7 +138,10 @@ fun StatsScreen(viewModel: FinchViewModel) {
     val steamMin by remember { viewModel.steamTotalMinutes() }.collectAsState(initial = 0L)
     val distinctGames by remember(fromMillis, toMillis) { viewModel.distinctGamesInRange(fromMillis, toMillis) }
         .collectAsState(initial = 0)
+    // v0.19.2：月视图按周几看作息，年视图按月看（一年里周几分布没有意义）
     val weekday by remember(fromMillis, toMillis) { viewModel.weekdayTotals(fromMillis, toMillis) }
+        .collectAsState(initial = emptyList())
+    val months by remember(fromMillis, toMillis) { viewModel.monthTotals(fromMillis, toMillis) }
         .collectAsState(initial = emptyList())
     val hours by remember(fromMillis, toMillis) { viewModel.hourTotals(fromMillis, toMillis) }
         .collectAsState(initial = emptyList())
@@ -256,7 +259,9 @@ fun StatsScreen(viewModel: FinchViewModel) {
         }
         if (daily.isNotEmpty()) item { ActivityCard(daily, mode) }
         if (platforms.isNotEmpty()) item { PlatformCard(platforms, total) }
-        if (weekday.isNotEmpty() || hours.isNotEmpty()) item { RhythmCard(weekday, hours) }
+        if (weekday.isNotEmpty() || months.isNotEmpty() || hours.isNotEmpty()) {
+            item { RhythmCard(weekday, months, hours, mode) }
+        }
         if (topGames.isNotEmpty()) item { TopGamesCard(topGames) }
     }
 
@@ -909,14 +914,24 @@ private fun heatColor(frac: Float, blank: Boolean): Color {
     }
 }
 
-/** 作息：周几玩得最多 + 几点玩得最多 */
+/**
+ * 作息：
+ * - 月视图 → 按周几（一…日）
+ * - 年视图 → 按月（1…12）
+ * - 两者都带「高峰时段」（按小时）
+ */
 @Composable
 private fun RhythmCard(
     weekday: List<dev.cao.finch.data.BucketTotal>,
+    months: List<dev.cao.finch.data.BucketTotal>,
     hours: List<dev.cao.finch.data.BucketTotal>,
+    mode: StatsMode,
 ) {
-    FinchCard(title = "作息", icon = Icons.Filled.Schedule) {
-        if (weekday.isNotEmpty()) {
+    val byMonth = mode == StatsMode.YEAR
+    FinchCard(title = if (byMonth) "每月分布" else "作息", icon = Icons.Filled.Schedule) {
+        if (byMonth) {
+            if (months.isNotEmpty()) MonthlyBars(months)
+        } else if (weekday.isNotEmpty()) {
             val byBucket = weekday.associate { it.bucket to (it.totalMs ?: 0L) }
             val maxMs = max(1L, byBucket.values.maxOrNull() ?: 1L)
             val order = listOf(1, 2, 3, 4, 5, 6, 0)
@@ -1010,6 +1025,56 @@ private fun RhythmCard(
                 listOf("0", "6", "12", "18", "23").forEach {
                     Text("${it}点", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
+            }
+        }
+    }
+}
+
+/** 年视图：按月分布（1…12），与周几条同一个视觉语言 */
+@Composable
+private fun MonthlyBars(months: List<dev.cao.finch.data.BucketTotal>) {
+    val byBucket = months.associate { it.bucket to (it.totalMs ?: 0L) }
+    val maxMs = max(1L, byBucket.values.maxOrNull() ?: 1L)
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        (1..12).forEach { m ->
+            val ms = byBucket[m] ?: 0L
+            val frac = ms.toFloat() / maxMs
+            val peak = ms >= maxMs && ms > 0
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "${m}月",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.width(30.dp),
+                )
+                Box(
+                    Modifier
+                        .weight(1f)
+                        .height(9.dp)
+                        .clip(FinchShapes.pill)
+                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)),
+                ) {
+                    if (frac > 0f) {
+                        Box(
+                            Modifier
+                                .fillMaxWidth(frac.coerceIn(0.03f, 1f))
+                                .fillMaxHeight()
+                                .clip(FinchShapes.pill)
+                                .background(
+                                    if (peak) MaterialTheme.colorScheme.tertiary
+                                    else MaterialTheme.colorScheme.primary.copy(alpha = 0.75f)
+                                ),
+                        )
+                    }
+                }
+                Spacer(Modifier.width(FinchSpace.sm))
+                Text(
+                    TimeFormatter.hoursMinutes(Duration.ofMillis(ms)),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.width(62.dp),
+                    textAlign = TextAlign.End,
+                )
             }
         }
     }

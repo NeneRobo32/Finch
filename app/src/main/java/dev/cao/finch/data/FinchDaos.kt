@@ -254,6 +254,18 @@ interface SessionDao {
     )
     fun observeWeekdayTotals(fromMillis: Long, toMillis: Long): Flow<List<BucketTotal>>
 
+    /** 时段分布：按月聚合（1..12，本地时间），年视图用；时长扣暂停 */
+    @Query(
+        """
+        SELECT CAST(strftime('%m', startTime / 1000, 'unixepoch', 'localtime') AS INTEGER) AS bucket,
+               SUM(MAX(0, endTime - startTime - COALESCE(pauseAccumMs, 0))) AS totalMs
+        FROM play_sessions
+        WHERE endTime IS NOT NULL AND startTime >= :fromMillis AND startTime < :toMillis
+        GROUP BY bucket ORDER BY bucket
+        """
+    )
+    fun observeMonthTotals(fromMillis: Long, toMillis: Long): Flow<List<BucketTotal>>
+
     /** 时段分布：按小时聚合（0..23，本地时间），时长扣暂停 */
     @Query(
         """
