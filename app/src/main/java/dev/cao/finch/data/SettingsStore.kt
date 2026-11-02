@@ -83,6 +83,15 @@ class SettingsStore(context: Context) {
         set(value) = sp.edit().putString(KEY_FINCH_THEME, value).apply()
 
     /**
+     * 实验性「玻璃化界面」（默认关）：
+     * 开启后卡片/底栏走 backdrop 全玻璃（采样 + 模糊 + 边缘折射），
+     * 关闭则是实色面板——低端机、或运行时着色器不可用时也能正常显示。
+     */
+    var experimentalGlassEnabled: Boolean
+        get() = sp.getBoolean(KEY_EXPERIMENTAL_GLASS, false)
+        set(value) = sp.edit().putBoolean(KEY_EXPERIMENTAL_GLASS, value).apply()
+
+    /**
      * 时长目标（v0.19，纯配置不进 DB）：
      * 月目标分钟数 / 年目标分钟数，0 = 未设置（总结页不显示进度环）。
      */
@@ -142,6 +151,7 @@ class SettingsStore(context: Context) {
         private const val KEY_HLTB_ONLINE = "hltb_online_enabled"
         private const val KEY_THEME_MODE = "theme_mode"
         private const val KEY_FINCH_THEME = "finch_theme"
+        private const val KEY_EXPERIMENTAL_GLASS = "experimental_glass_enabled"
         private const val KEY_MONTH_GOAL = "month_goal_min"
         private const val KEY_YEAR_GOAL = "year_goal_min"
         const val DEFAULT_BASE = "https://api.steampowered.com"

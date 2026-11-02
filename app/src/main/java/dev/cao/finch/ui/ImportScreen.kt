@@ -64,13 +64,13 @@ import dev.cao.finch.ui.design.FinchButton
 import dev.cao.finch.ui.design.FinchButtonVariant
 import dev.cao.finch.ui.design.FinchCard
 import dev.cao.finch.ui.design.FinchChip
+import dev.cao.finch.ui.design.FinchCollapsibleGroup
 import dev.cao.finch.ui.design.FinchDialog
 import dev.cao.finch.ui.design.FinchDivider
 import dev.cao.finch.ui.design.FinchHeader
 import dev.cao.finch.ui.design.FinchIconButton
 import dev.cao.finch.ui.design.FinchListRow
 import dev.cao.finch.ui.design.InsetSurface
-import dev.cao.finch.ui.design.FinchSectionTitle
 import dev.cao.finch.ui.design.FinchSpace
 import dev.cao.finch.ui.design.FinchSwitch
 import dev.cao.finch.ui.design.FinchTextField
@@ -86,9 +86,10 @@ import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 
 /**
- * 设置页（原「导入」页，2026-10 UI 重构）：
- * 外观 / 数据同步 / 手动补录 / 数据安全 / 关于，全部卡片化；
- * 亮暗与三套主题保留，状态用统一徽章与提示行表达。
+ * 设置页（原「导入」页，2026-10 UI 重构；2026-11 改成分类折叠）：
+ * 原来一长条卡片列表，现在按用途收成六个可折叠分组——外观 / 数据同步 / 时长目标 /
+ * 数据安全 / 实验性功能 / 关于。默认只展开「外观」，其余收起后各占一行，
+ * 长页面一眼能扫完；展开状态用 rememberSaveable 保存，切走再回来不会自己收起来。
  */
 @Composable
 fun ImportScreen(
@@ -96,6 +97,7 @@ fun ImportScreen(
     importViewModel: ImportViewModel = viewModel(),
     themeState: dev.cao.finch.ui.theme.ThemeState? = null,
     finchThemeState: dev.cao.finch.ui.theme.FinchThemeState? = null,
+    glassState: dev.cao.finch.ui.theme.GlassState? = null,
 ) {
     val games by viewModel.games.collectAsState()
     val steamKey by importViewModel.steamKey.collectAsState()
@@ -132,206 +134,277 @@ fun ImportScreen(
 
         // ============ 外观 ============
         if (themeState != null) {
-            FinchCard(
+            FinchCollapsibleGroup(
                 title = "外观",
+                subtitle = "亮暗模式与主题风格",
+                summary = finchThemeState?.theme?.label,
                 icon = Icons.Filled.Palette,
-                titleExtra = "Liquid Glass",
+                initiallyExpanded = true,
+                enterOrder = 0,
             ) {
-                Text(
-                    "亮暗模式",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = scheme.onSurfaceVariant,
-                )
-                Spacer(Modifier.height(FinchSpace.sm))
-                Row(horizontalArrangement = Arrangement.spacedBy(FinchSpace.sm)) {
-                    listOf(
-                        ThemeMode.SYSTEM to (Icons.Filled.AutoAwesome to "跟随系统"),
-                        ThemeMode.LIGHT to (Icons.Filled.LightMode to "浅色"),
-                        ThemeMode.DARK to (Icons.Filled.DarkMode to "深色"),
-                    ).forEach { (mode, pair) ->
-                        val (icon, label) = pair
-                        FinchChip(
-                            label = label,
-                            selected = themeState.mode == mode,
-                            onClick = { themeState.set(mode) },
-                            leadingIcon = icon,
-                        )
-                    }
-                }
-                if (finchThemeState != null) {
-                    Spacer(Modifier.height(FinchSpace.lg))
+                FinchCard {
                     Text(
-                        "主题风格",
+                        "亮暗模式",
                         style = MaterialTheme.typography.labelMedium,
                         color = scheme.onSurfaceVariant,
                     )
                     Spacer(Modifier.height(FinchSpace.sm))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(FinchSpace.sm),
-                    ) {
-                        FinchTheme.entries.forEach { t ->
-                            ThemeSwatch(
-                                theme = t,
-                                selected = finchThemeState.theme == t,
-                                onClick = { finchThemeState.set(t) },
-                                modifier = Modifier.weight(1f),
+                    Row(horizontalArrangement = Arrangement.spacedBy(FinchSpace.sm)) {
+                        listOf(
+                            ThemeMode.SYSTEM to (Icons.Filled.AutoAwesome to "跟随系统"),
+                            ThemeMode.LIGHT to (Icons.Filled.LightMode to "浅色"),
+                            ThemeMode.DARK to (Icons.Filled.DarkMode to "深色"),
+                        ).forEach { (mode, pair) ->
+                            val (icon, label) = pair
+                            FinchChip(
+                                label = label,
+                                selected = themeState.mode == mode,
+                                onClick = { themeState.set(mode) },
+                                leadingIcon = icon,
                             )
                         }
                     }
+                    if (finchThemeState != null) {
+                        Spacer(Modifier.height(FinchSpace.lg))
+                        Text(
+                            "主题风格",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = scheme.onSurfaceVariant,
+                        )
+                        Spacer(Modifier.height(FinchSpace.sm))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(FinchSpace.sm),
+                        ) {
+                            FinchTheme.entries.forEach { t ->
+                                ThemeSwatch(
+                                    theme = t,
+                                    selected = finchThemeState.theme == t,
+                                    onClick = { finchThemeState.set(t) },
+                                    modifier = Modifier.weight(1f),
+                                )
+                            }
+                        }
+                    }
+                    Spacer(Modifier.height(FinchSpace.md))
+                    Text(
+                        "三套风格共用同一套组件与层级。想要实时折射玻璃，去「实验性功能」里打开全面玻璃化。",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = scheme.onSurfaceVariant,
+                    )
                 }
-                Spacer(Modifier.height(FinchSpace.md))
+            }
+            Spacer(Modifier.height(FinchSpace.md))
+        }
+
+        // ============ 数据同步 ============
+        FinchCollapsibleGroup(
+            title = "数据同步",
+            subtitle = "Steam / PlayStation / Switch 与手动补录",
+            icon = Icons.Filled.Computer,
+            enterOrder = 1,
+        ) {
+            // ---- Steam ----
+            FinchCard(
+                title = "Steam",
+                icon = Icons.Filled.Computer,
+                titleExtra = if (steamKey.isNotBlank()) "已配置" else "未配置",
+                titleExtraColor = if (steamKey.isNotBlank()) MaterialTheme.colorScheme.primary
+                else MaterialTheme.colorScheme.onSurfaceVariant,
+            ) {
                 Text(
-                    "界面统一采用折射玻璃：底栏、卡片、输入框是半透明玻璃，叠在静态氛围光上。" +
-                        "三套风格共用同一套组件与层级。",
+                    "拉取游戏库总时长用于对账（Steam 只有总量，没有逐次记录；计时页的逐次数据不受影响）。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = scheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(FinchSpace.sm))
+                FinchTextField(
+                    value = keyField,
+                    onValueChange = { keyField = it },
+                    label = "Web API Key（32 位）",
+                    password = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(FinchSpace.sm))
+                FinchTextField(
+                    value = idField,
+                    onValueChange = { idField = it },
+                    label = "SteamID64（17 位数字）",
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(FinchSpace.sm))
+                FinchTextField(
+                    value = baseField,
+                    onValueChange = { baseField = it },
+                    label = "API 地址（不通可换反代）",
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(FinchSpace.md))
+                Row(horizontalArrangement = Arrangement.spacedBy(FinchSpace.sm)) {
+                    FinchButton(
+                        text = if (steamState is ImportViewModel.SyncState.Running) "同步中…" else "同步",
+                        loading = steamState is ImportViewModel.SyncState.Running,
+                        onClick = {
+                            importViewModel.saveSteamConfig(keyField, idField, baseField)
+                            importViewModel.syncSteam(keyField, idField, baseField)
+                        },
+                    )
+                    FinchButton(
+                        text = "仅保存",
+                        variant = FinchButtonVariant.Glass,
+                        onClick = { importViewModel.saveSteamConfig(keyField, idField, baseField) },
+                    )
+                }
+                SyncNote(steamState)
+                Spacer(Modifier.height(FinchSpace.sm))
+                Text(
+                    "Key 获取：steamcommunity.com/dev/apikey；SteamID64：个人资料页 URL 里的数字。",
                     style = MaterialTheme.typography.labelSmall,
                     color = scheme.onSurfaceVariant,
                 )
             }
-        }
-        Spacer(Modifier.height(FinchSpace.xl))
-        FinchSectionTitle("数据同步")
 
-        // ============ Steam ============
-        FinchCard(
-            title = "Steam",
-            icon = Icons.Filled.Computer,
-            titleExtra = if (steamKey.isNotBlank()) "已配置" else "未配置",
-            titleExtraColor = if (steamKey.isNotBlank()) MaterialTheme.colorScheme.primary
-            else MaterialTheme.colorScheme.onSurfaceVariant,
-        ) {
-            Text(
-                "拉取游戏库总时长用于对账（Steam 只有总量，没有逐次记录；计时页的逐次数据不受影响）。",
-                style = MaterialTheme.typography.bodySmall,
-                color = scheme.onSurfaceVariant,
-            )
-            Spacer(Modifier.height(FinchSpace.sm))
-            FinchTextField(
-                value = keyField,
-                onValueChange = { keyField = it },
-                label = "Web API Key（32 位）",
-                password = true,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            Spacer(Modifier.height(FinchSpace.sm))
-            FinchTextField(
-                value = idField,
-                onValueChange = { idField = it },
-                label = "SteamID64（17 位数字）",
-                modifier = Modifier.fillMaxWidth(),
-            )
-            Spacer(Modifier.height(FinchSpace.sm))
-            FinchTextField(
-                value = baseField,
-                onValueChange = { baseField = it },
-                label = "API 地址（不通可换反代）",
-                modifier = Modifier.fillMaxWidth(),
-            )
-            Spacer(Modifier.height(FinchSpace.md))
-            Row(horizontalArrangement = Arrangement.spacedBy(FinchSpace.sm)) {
-                FinchButton(
-                    text = if (steamState is ImportViewModel.SyncState.Running) "同步中…" else "同步",
-                    loading = steamState is ImportViewModel.SyncState.Running,
-                    onClick = {
-                        importViewModel.saveSteamConfig(keyField, idField, baseField)
-                        importViewModel.syncSteam(keyField, idField, baseField)
-                    },
+            // ---- 游戏资料库 / HLTB ----
+            FinchCard(title = "游戏资料库", icon = Icons.AutoMirrored.Filled.MenuBook) {
+                Text(
+                    "「添加游戏」在线搜索封面和平台：Bangumi（免Key）→ Steam 商店（免Key），自动容错，全不通也能手输。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = scheme.onSurfaceVariant,
                 )
-                FinchButton(
-                    text = "仅保存",
-                    variant = FinchButtonVariant.Glass,
-                    onClick = { importViewModel.saveSteamConfig(keyField, idField, baseField) },
-                )
+                Spacer(Modifier.height(FinchSpace.md))
+                HltbOnlineRow()
             }
-            SyncNote(steamState)
-            Spacer(Modifier.height(FinchSpace.sm))
-            Text(
-                "Key 获取：steamcommunity.com/dev/apikey；SteamID64：个人资料页 URL 里的数字。",
-                style = MaterialTheme.typography.labelSmall,
-                color = scheme.onSurfaceVariant,
-            )
-        }
-        Spacer(Modifier.height(FinchSpace.md))
 
-        // ============ 游戏资料库 / HLTB ============
-        FinchCard(title = "游戏资料库", icon = Icons.AutoMirrored.Filled.MenuBook) {
-            Text(
-                "「添加游戏」在线搜索封面和平台：Bangumi（免Key）→ Steam 商店（免Key），自动容错，全不通也能手输。",
-                style = MaterialTheme.typography.bodySmall,
-                color = scheme.onSurfaceVariant,
-            )
-            Spacer(Modifier.height(FinchSpace.md))
-            HltbOnlineRow()
-        }
-        Spacer(Modifier.height(FinchSpace.md))
-
-        // ============ 手动补录 ============
-        FinchCard(title = "手动补录", icon = Icons.Filled.EditNote) {
-            Text(
-                "补历史会话（Switch 老游戏、PS4 等无法自动导入的）。",
-                style = MaterialTheme.typography.bodySmall,
-                color = scheme.onSurfaceVariant,
-            )
-            Spacer(Modifier.height(FinchSpace.sm))
-            var expanded by remember { mutableStateOf(false) }
-            FinchTextField(
-                value = manualGameQuery,
-                onValueChange = {
-                    manualGameQuery = it
-                    expanded = true
-                },
-                label = "游戏（输入名称选择）",
-                modifier = Modifier.fillMaxWidth(),
-            )
-            val candidates = games.filter {
-                it.name.contains(manualGameQuery.trim(), ignoreCase = true) && manualGameQuery.isNotBlank()
-            }.take(5)
-            if (expanded && candidates.isNotEmpty()) {
-                Spacer(Modifier.height(FinchSpace.xs))
-                candidates.forEach { g ->
-                    FinchListRow(
-                        title = g.name,
-                        subtitle = platformLabel(g.platform),
+            // ---- 手动补录 ----
+            FinchCard(title = "手动补录", icon = Icons.Filled.EditNote) {
+                Text(
+                    "补历史会话（Switch 老游戏、PS4 等无法自动导入的）。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = scheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(FinchSpace.sm))
+                var expanded by remember { mutableStateOf(false) }
+                FinchTextField(
+                    value = manualGameQuery,
+                    onValueChange = {
+                        manualGameQuery = it
+                        expanded = true
+                    },
+                    label = "游戏（输入名称选择）",
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                val candidates = games.filter {
+                    it.name.contains(manualGameQuery.trim(), ignoreCase = true) && manualGameQuery.isNotBlank()
+                }.take(5)
+                if (expanded && candidates.isNotEmpty()) {
+                    Spacer(Modifier.height(FinchSpace.xs))
+                    candidates.forEach { g ->
+                        FinchListRow(
+                            title = g.name,
+                            subtitle = platformLabel(g.platform),
+                            onClick = {
+                                manualGameId = g.id
+                                manualGameQuery = g.name
+                                expanded = false
+                            },
+                        )
+                    }
+                }
+                if (manualGameId != null) {
+                    Spacer(Modifier.height(FinchSpace.sm))
+                    SessionTimeFields(
+                        dateField = dateField, onDateChange = { dateField = it },
+                        startField = startField, onStartChange = { startField = it },
+                        endField = endField, onEndChange = { endField = it },
+                    )
+                    Spacer(Modifier.height(FinchSpace.sm))
+                    FinchButton(
+                        text = if (manualState is ImportViewModel.SyncState.Running) "保存中…" else "补录",
+                        loading = manualState is ImportViewModel.SyncState.Running,
                         onClick = {
-                            manualGameId = g.id
-                            manualGameQuery = g.name
-                            expanded = false
+                            importViewModel.addManualSession(manualGameId!!, dateField, startField, endField)
                         },
                     )
+                    SyncNote(manualState)
                 }
             }
-            if (manualGameId != null) {
+
+            PsnImportCard(importViewModel)
+            SwitchImportCard(importViewModel)
+        }
+        Spacer(Modifier.height(FinchSpace.md))
+
+        // ============ 时长目标 ============
+        FinchCollapsibleGroup(
+            title = "时长目标",
+            subtitle = "每月 / 每年想玩多少小时",
+            icon = Icons.Filled.Flag,
+            enterOrder = 2,
+        ) {
+            GoalCard()
+        }
+        Spacer(Modifier.height(FinchSpace.md))
+
+        // ============ 数据安全 ============
+        FinchCollapsibleGroup(
+            title = "数据安全",
+            subtitle = "备份、恢复与自动备份",
+            icon = Icons.Filled.Backup,
+            enterOrder = 3,
+        ) {
+            BackupCard(importViewModel)
+        }
+        Spacer(Modifier.height(FinchSpace.md))
+
+        // ============ 实验性功能 ============
+        FinchCollapsibleGroup(
+            title = "实验性功能",
+            subtitle = "可能更耗电、可能不稳定，随时可以关掉",
+            summary = if (glassState?.enabled == true) "已启用" else "关闭",
+            icon = Icons.Filled.AutoAwesome,
+            enterOrder = 4,
+        ) {
+            FinchCard {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("全面玻璃化", style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            "卡片、底栏、输入框改成实时折射玻璃（True Glass），叠在氛围光上采样；" +
+                                "关闭时用实色面板，更省电、低端机更稳。",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = scheme.onSurfaceVariant,
+                        )
+                    }
+                    Spacer(Modifier.width(FinchSpace.sm))
+                    FinchSwitch(
+                        checked = glassState?.enabled == true,
+                        enabled = glassState != null,
+                        onCheckedChange = { glassState?.set(it) },
+                    )
+                }
                 Spacer(Modifier.height(FinchSpace.sm))
-                SessionTimeFields(
-                    dateField = dateField, onDateChange = { dateField = it },
-                    startField = startField, onStartChange = { startField = it },
-                    endField = endField, onEndChange = { endField = it },
+                Text(
+                    "在 Android 12 以下或关闭了模糊效果的系统上，玻璃会自动退化成半透明色块，不影响使用。",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = scheme.onSurfaceVariant.copy(alpha = 0.8f),
                 )
-                Spacer(Modifier.height(FinchSpace.sm))
-                FinchButton(
-                    text = if (manualState is ImportViewModel.SyncState.Running) "保存中…" else "补录",
-                    loading = manualState is ImportViewModel.SyncState.Running,
-                    onClick = {
-                        importViewModel.addManualSession(manualGameId!!, dateField, startField, endField)
-                    },
-                )
-                SyncNote(manualState)
             }
         }
         Spacer(Modifier.height(FinchSpace.md))
 
-        PsnImportCard(importViewModel)
-        Spacer(Modifier.height(FinchSpace.md))
-        SwitchImportCard(importViewModel)
-        Spacer(Modifier.height(FinchSpace.xl))
-        FinchSectionTitle("时长目标")
-        GoalCard()
-        Spacer(Modifier.height(FinchSpace.xl))
-        FinchSectionTitle("数据安全")
-        BackupCard(importViewModel)
-        Spacer(Modifier.height(FinchSpace.xl))
-        FinchSectionTitle("关于")
-        UpdateCard(importViewModel)
+        // ============ 关于 ============
+        FinchCollapsibleGroup(
+            title = "关于",
+            subtitle = "版本与更新",
+            icon = Icons.Filled.SystemUpdate,
+            enterOrder = 5,
+        ) {
+            UpdateCard(importViewModel)
+        }
+
         Spacer(Modifier.height(FinchSpace.xl))
         Text(
             "Finch · 个人游戏时长记录",
@@ -344,6 +417,7 @@ fun ImportScreen(
         )
     }
 }
+
 
 /** 主题色板：三色小圆点 + 名称，选中时主题色描边 */
 @Composable
@@ -449,7 +523,8 @@ private fun GoalCard() {
     val store = remember { (context.applicationContext as dev.cao.finch.FinchApp).settings }
     var monthField by remember { mutableStateOf(store.monthGoalMin.toHoursText()) }
     var yearField by remember { mutableStateOf(store.yearGoalMin.toHoursText()) }
-    FinchCard(title = "时长目标", icon = Icons.Filled.Flag) {
+    // 外层已是「时长目标」折叠分组，卡片本身不再重复标题
+    FinchCard {
         Text(
             "填 0 或留空 = 不设目标。设了之后总结页顶部会出现本月/本年进度。",
             style = MaterialTheme.typography.bodySmall,

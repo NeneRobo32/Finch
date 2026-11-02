@@ -1,5 +1,12 @@
 package dev.cao.finch.ui.design
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -25,6 +32,8 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.TextAutoSize
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -36,10 +45,15 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -63,6 +77,8 @@ import dev.cao.finch.ui.theme.glassPalette
 /**
  * 内容卡：玻璃底 + 可选标题行（图标 + 标题 + 右侧操作）。
  * @param style GlassStyle.Card 默认；需要更轻的列表卡用 Tile
+ * @param enterOrder 进场动画的排序（同屏多张卡依次浮现）；null = 不参与错开，一起出现
+ * @param animateIn 是否播进场动画；弹窗等需要绝对静止的场合可置 false
  */
 @Composable
 fun FinchCard(
@@ -75,9 +91,16 @@ fun FinchCard(
     titleExtraColor: Color = MaterialTheme.colorScheme.primary,
     action: @Composable (RowScope.() -> Unit)? = null,
     contentPadding: PaddingValues = PaddingValues(FinchSpace.xl, FinchSpace.lg),
+    enterOrder: Int? = null,
+    animateIn: Boolean = true,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    GlassSurface(modifier = modifier, style = style) {
+    GlassSurface(
+        modifier = modifier.then(
+            Modifier.finchEnter(order = enterOrder ?: 0, enabled = animateIn),
+        ),
+        style = style,
+    ) {
         Column(Modifier.padding(contentPadding)) {
             if (title != null) {
                 Row(
@@ -571,4 +594,109 @@ fun FinchInsetDivider(modifier: Modifier = Modifier, startIndent: androidx.compo
             .height(1.dp)
             .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)),
     )
+}
+
+/**
+ * 可折叠分组：设置页原来的「一长条卡片」改成「标题点开才展开内容」。
+ *
+ * 折叠态只用一行，长页面一眼能扫完；展开态照常用 [FinchCard] 排列。
+ * 展开状态用 rememberSaveable 保存，旋转屏幕/切走再回来不会自己收起来。
+ *
+ * @param summary 折叠时右侧显示的一句话摘要（比如「已配置 · 自动同步关」），让收起后仍有信息量
+ */
+@Composable
+fun FinchCollapsibleGroup(
+    title: String,
+    modifier: Modifier = Modifier,
+    subtitle: String? = null,
+    summary: String? = null,
+    icon: ImageVector? = null,
+    initiallyExpanded: Boolean = false,
+    enterOrder: Int? = null,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    var expanded by rememberSaveable { mutableStateOf(initiallyExpanded) }
+    // 箭头旋转跟着展开状态走，用同一个 spring 保持手感一致
+    val arrow by animateFloatAsState(
+        targetValue = if (expanded) 90f else 0f,
+        animationSpec = FinchMotion.enter(),
+        label = "groupArrow",
+    )
+
+    Column(modifier.fillMaxWidth()) {
+        GlassSurface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .then(if (enterOrder != null) Modifier.finchEnter(enterOrder) else Modifier),
+            style = GlassStyle.Tile,
+            shape = FinchShapes.tile,
+            onClick = { expanded = !expanded },
+        ) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = FinchSpace.lg, vertical = FinchSpace.md),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (icon != null) {
+                    Box(
+                        Modifier
+                            .size(28.dp)
+                            .clip(FinchShapes.thumb)
+                            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            icon,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(16.dp),
+                        )
+                    }
+                    Spacer(Modifier.width(FinchSpace.md))
+                }
+                Column(Modifier.weight(1f)) {
+                    Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                    if (subtitle != null) {
+                        Text(
+                            subtitle,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+                if (summary != null && !expanded) {
+                    Text(
+                        summary,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Spacer(Modifier.width(FinchSpace.xs))
+                }
+                Icon(
+                    Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                    contentDescription = if (expanded) "收起" else "展开",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier
+                        .size(20.dp)
+                        .rotate(arrow),
+                )
+            }
+        }
+        AnimatedVisibility(
+            visible = expanded,
+            enter = expandVertically(FinchMotion.enter()) + fadeIn(tween(160)),
+            exit = shrinkVertically(FinchMotion.settle()) + fadeOut(tween(90)),
+        ) {
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(top = FinchSpace.md),
+                verticalArrangement = Arrangement.spacedBy(FinchSpace.md),
+                content = content,
+            )
+        }
+    }
 }

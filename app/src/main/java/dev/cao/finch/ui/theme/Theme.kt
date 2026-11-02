@@ -58,6 +58,32 @@ fun rememberFinchThemeState(
 ): FinchThemeState =
     androidx.compose.runtime.remember { FinchThemeState(current, save) }
 
+// ============ 实验性功能开关 ============
+
+/**
+ * 可观察的实验性玻璃化开关：从 SettingsStore 初始化，切换时同步回存。
+ * 与 ThemeState 同构，只是值从枚举换成布尔。
+ */
+class GlassState(
+    initial: Boolean,
+    private val save: (Boolean) -> Unit,
+) {
+    var enabled by mutableStateOf(initial)
+        private set
+
+    fun set(new: Boolean) {
+        enabled = new
+        save(new)
+    }
+}
+
+@Composable
+fun rememberGlassState(
+    current: Boolean,
+    save: (Boolean) -> Unit,
+): GlassState =
+    androidx.compose.runtime.remember { GlassState(current, save) }
+
 // ============ CompositionLocal：当前主题 + 玻璃 + 场景色 ============
 
 /** 当前风格主题（默认琉璃） */
@@ -75,11 +101,18 @@ val LocalFinchBundle = compositionLocalOf { finchScheme(FinchTheme.IRIDESCENT, f
 /** 当前是否为深色（供不读 MaterialTheme 的绘制逻辑使用） */
 val LocalFinchDark = compositionLocalOf { false }
 
+/**
+ * 是否启用实验性玻璃化。
+ * 为 false 时 GlassSurface / 底栏退回实色面板（与旧版外观一致，且不产生离屏采样开销）。
+ */
+val LocalGlassEnabled = compositionLocalOf { false }
+
 /** 主题根：按亮暗 + 风格主题取整套配色，注入 CompositionLocal 并设置 MaterialTheme */
 @Composable
 fun FinchTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
     finchTheme: FinchTheme = FinchTheme.IRIDESCENT,
+    glassEnabled: Boolean = false,
     content: @Composable () -> Unit,
 ) {
     val bundle = finchScheme(finchTheme, darkTheme)
@@ -89,6 +122,7 @@ fun FinchTheme(
         LocalFinchDark provides darkTheme,
         LocalGlassPalette provides bundle.glass,
         LocalScenePalette provides bundle.scene,
+        LocalGlassEnabled provides glassEnabled,
         // 关键：MaterialTheme 本身不提供内容色，外层没有 Surface/Scaffold 时
         // LocalContentColor 默认是黑色——深色模式下所有未显式指定颜色的文字/图标都会看不见。
         androidx.compose.material3.LocalContentColor provides bundle.scheme.onBackground,

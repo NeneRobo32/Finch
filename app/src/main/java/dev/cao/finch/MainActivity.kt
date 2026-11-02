@@ -19,8 +19,10 @@ import dev.cao.finch.data.SettingsStore
 import dev.cao.finch.ui.FinchAppScaffold
 import dev.cao.finch.ui.theme.FinchTheme
 import dev.cao.finch.ui.theme.FinchThemeState
+import dev.cao.finch.ui.theme.GlassState
 import dev.cao.finch.ui.theme.ThemeMode
 import dev.cao.finch.ui.theme.rememberFinchThemeState
+import dev.cao.finch.ui.theme.rememberGlassState
 import dev.cao.finch.ui.theme.rememberThemeState
 
 class MainActivity : ComponentActivity() {
@@ -87,12 +89,21 @@ private fun AppRoot(store: SettingsStore, initialGameId: Long? = null) {
         current = FinchTheme.fromPersist(store.finchTheme),
         save = { store.finchTheme = it },
     )
+    // 实验性「全面玻璃化」：默认关闭，走实色面板；用户在设置里打开后全局切成真玻璃
+    val glassState = rememberGlassState(
+        current = store.experimentalGlassEnabled,
+        save = { store.experimentalGlassEnabled = it },
+    )
     val darkTheme = when (themeState.mode) {
         ThemeMode.SYSTEM -> androidx.compose.foundation.isSystemInDarkTheme()
         ThemeMode.LIGHT -> false
         ThemeMode.DARK -> true
     }
-    FinchTheme(darkTheme = darkTheme, finchTheme = finchThemeState.theme) {
+    FinchTheme(
+        darkTheme = darkTheme,
+        finchTheme = finchThemeState.theme,
+        glassEnabled = glassState.enabled,
+    ) {
         // 状态栏/导航栏图标跟随应用主题（而不是系统深浅），
         // 否则「浅色主题 + 系统深色」时白字压在浅色氛围背景上不可读
         val view = androidx.compose.ui.platform.LocalView.current
@@ -108,6 +119,7 @@ private fun AppRoot(store: SettingsStore, initialGameId: Long? = null) {
         FinchAppScaffold(
             themeState = themeState,
             finchThemeState = finchThemeState,
+            glassState = glassState,
             initialGameId = initialGameId,
         )
     }

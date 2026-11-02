@@ -6,6 +6,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
@@ -24,6 +25,7 @@ import com.kyant.backdrop.effects.vibrancy
 import com.kyant.backdrop.highlight.Highlight
 import com.kyant.backdrop.shadow.Shadow
 import dev.cao.finch.ui.theme.FinchShapes
+import dev.cao.finch.ui.theme.LocalGlassEnabled
 import dev.cao.finch.ui.theme.finchBundle
 import dev.cao.finch.ui.theme.glassPalette
 
@@ -60,16 +62,19 @@ enum class GlassStyle(
 }
 
 /**
- * 玻璃是否再叠一层模糊（视觉开关）。
- * 采样源只有全屏静态氛围背景——三团大光斑 + 垂直渐变，平滑到 blur 前后几乎无差别；
- * 关掉少一遍全表面像素运算，且滚动时 LayerBackdrop 会随位移重录，省的是每帧开销。
- * 将来若要采样带细节的层（封面 / 内容），改回 true。
+ * 玻璃是否再叠一层模糊。
+ * 采样源只有全屏静态氛围背景——三团大光斑 + 垂直渐变，平滑到 blur 前后差别很小，
+ * 却要对整块面板多跑一遍像素（LayerBackdrop 还会随位移重录）。
+ * 所以只在「全面玻璃化」开关打开时才走这条更厚的链路，关掉时根本不进 drawBackdrop。
  */
-private const val GLASS_BLUR = false
+private const val GLASS_BLUR = true
 
 /**
  * 统一的玻璃面板（Liquid Glass，基于 Kyant0/backdrop 2.0.0）：
  * vibrancy 提亮 → blur 模糊 → lens 边缘折射，再叠主题色 + 顶部光晕。
+ *
+ * 「设置 → 实验性功能 → 全面玻璃化」关闭时退回实色面板（[SolidPanel]）：
+ * 外观接近旧版，且完全不碰 drawBackdrop —— 不分配离屏层、不重录快照。
  *
  * @param style 层级强度
  * @param shape 形状（默认连续圆角内容卡）
@@ -88,6 +93,20 @@ fun GlassSurface(
     onLongClick: (() -> Unit)? = null,
     content: @Composable BoxScope.() -> Unit,
 ) {
+    if (!LocalGlassEnabled.current) {
+        SolidPanel(
+            modifier = modifier,
+            style = style,
+            shape = shape,
+            enabled = enabled,
+            interactionSource = interactionSource,
+            onClick = onClick,
+            onLongClick = onLongClick,
+            content = content,
+        )
+        return
+    }
+
     val glass = glassPalette()
     val dark = finchBundle().isDark
     // 只有调用方没传采样源时才自建：原先无条件 rememberLayerBackdrop()，
@@ -122,10 +141,9 @@ fun GlassSurface(
             shape = { shape },
             effects = {
                 vibrancy()
-                // 采样源只有全屏氛围背景（三团大光斑 + 垂直渐变，没有高频细节），blur 在这里
-                // 几乎不产生可见差别，却要对整块面板多跑一遍像素；而且 LayerBackdrop 是坐标
-                // 相关的，卡片一移动（滚动）就要重录重算一次。先关掉：若某个面板看出渐变色带，
-                // 把 GLASS_BLUR 改回 true 即可恢复。
+                // 打开「全面玻璃化」后这里才真正跑 blur：采样源是氛围光（三团大光斑 + 垂直渐变），
+                // blur 的增益主要体现在有高频内容的场景；关掉开关时根本不进 drawBackdrop，
+                // 所以这条更重的链路只在用户主动开启时承担开销。
                 if (GLASS_BLUR) blur(style.blurDp.dp.toPx())
                 lens(style.refractionHeightDp.dp.toPx(), style.refractionAmountDp.dp.toPx())
             },
@@ -162,3 +180,64 @@ fun GlassSurface(
 /** backdrop 缺省时的兜底采样源（单独抽出来，才能只在需要时创建） */
 @Composable
 private fun rememberOwnBackdrop(): Backdrop = rememberLayerBackdrop()
+
+/**
+ * 实色面板：玻璃化开关关闭时的降级外观。
+ * 用一档极淡的竖向渐变代替折射，压在氛围光上仍有层次，但不做任何采样。
+ * 层级越厚（[GlassStyle.Chrome]）底色越实、描边越亮，保持原有的视觉分层。
+ */
+@Composable
+private fun SolidPanel(
+    modifier: Modifier,
+    style: GlassStyle,
+    shape: Shape,
+    enabled: Boolean,
+    interactionSource: MutableInteractionSource?,
+    onClick: (() -> Unit)?,
+    onLongClick: (() -> Unit)?,
+    content: @Composable BoxScope.() -> Unit,
+) {
+    val scheme = MaterialTheme.colorScheme
+    val dark = finchBundle().isDark
+    val source = interactionSource ?: remember { MutableInteractionSource() }
+    // 玻璃越厚 → 底色越不透明；1.0f - tintScale 把四档映射成 0.38f..0.70f
+    val fill = remember(scheme, style, dark, enabled) {
+        val base = if (dark) scheme.surface else scheme.surfaceContainerLow
+        val alpha = when {
+            !enabled -> 0.34f
+            style == GlassStyle.Chrome -> 0.70f
+            style == GlassStyle.Card -> 0.58f
+            style == GlassStyle.Tile -> 0.50f
+            else -> 0.42f
+        }
+        Brush.verticalGradient(
+            0f to base.copy(alpha = alpha),
+            1f to scheme.surfaceContainerHigh.copy(alpha = alpha),
+        )
+    }
+    val stroke = remember(scheme, style, dark) {
+        val base = if (dark) scheme.outlineVariant else scheme.outline
+        val alpha = if (dark) style.edgeAlpha * 0.9f else style.edgeAlpha * 0.7f
+        BorderStroke(1.dp, base.copy(alpha = alpha))
+    }
+
+    Box(
+        modifier
+            .clip(shape)
+            .then(
+                if (onClick != null) {
+                    Modifier.finchClickable(
+                        enabled = enabled,
+                        interactionSource = source,
+                        onClick = onClick,
+                        onLongClick = onLongClick,
+                    )
+                } else {
+                    Modifier
+                }
+            )
+            .background(fill, shape)
+            .border(stroke, shape),
+        content = content,
+    )
+}

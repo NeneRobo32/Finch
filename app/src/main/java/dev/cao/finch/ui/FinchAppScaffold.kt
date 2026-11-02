@@ -45,6 +45,7 @@ import dev.cao.finch.ui.design.FinchSpace
 import dev.cao.finch.ui.design.FinchTab
 import dev.cao.finch.ui.design.LocalFinchBackdrop
 import dev.cao.finch.ui.theme.FinchThemeState
+import dev.cao.finch.ui.theme.GlassState
 import dev.cao.finch.ui.theme.ThemeState
 
 /**
@@ -71,6 +72,7 @@ fun FinchAppScaffold(
     addViewModel: AddGameViewModel = viewModel(),
     themeState: ThemeState? = null,
     finchThemeState: FinchThemeState? = null,
+    glassState: GlassState? = null,
     initialGameId: Long? = null,
 ) {
     var tab by rememberSaveable { mutableStateOf(Tab.Home) }
@@ -123,6 +125,7 @@ fun FinchAppScaffold(
                                 viewModel = viewModel,
                                 themeState = themeState,
                                 finchThemeState = finchThemeState,
+                                glassState = glassState,
                             )
                         }
                     }
