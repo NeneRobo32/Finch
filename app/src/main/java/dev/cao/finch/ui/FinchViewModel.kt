@@ -154,12 +154,20 @@ class FinchViewModel(app: Application) : AndroidViewModel(app) {
         start: LocalDateTime,
         end: LocalDateTime,
         tag: String?,
+        note: String?,
     ): Result<Unit> {
         if (!end.isAfter(start)) return Result.failure(IllegalArgumentException("结束时间需晚于开始时间"))
         val s = sessionDao.byId(id) ?: return Result.failure(IllegalArgumentException("记录不存在"))
         if (s.endTime == null) return Result.failure(IllegalArgumentException("进行中的会话不能改时间，先停止"))
         if (start.isAfter(LocalDateTime.now())) return Result.failure(IllegalArgumentException("开始时间不能在未来"))
-        sessionDao.update(s.copy(startTime = start, endTime = end, tag = SessionTags.normalize(tag)))
+        sessionDao.update(
+            s.copy(
+                startTime = start,
+                endTime = end,
+                tag = SessionTags.normalize(tag),
+                note = SessionTags.normalizeNote(note),
+            )
+        )
         return Result.success(Unit)
     }
 

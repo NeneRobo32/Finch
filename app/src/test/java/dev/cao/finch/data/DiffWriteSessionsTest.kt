@@ -183,10 +183,60 @@ class DiffWriteSessionsTest {
     }
 
     @Test
-    fun `撞旧占位同起点跳过_不重复计时长`() = runBlocking {
+    fun `撞旧占位同起点_延长当天占位而不是丢增量`() = runBlocking {
         val sessions = FakeSessionDao(zone)
         val snaps = FakeSnapshotDao()
-        // 预置一条与本次分配同起点（21:00）的旧占位会话 → 本批份额被去重跳过
+        // 预置一条今天 20:00 起的旧占位（20 分钟）：本次份额同起点，应把终点往后延长
+        sessions.rows += PlaySession(
+            id = 99, gameId = 1L,
+            startTime = LocalDateTime.parse("2026-09-13T20:00:00"),
+            endTime = LocalDateTime.parse("2026-09-13T20:20:00"),
+            source = SessionSource.STEAM,
+        )
+        val r = diff(
+            sessions, snaps, totalMin = 160,
+            prev = snapshot(100, LocalDateTime.parse("2026-09-13T20:00:00")),
+            now = LocalDateTime.parse("2026-09-13T22:00:00"),
+        )
+        // 60 分钟增量摊成今天 20:00–21:00；旧占位已有 20 分钟 → 延长到 21:00
+        assertEquals(0, r.added) // 没有新行，旧占位被延长
+        assertEquals(60L, r.writtenMin) // 这一段份额已完整落库
+        assertEquals(1, sessions.rows.size)
+        assertEquals(60L, sessions.totalMin())
+        assertEquals(160L, snaps.byKey("steam", "steam:1")!!.totalMin)
+    }
+
+    @Test
+    fun `份额放不下时基线只推进已写入量_余量下次补`() = runBlocking {
+        val sessions = FakeSessionDao(zone)
+        val snaps = FakeSnapshotDao()
+        // 上次快照刚在今天 21:59，增量 30 分钟：唯一份额 [21:59, 22:29] 越过 now 被丢弃
+        val r1 = diff(
+            sessions, snaps, totalMin = 130,
+            prev = snapshot(100, LocalDateTime.parse("2026-09-13T21:59:00")),
+            now = LocalDateTime.parse("2026-09-13T22:00:00"),
+        )
+        assertEquals(0, r1.added)
+        assertEquals(0L, r1.writtenMin)
+        assertTrue(sessions.rows.isEmpty())
+        // 关键：基线不得跳到 130，否则这 30 分钟永远补不回来
+        assertEquals(100L, snaps.byKey("steam", "steam:1")!!.totalMin)
+        // 次日再同步：同一笔增量仍能被算出来并落账
+        val r2 = diff(
+            sessions, snaps, totalMin = 130,
+            prev = snaps.byKey("steam", "steam:1"),
+            now = LocalDateTime.parse("2026-09-14T22:00:00"),
+        )
+        assertEquals(30L, r2.writtenMin)
+        assertEquals(30L, sessions.totalMin())
+        assertEquals(130L, snaps.byKey("steam", "steam:1")!!.totalMin)
+    }
+
+    @Test
+    fun `撞旧占位只补差额_再次同步不重复计`() = runBlocking {
+        val sessions = FakeSessionDao(zone)
+        val snaps = FakeSnapshotDao()
+        // 预置一条与本次份额同起点（21:00）的旧占位，已有 5 分钟 → 本次延长到 21:10
         sessions.rows += PlaySession(
             id = 99, gameId = 1L,
             startTime = LocalDateTime.parse("2026-09-13T21:00:00"),
@@ -198,17 +248,20 @@ class DiffWriteSessionsTest {
             prev = snapshot(100, LocalDateTime.parse("2026-09-13T21:00:00")),
             now = LocalDateTime.parse("2026-09-13T22:00:00"),
         )
-        assertEquals(0, r1.added)
-        assertEquals(0L, r1.writtenMin)
+        assertEquals(0, r1.added) // 没有新行，旧占位被延长
+        assertEquals(10L, r1.writtenMin) // 这一段份额已完整落库
         assertEquals(1, sessions.rows.size)
+        assertEquals(10L, sessions.totalMin())
         assertEquals(110L, snaps.byKey("steam", "steam:1")!!.totalMin)
-        // 再次同步（平台总量仍 110）：没有增量，不再写
+        // 再次同步（平台总量仍 110）：没有新增量，不重复写、不重复计时长
         val r2 = diff(
             sessions, snaps, totalMin = 110,
             prev = snaps.byKey("steam", "steam:1"),
             now = LocalDateTime.parse("2026-09-13T23:00:00"),
         )
         assertEquals(0, r2.added)
-        assertEquals(1, sessions.rows.size)
+        assertEquals(0L, r2.writtenMin)
+        assertEquals(10L, sessions.totalMin())
+        assertEquals(110L, snaps.byKey("steam", "steam:1")!!.totalMin)
     }
 }

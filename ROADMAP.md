@@ -1,6 +1,6 @@
 # Finch 路线图
 
-基线：`v0.19.0`（DB v20，versionCode 86）。
+基线：`v0.19.1`（DB v21，versionCode 87）。
 IGDB 已整体移除（国内直连不通）；HLTB 改走 Crashdummy 中转 API（Steam 直查+Nlib 英文名+按名搜，默认开、可一键关）；非英文库名走英文名解析链换英文线索再搜（Steam 中文反查/Bangumi 原名/eShop 英文段/游民星空/机翻已移除，v0.15.15–0.15.18）。
 下阶段主题：**让回顾更深 → 让分享更强**（v0.20 年度报告/backlog 漏斗，见文末）。
 
@@ -39,6 +39,7 @@ IGDB 已整体移除（国内直连不通）；HLTB 改走 Crashdummy 中转 API
 | v0.18.6 ✅热修 | 本月时长修正 | 推算的历史会话加 `estimated` 标记（DB 18），本月/今年/热力图/作息/平台/Top 等区间统计一律排除；锚点改到上个月末之前、上限 400 天；旧云端来源会话迁移回标 | 17→18 | 无 |
 | v0.18.7 ✅热修 | 底栏透明玻璃 | 内容层单独挂 `contentBackdrop`，底栏采样源改为「氛围光 ＋ 内容层」合成，真正透出滚动内容；遮罩 alpha 0.34/0.46 → 0.18/0.26 | 不变 | 无 |
 | v0.18.8 ✅热修 | 记录只存真实 | 删掉「按官方累计差额摊历史会话」的对账逻辑与推算行，`play_sessions.estimated` 列移除（DB 19）；同步只写真实新增，首次同步仅落基线；详情页显示「本地记录 X · 差额 Y」；底栏去 vibrancy＋blur 8→3dp | 18→19 | 无 |
+| v0.19.1 ✅热修 | 同步写不进记录 | `diffWriteSessions` 撞旧占位就延长而非丢弃整天增量；基线只推进到「已落账」量，余量下次补；每条记录可写备注（`play_sessions.note TEXT`，DB 21） | 20→21 | 无 |
 | v0.19 ✅已交付 | 记录更细 | 会话标签（主线/支线/联机/多周目/自定义）＋记录页胶囊筛选＋总结页标签分布；时长目标（月/年，设置页可填，Hero 卡出进度）；海报拆到 v0.21 | 19→20 | 无 |
 | 远期 / 明确不做 | — | WebDAV 同步（可选）；前台自动识别、账号云同步、国际化明确不做 | — | — |
 
@@ -173,6 +174,20 @@ gantt
 
 ---
 
+## v0.19.1 ✅ 热修 —— 同步不再丢记录 ＋ 备注（DB 20→21）
+
+用户报「同步提示匹配更新 11 款，却写入 0 条游玩记录」。根因全在 `SyncEngine.diffWriteSessions`：
+
+- ✅ **撞占位不再丢增量**：旧代码 `if (sessionDao.at(...) != null) continue` 会把整天份额直接跳过；
+  现在改成延长当天占位的 `endTime`，并且只要份额没被分配器丢弃就计入「已落账」
+- ✅ **基线只推进已落账量**：旧代码结尾无条件把快照对齐官方累计，没写进去的增量从此永久丢失；
+  改为 `prev.totalMin + writtenMin`（本轮写满才对齐 totalMin），余量下次同步继续补
+- ✅ **单条备注**：`play_sessions.note TEXT`（`MIGRATION_20_21`，null = 没写，最长 120 字）；
+  编辑弹窗可写，记录页与详情页最多折 2 行显示，不进任何统计口径
+- **验收**：DiffWriteSessionsTest 三例重写、MigrationTest 增 v20→21 专项；单测 132 全绿
+
+---
+
 ## DB 演进一览
 
 | DB | 版本 | 变更 |
@@ -190,6 +205,7 @@ gantt
 | 18 | v0.18.6（已交付） | `play_sessions.estimated`（0=真实/1=云端对账摊出的推算历史）；`MIGRATION_17_18` 回标旧 STEAM/SWITCH/PS 会话为估算，区间统计加 `estimated = 0` 过滤 |
 | 19 | v0.18.8（已交付） | 移除 `play_sessions.estimated`（`MIGRATION_18_19` 先 `DELETE ... WHERE estimated = 1` 清推算行，再重建表去列）；取消「按官方累计差额摊历史会话」，记录只存真实会话 |
 | 20 | v0.19.0（已交付） | `play_sessions.tag TEXT`（`MIGRATION_19_20`，无 DEFAULT；null = 未分类）；会话标签 + 记录页筛选 + 总结页标签分布；时长目标走 SettingsStore 不动 DB |
+| 21 | v0.19.1（已交付） | `play_sessions.note TEXT`（`MIGRATION_20_21`，无 DEFAULT；null = 没写）；单条记录备注，记录页/详情页可写可看，不进统计口径 |
 
 备份恢复逻辑（`BackupManager.validate()`）按 `FINCH_DB_VERSION` 校验，跨版恢复走 Room 自动迁移，老备份可读。
 

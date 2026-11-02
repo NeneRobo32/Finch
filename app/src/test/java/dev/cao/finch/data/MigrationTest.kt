@@ -26,7 +26,7 @@ import org.robolectric.annotation.SQLiteMode
  * Room 挂全量 MIGRATION_* 打开（Room 自带 schema 校验，迁移 SQL 与实体不一致会抛
  * IllegalStateException —— v0.15.0 的启动闪退就是这么炸的）→ 断言样例数据保留、列值正确。
  *
- * 覆盖起始版本 7..19 逐版升到 FINCH_DB_VERSION=20。
+ * 覆盖起始版本 7..20 逐版升到 FINCH_DB_VERSION=21。
  * 1..6 无 schema JSON（schemas 从 7 起入库），无法起测，已在报告注明。
  */
 @RunWith(RobolectricTestRunner::class)
@@ -90,6 +90,9 @@ class MigrationTest {
 
     @Test
     fun `v19升级到当前_数据保留`() = checkFrom(19)
+
+    @Test
+    fun `v20升级到当前_数据保留`() = checkFrom(20)
 
     // ---- 专项：19→20 会话标签列 ----
 
@@ -215,9 +218,46 @@ class MigrationTest {
         }
     }
 
+    // ---- 专项：20→21 备注列 ----
+
     @Test
-    fun `新装库直接建v20_可正常读写`() {
-        // 无旧文件：Room 直接按实体建 v20（与迁移结果同构是 Room 校验口径统一的前提）
+    fun `v20到21_note列加入_老会话为null_可写入备注`() {
+        createOldDb(20)
+        val room = openWithMigrations()
+        try {
+            val db = room.openHelper.writableDatabase
+            var hasNote = false
+            var noteDefault: String? = null
+            db.query("PRAGMA table_info(`play_sessions`)").use { c ->
+                val nameIdx = c.getColumnIndex("name")
+                val dfltIdx = c.getColumnIndex("dflt_value")
+                while (c.moveToNext()) {
+                    if (c.getString(nameIdx) == "note") {
+                        hasNote = true
+                        noteDefault = if (c.isNull(dfltIdx)) null else c.getString(dfltIdx)
+                    }
+                }
+            }
+            assertTrue("v0.19.1 起 play_sessions 应有 note 列", hasNote)
+            assertEquals(null, noteDefault)
+            runBlocking {
+                val sessions = room.sessionDao()
+                assertEquals(null, sessions.byId(1L)!!.note)
+                // 写备注后能读回；清空回到 null；时长口径不受备注影响
+                sessions.update(sessions.byId(1L)!!.copy(note = "打到第三章"))
+                assertEquals("打到第三章", sessions.byId(1L)!!.note)
+                assertEquals(3_600_000L - 42L, sessions.totalMsForGame(1L))
+                sessions.update(sessions.byId(1L)!!.copy(note = null))
+                assertEquals(null, sessions.byId(1L)!!.note)
+            }
+        } finally {
+            room.close()
+        }
+    }
+
+    @Test
+    fun `新装库直接建v21_可正常读写`() {
+        // 无旧文件：Room 直接按实体建 v21（与迁移结果同构是 Room 校验口径统一的前提）
         val room = openWithMigrations()
         try {
             runBlocking {

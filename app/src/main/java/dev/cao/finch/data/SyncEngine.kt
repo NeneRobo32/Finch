@@ -94,17 +94,35 @@ object SyncEngine {
         if (deltaMin > 0) {
             for (s in allocateSteamSessions(deltaMin, prev!!.at, now, zone, lastPlayedEpoch)) {
                 val startMs = s.start.atZone(zone).toInstant().toEpochMilli()
-                // 精确去重：同游戏同来源同开始时间 = 同一条占位会话（旧版按区间计数，同日二次同步会误判重复）
-                if (sessionDao.at(gameId, startMs, sessionSource) != null) continue
                 val endMs = s.end.atZone(zone).toInstant().toEpochMilli()
-                sessionDao.insert(
-                    PlaySession(gameId = gameId, startTime = s.start, endTime = s.end, source = sessionSource)
-                )
-                added++
+                val dup = sessionDao.at(gameId, startMs, sessionSource)
+                if (dup == null) {
+                    sessionDao.insert(
+                        PlaySession(gameId = gameId, startTime = s.start, endTime = s.end, source = sessionSource)
+                    )
+                    added++
+                } else {
+                    // 同起点已有占位：把当天那一块延长即可（与 Switch 日报的幂等修正同一口径）。
+                    // v0.19.1 前这里直接 continue，撞点那天的增量被永久丢掉；现在无论是否延长，
+                    // 这一段份额都已在库里（占位本身或延长后的窗口），按「已落账」计入。
+                    val dupEndMs = dup.endTime?.atZone(zone)?.toInstant()?.toEpochMilli()
+                    if (dupEndMs != null && endMs > dupEndMs) {
+                        sessionDao.update(dup.copy(endTime = s.end))
+                    }
+                }
+                // 份额只要没被分配器丢弃（越过 now 的会被过滤掉），就代表这段时间已进库
                 writtenMin += (endMs - startMs) / 60_000
             }
         }
-        saveSnapshot(snapshotDao, source, refKey, refName, totalMin, now)
+        // 基线只推进「实际落账」的量（v0.19.1 丢记录修复）：份额放不下、或与既有占位同起点被跳过时，
+        // 差值留到下次同步继续补；旧版无条件把基线对齐到官方累计，一旦本次没写成功就永久丢掉这段时长
+        // （表现为「匹配更新 11 款、写入 0 条」，之后再同步增量恒为 0）。
+        val nextBaseline = when {
+            prev == null -> totalMin // 首次建档：只落基线，不写记录
+            writtenMin >= deltaMin -> totalMin // 差额全部落账（含平台数据回落）→ 与官方对齐
+            else -> prev.totalMin + writtenMin // 部分落账 → 只推进已写入量，余量下次再补
+        }
+        saveSnapshot(snapshotDao, source, refKey, refName, nextBaseline, now)
         return DiffWrite(added, writtenMin)
     }
 

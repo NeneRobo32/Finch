@@ -40,14 +40,14 @@ import java.time.LocalTime
 
 /**
  * 会话编辑框（详情页与记录页共用）：
- * 日期 + 开始/结束输入 + 标签（v0.19）；结束早于开始按跨夜自动 +1 天；解析失败静默不提交。
+ * 日期 + 开始/结束输入 + 标签 + 备注（v0.19 / v0.19.1）；结束早于开始按跨夜自动 +1 天；解析失败静默不提交。
  */
 @Composable
 internal fun SessionEditDialog(
     session: PlaySession,
     error: String?,
     onDismiss: () -> Unit,
-    onConfirm: (start: LocalDateTime, end: LocalDateTime, tag: String?) -> Unit,
+    onConfirm: (start: LocalDateTime, end: LocalDateTime, tag: String?, note: String?) -> Unit,
 ) {
     val dateFmt = TimeFormatter.DATE_YMD
     val timeFmt = TimeFormatter.TIME_HM
@@ -57,6 +57,7 @@ internal fun SessionEditDialog(
         mutableStateOf(session.endTime?.format(timeFmt) ?: session.startTime.format(timeFmt))
     }
     var tag by remember(session.id) { mutableStateOf(session.tag) }
+    var note by remember(session.id) { mutableStateOf(session.note.orEmpty()) }
     FinchDialog(
         title = "编辑记录",
         subtitle = "结束时间早于开始时间会按跨夜处理。",
@@ -71,7 +72,7 @@ internal fun SessionEditDialog(
                 var s = LocalDateTime.of(date, start)
                 var e = LocalDateTime.of(date, end)
                 if (e.isBefore(s)) e = e.plusDays(1) // 跨夜
-                onConfirm(s, e, SessionTags.normalize(tag))
+                onConfirm(s, e, SessionTags.normalize(tag), SessionTags.normalizeNote(note))
             }
             // 格式错误静默不提交（与原两份副本行为一致）
         },
@@ -83,6 +84,17 @@ internal fun SessionEditDialog(
         )
         Spacer(Modifier.height(FinchSpace.md))
         TagPicker(selected = tag, onSelect = { tag = it })
+        Spacer(Modifier.height(FinchSpace.md))
+        FinchTextField(
+            value = note,
+            onValueChange = { note = it.take(SessionTags.MAX_NOTE_LENGTH) },
+            label = "备注",
+            placeholder = "这次玩到哪了？比如「打完第三章 BOSS」",
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = false,
+            minLines = 2,
+            maxLines = 4,
+        )
         if (error != null) {
             Column(Modifier.padding(top = FinchSpace.sm)) {
                 Text(error, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
@@ -129,7 +141,7 @@ internal fun TagPicker(
         }
         Spacer(Modifier.height(FinchSpace.sm))
         FinchTextField(
-            value = if (isCustom) selected ?: "" else "",
+            value = if (isCustom) selected.orEmpty() else "",
             onValueChange = { onSelect(SessionTags.normalize(it)) },
             label = "自定义标签",
             placeholder = if (isCustom) null else "想写别的就填这里",
@@ -138,7 +150,7 @@ internal fun TagPicker(
     }
 }
 
-/** 单条游玩记录：起止时间 + 时长（扣暂停） + 标签 + 编辑 + 删除（详情页列表用） */
+/** 单条游玩记录：起止时间 + 时长（扣暂停） + 标签 + 备注 + 编辑 + 删除（详情页列表用） */
 @Composable
 internal fun SessionRow(s: PlaySession, onDelete: () -> Unit, onEdit: () -> Unit) {
     val end = s.endTime ?: return
@@ -169,6 +181,15 @@ internal fun SessionRow(s: PlaySession, onDelete: () -> Unit, onEdit: () -> Unit
                         color = MaterialTheme.colorScheme.primary,
                     )
                 }
+            }
+            if (s.note != null) {
+                Text(
+                    s.note,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                )
             }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(FinchSpace.xxs), verticalAlignment = Alignment.CenterVertically) {

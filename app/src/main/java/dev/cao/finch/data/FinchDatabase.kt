@@ -20,7 +20,7 @@ class Converters {
 }
 
 /** Room schema 版本（迁移与备份校验共用） */
-const val FINCH_DB_VERSION = 20
+const val FINCH_DB_VERSION = 21
 
 @Database(
     entities = [Game::class, PlaySession::class, PlaytimeSnapshot::class, ReleaseFollow::class],
@@ -300,6 +300,14 @@ abstract class FinchDatabase : RoomDatabase() {
             }
         }
 
+        // v0.19.1（DB 21）：给单条记录加「备注」。纯附加列，不重建表；
+        // 老记录保持 null，记录页/详情页只在非空时显示，不进任何统计口径。
+        val MIGRATION_20_21 = object : Migration(20, 21) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE play_sessions ADD COLUMN note TEXT")
+            }
+        }
+
         val MIGRATION_19_20 = object : Migration(19, 20) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 // v0.19：会话标签（主线/支线/联机/多周目/自定义）。老会话不回填，保持 null = 未分类，
@@ -314,7 +322,7 @@ abstract class FinchDatabase : RoomDatabase() {
             MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9,
             MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13,
             MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17, MIGRATION_17_18,
-            MIGRATION_18_19, MIGRATION_19_20,
+            MIGRATION_18_19, MIGRATION_19_20, MIGRATION_20_21,
         )
 
         fun build(context: Context): FinchDatabase =

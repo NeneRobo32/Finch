@@ -286,6 +286,15 @@ private fun SessionCard(
                         FinchBadge(text = s.tag, tint = MaterialTheme.colorScheme.primary)
                     }
                 }
+                if (s.note != null) {
+                    Text(
+                        s.note,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
             Text(
                 if (running) TimeFormatter.hms(duration) else TimeFormatter.hoursMinutes(duration),
@@ -311,9 +320,9 @@ private fun SessionCard(
             session = s,
             error = editError,
             onDismiss = { showEdit = false; editError = null },
-            onConfirm = { start, end, tag ->
+            onConfirm = { start, end, tag, note ->
                 scope.launch {
-                    val r = viewModel.updateSessionTimes(s.id, start, end, tag)
+                    val r = viewModel.updateSessionTimes(s.id, start, end, tag, note)
                     if (r.isSuccess) {
                         showEdit = false
                         editError = null
