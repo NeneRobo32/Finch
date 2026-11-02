@@ -5,6 +5,12 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
@@ -21,24 +27,27 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import dev.cao.finch.TimeFormatter
 import dev.cao.finch.data.PlaySession
+import dev.cao.finch.data.SessionTags
+import dev.cao.finch.ui.design.FinchChip
 import dev.cao.finch.ui.design.FinchDialog
 import dev.cao.finch.ui.design.FinchIconButton
 import dev.cao.finch.ui.design.FinchSpace
+import dev.cao.finch.ui.design.FinchTextField
 import java.time.Duration
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
 
 /**
- * 会话起止编辑框（详情页与记录页共用）：
- * 日期 + 开始/结束输入；结束早于开始按跨夜自动 +1 天；解析失败静默不提交。
+ * 会话编辑框（详情页与记录页共用）：
+ * 日期 + 开始/结束输入 + 标签（v0.19）；结束早于开始按跨夜自动 +1 天；解析失败静默不提交。
  */
 @Composable
 internal fun SessionEditDialog(
     session: PlaySession,
     error: String?,
     onDismiss: () -> Unit,
-    onConfirm: (start: LocalDateTime, end: LocalDateTime) -> Unit,
+    onConfirm: (start: LocalDateTime, end: LocalDateTime, tag: String?) -> Unit,
 ) {
     val dateFmt = TimeFormatter.DATE_YMD
     val timeFmt = TimeFormatter.TIME_HM
@@ -47,6 +56,7 @@ internal fun SessionEditDialog(
     var endField by remember(session.id) {
         mutableStateOf(session.endTime?.format(timeFmt) ?: session.startTime.format(timeFmt))
     }
+    var tag by remember(session.id) { mutableStateOf(session.tag) }
     FinchDialog(
         title = "编辑记录",
         subtitle = "结束时间早于开始时间会按跨夜处理。",
@@ -61,7 +71,7 @@ internal fun SessionEditDialog(
                 var s = LocalDateTime.of(date, start)
                 var e = LocalDateTime.of(date, end)
                 if (e.isBefore(s)) e = e.plusDays(1) // 跨夜
-                onConfirm(s, e)
+                onConfirm(s, e, SessionTags.normalize(tag))
             }
             // 格式错误静默不提交（与原两份副本行为一致）
         },
@@ -71,6 +81,8 @@ internal fun SessionEditDialog(
             startField = startField, onStartChange = { startField = it },
             endField = endField, onEndChange = { endField = it },
         )
+        Spacer(Modifier.height(FinchSpace.md))
+        TagPicker(selected = tag, onSelect = { tag = it })
         if (error != null) {
             Column(Modifier.padding(top = FinchSpace.sm)) {
                 Text(error, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
@@ -79,7 +91,54 @@ internal fun SessionEditDialog(
     }
 }
 
-/** 单条游玩记录：起止时间 + 时长（扣暂停） + 编辑 + 删除（详情页列表用） */
+/**
+ * 标签选择（v0.19）：预设四档 + 清空；再点一次同一档即取消（回到未分类）。
+ * 想写别的就点「自定义」在下方输入框里打字。
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+internal fun TagPicker(
+    selected: String?,
+    onSelect: (String?) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val isCustom = selected != null && selected !in SessionTags.PRESETS
+    Column(modifier.fillMaxWidth()) {
+        Text(
+            "标签",
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(FinchSpace.xs))
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(FinchSpace.xs),
+            verticalArrangement = Arrangement.spacedBy(FinchSpace.xs),
+        ) {
+            FinchChip(
+                label = "未分类",
+                selected = selected == null,
+                onClick = { onSelect(null) },
+            )
+            SessionTags.PRESETS.forEach { preset ->
+                FinchChip(
+                    label = preset,
+                    selected = selected == preset,
+                    onClick = { onSelect(if (selected == preset) null else preset) },
+                )
+            }
+        }
+        Spacer(Modifier.height(FinchSpace.sm))
+        FinchTextField(
+            value = if (isCustom) selected ?: "" else "",
+            onValueChange = { onSelect(SessionTags.normalize(it)) },
+            label = "自定义标签",
+            placeholder = if (isCustom) null else "想写别的就填这里",
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
+}
+
+/** 单条游玩记录：起止时间 + 时长（扣暂停） + 标签 + 编辑 + 删除（详情页列表用） */
 @Composable
 internal fun SessionRow(s: PlaySession, onDelete: () -> Unit, onEdit: () -> Unit) {
     val end = s.endTime ?: return
@@ -96,11 +155,21 @@ internal fun SessionRow(s: PlaySession, onDelete: () -> Unit, onEdit: () -> Unit
                 style = MaterialTheme.typography.bodyMedium,
                 fontWeight = FontWeight.Medium,
             )
-            Text(
-                "时长 ${TimeFormatter.hoursMinutes(Duration.ofMillis(s.effectiveMillis()))}",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "时长 ${TimeFormatter.hoursMinutes(Duration.ofMillis(s.effectiveMillis()))}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (s.tag != null) {
+                    Spacer(Modifier.width(FinchSpace.xs))
+                    Text(
+                        "· ${s.tag}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
+            }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(FinchSpace.xxs), verticalAlignment = Alignment.CenterVertically) {
             FinchIconButton(

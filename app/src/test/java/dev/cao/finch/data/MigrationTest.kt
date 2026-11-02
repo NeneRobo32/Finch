@@ -26,7 +26,7 @@ import org.robolectric.annotation.SQLiteMode
  * Room 挂全量 MIGRATION_* 打开（Room 自带 schema 校验，迁移 SQL 与实体不一致会抛
  * IllegalStateException —— v0.15.0 的启动闪退就是这么炸的）→ 断言样例数据保留、列值正确。
  *
- * 覆盖起始版本 7..18 逐版升到 FINCH_DB_VERSION=19。
+ * 覆盖起始版本 7..19 逐版升到 FINCH_DB_VERSION=20。
  * 1..6 无 schema JSON（schemas 从 7 起入库），无法起测，已在报告注明。
  */
 @RunWith(RobolectricTestRunner::class)
@@ -87,6 +87,47 @@ class MigrationTest {
 
     @Test
     fun `v18升级到当前_数据保留`() = checkFrom(18)
+
+    @Test
+    fun `v19升级到当前_数据保留`() = checkFrom(19)
+
+    // ---- 专项：19→20 会话标签列 ----
+
+    @Test
+    fun `v19到20_tag列加入_老会话为null_可写入标签`() {
+        createOldDb(19)
+        val room = openWithMigrations()
+        try {
+            val db = room.openHelper.writableDatabase
+            var hasTag = false
+            var tagDefault: String? = null
+            db.query("PRAGMA table_info(`play_sessions`)").use { c ->
+                val nameIdx = c.getColumnIndex("name")
+                val dfltIdx = c.getColumnIndex("dflt_value")
+                while (c.moveToNext()) {
+                    if (c.getString(nameIdx) == "tag") {
+                        hasTag = true
+                        tagDefault = if (c.isNull(dfltIdx)) null else c.getString(dfltIdx)
+                    }
+                }
+            }
+            assertTrue("v0.19 起 play_sessions 应有 tag 列", hasTag)
+            // 没有 DEFAULT：老会话静默为 null = 未分类，不猜用户当年在跑哪条线
+            assertEquals(null, tagDefault)
+            runBlocking {
+                val sessions = room.sessionDao()
+                // 老会话的标签为空
+                assertEquals(null, sessions.byId(1L)!!.tag)
+                // 打标后能读回；清空也能读回 null
+                sessions.updateTag(1L, SessionTags.SIDE)
+                assertEquals(SessionTags.SIDE, sessions.byId(1L)!!.tag)
+                sessions.updateTag(1L, null)
+                assertEquals(null, sessions.byId(1L)!!.tag)
+            }
+        } finally {
+            room.close()
+        }
+    }
 
     // ---- 专项：18→19 删掉推算会话并移除 estimated 列 ----
 
@@ -175,8 +216,8 @@ class MigrationTest {
     }
 
     @Test
-    fun `新装库直接建v19_可正常读写`() {
-        // 无旧文件：Room 直接按实体建 v19（与迁移结果同构是 Room 校验口径统一的前提）
+    fun `新装库直接建v20_可正常读写`() {
+        // 无旧文件：Room 直接按实体建 v20（与迁移结果同构是 Room 校验口径统一的前提）
         val room = openWithMigrations()
         try {
             runBlocking {

@@ -94,6 +94,38 @@ interface SessionDao {
     @Query("SELECT * FROM play_sessions WHERE id = :id")
     suspend fun byId(id: Long): PlaySession?
 
+    /** 只改标签（v0.19）：记录页/详情页快速打标，不碰起止时间 */
+    @Query("UPDATE play_sessions SET tag = :tag WHERE id = :id")
+    suspend fun updateTag(id: Long, tag: String?)
+
+    /** 区间内按标签聚合（v0.19 统计页标签分布；null 归到「未分类」，由 UI 兜底） */
+    @Query(
+        """
+        SELECT COALESCE(tag, '') AS tag,
+               SUM(MAX(0, endTime - startTime - COALESCE(pauseAccumMs, 0))) AS totalMs,
+               COUNT(*) AS sessionCount
+        FROM play_sessions
+        WHERE endTime IS NOT NULL AND startTime >= :fromMillis AND startTime < :toMillis
+        GROUP BY COALESCE(tag, '')
+        ORDER BY totalMs DESC
+        """
+    )
+    fun observeTagTotals(fromMillis: Long, toMillis: Long): Flow<List<TagTotal>>
+
+    /** 某游戏按标签聚合（详情页标签筛选条用，时间范围不限；null 归「未分类」） */
+    @Query(
+        """
+        SELECT COALESCE(tag, '') AS tag,
+               SUM(MAX(0, endTime - startTime - COALESCE(pauseAccumMs, 0))) AS totalMs,
+               COUNT(*) AS sessionCount
+        FROM play_sessions
+        WHERE gameId = :gameId AND endTime IS NOT NULL
+        GROUP BY COALESCE(tag, '')
+        ORDER BY totalMs DESC
+        """
+    )
+    fun observeTagTotalsForGame(gameId: Long): Flow<List<TagTotal>>
+
     /** 每款游戏的已完成会话累计（扣暂停），主页按总时长排序用 */
     @Query(
         "SELECT gameId, SUM(MAX(0, endTime - startTime - COALESCE(pauseAccumMs, 0))) AS totalMs " +

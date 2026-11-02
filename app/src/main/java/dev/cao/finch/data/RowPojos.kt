@@ -55,3 +55,10 @@ data class BucketTotal(
     val bucket: Int,
     val totalMs: Long?,
 )
+
+/** 标签聚合（v0.19）：tag 空串 = 未分类 */
+data class TagTotal(
+    val tag: String,
+    val totalMs: Long,
+    val sessionCount: Long,
+)

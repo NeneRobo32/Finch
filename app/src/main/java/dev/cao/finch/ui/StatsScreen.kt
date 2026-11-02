@@ -63,9 +63,11 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import dev.cao.finch.FinchApp
 import dev.cao.finch.TimeFormatter
 import dev.cao.finch.data.DailyTotal
 import dev.cao.finch.data.PlatformTotal
+import dev.cao.finch.data.TagTotal
 import dev.cao.finch.data.TopGameRow
 import dev.cao.finch.ui.design.FinchCard
 import dev.cao.finch.ui.design.FinchHeader
@@ -140,6 +142,12 @@ fun StatsScreen(viewModel: FinchViewModel) {
         .collectAsState(initial = emptyList())
     val hours by remember(fromMillis, toMillis) { viewModel.hourTotals(fromMillis, toMillis) }
         .collectAsState(initial = emptyList())
+    // v0.19：标签分布（null 归「未分类」）与时长目标（纯配置，导入页设置）
+    val tags by remember(fromMillis, toMillis) { viewModel.tagTotals(fromMillis, toMillis) }
+        .collectAsState(initial = emptyList())
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val store = remember(context) { (context.applicationContext as FinchApp).settings }
+    val goalMin = if (mode == StatsMode.MONTH) store.monthGoalMin else store.yearGoalMin
     var shareRequest by remember { mutableStateOf(false) }
     // 配置感知的资源读取：不在 LaunchedEffect 里用 LocalContext.getString（Configuration 变化会拿到旧值）
     val shareChooserTitle = stringResource(dev.cao.finch.R.string.share_chooser_title)
@@ -239,9 +247,10 @@ fun StatsScreen(viewModel: FinchViewModel) {
             }
         }
 
-        item { HeroTotalCard(total, prevTotal, steamMin, mode) }
+        item { HeroTotalCard(total, prevTotal, steamMin, mode, goalMin) }
 
         if (total > 0) item { MonthReportCard(distinctGames, daily, topGames, mode) }
+        if (tags.isNotEmpty()) item { TagDistributionCard(tags, total) }
         if (daily.isNotEmpty()) {
             item { HeatmapCard(daily = daily, mode = mode, anchorMonth = anchorMonth) }
         }
@@ -253,7 +262,6 @@ fun StatsScreen(viewModel: FinchViewModel) {
 
     // 战报分享：本期关键数字拼文本走系统分享（图片模板后续再做）
     if (shareRequest) {
-        val context = androidx.compose.ui.platform.LocalContext.current
         androidx.compose.runtime.LaunchedEffect(Unit) {
             val top = topGames.firstOrNull()
             val text = buildString {
@@ -268,6 +276,11 @@ fun StatsScreen(viewModel: FinchViewModel) {
                 val best = daily.maxByOrNull { it.totalMs }
                 if (best != null && best.totalMs > 0) {
                     append("最高产 ${best.day} · ${TimeFormatter.hoursMinutes(Duration.ofMillis(best.totalMs))}")
+                }
+                val mainTag = tags.firstOrNull { it.tag.isNotEmpty() }
+                if (mainTag != null && mainTag.totalMs > 0) {
+                    append("\\n")
+                    append("主打「${mainTag.tag}」· ${TimeFormatter.hoursMinutes(Duration.ofMillis(mainTag.totalMs))}")
                 }
             }
             val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
@@ -287,7 +300,7 @@ fun StatsScreen(viewModel: FinchViewModel) {
 
 /** 渐变 hero：总时长 + 环比 + Steam 终身时长 */
 @Composable
-private fun HeroTotalCard(totalMs: Long, prevMs: Long, steamMin: Long, mode: StatsMode) {
+private fun HeroTotalCard(totalMs: Long, prevMs: Long, steamMin: Long, mode: StatsMode, goalMin: Long) {
     val scheme = MaterialTheme.colorScheme
     val shape = FinchShapes.hero
     val delta = if (prevMs > 0) (totalMs - prevMs) * 100.0 / prevMs else null
@@ -357,6 +370,41 @@ private fun HeroTotalCard(totalMs: Long, prevMs: Long, steamMin: Long, mode: Sta
                 )
             }
             Column {
+                // v0.19 时长目标：导入页设了目标才显示（0 = 不设）
+                if (goalMin > 0) {
+                    val frac = (totalMs.toDouble() / (goalMin * 60_000.0)).coerceIn(0.0, 1.0).toFloat()
+                    val goalTxt = TimeFormatter.hoursMinutes(Duration.ofMinutes(goalMin))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            if (frac >= 1f) "已达成目标 $goalTxt" else "目标 $goalTxt · 还差 ${TimeFormatter.hoursMinutes(Duration.ofMillis((goalMin * 60_000L - totalMs).coerceAtLeast(0L)))}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color.White.copy(alpha = 0.92f),
+                        )
+                        Spacer(Modifier.width(FinchSpace.sm))
+                        Text(
+                            "${(frac * 100).roundToInt()}%",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Color.White,
+                        )
+                    }
+                    Spacer(Modifier.height(FinchSpace.xs))
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .height(6.dp)
+                            .clip(FinchShapes.pill)
+                            .background(Color.White.copy(alpha = 0.24f)),
+                    ) {
+                        Box(
+                            Modifier
+                                .fillMaxHeight()
+                                .fillMaxWidth(frac)
+                                .clip(FinchShapes.pill)
+                                .background(Color.White.copy(alpha = 0.92f)),
+                        )
+                    }
+                }
                 if (totalMs > 0) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         if (delta != null) {
@@ -513,6 +561,72 @@ private fun PlatformCard(platforms: List<PlatformTotal>, totalMs: Long) {
                     textAlign = TextAlign.End,
                 )
             }
+        }
+    }
+}
+
+/** 标签分布（v0.19）：按标签聚合本期时长，未打标的归「未分类」 */
+@Composable
+private fun TagDistributionCard(tags: List<TagTotal>, totalMs: Long) {
+    val shown = tags.take(5)
+    FinchCard(title = "标签分布", icon = Icons.Filled.Leaderboard) {
+        if (tags.all { it.tag.isEmpty() }) {
+            Text(
+                "这些记录还没打标签。在「记录」页点一条记录，选主线 / 支线 / 联机 / 多周目，这里就会有分布。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            return@FinchCard
+        }
+        shown.forEach { t ->
+            val frac = if (totalMs > 0) (t.totalMs.toFloat() / totalMs).coerceIn(0f, 1f) else 0f
+            Column(Modifier.padding(vertical = 3.dp)) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        if (t.tag.isEmpty()) "未分类" else t.tag,
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Text(
+                        TimeFormatter.hoursMinutes(Duration.ofMillis(t.totalMs)),
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Medium,
+                    )
+                    Spacer(Modifier.width(FinchSpace.sm))
+                    Text(
+                        "${(frac * 100).roundToInt()}% · ${t.sessionCount} 条",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Spacer(Modifier.height(4.dp))
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .height(6.dp)
+                        .clip(FinchShapes.pill)
+                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)),
+                ) {
+                    Box(
+                        Modifier
+                            .fillMaxHeight()
+                            .fillMaxWidth(frac)
+                            .clip(FinchShapes.pill)
+                            .background(
+                                if (t.tag.isEmpty()) MaterialTheme.colorScheme.outline
+                                else MaterialTheme.colorScheme.primary
+                            ),
+                    )
+                }
+            }
+        }
+        if (tags.size > shown.size) {
+            Spacer(Modifier.height(FinchSpace.xs))
+            Text(
+                "还有 ${tags.size - shown.size} 个标签未显示",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }

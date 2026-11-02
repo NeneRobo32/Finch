@@ -82,6 +82,18 @@ class SettingsStore(context: Context) {
         get() = sp.getString(KEY_FINCH_THEME, "jingying") ?: "jingying"
         set(value) = sp.edit().putString(KEY_FINCH_THEME, value).apply()
 
+    /**
+     * 时长目标（v0.19，纯配置不进 DB）：
+     * 月目标分钟数 / 年目标分钟数，0 = 未设置（总结页不显示进度环）。
+     */
+    var monthGoalMin: Long
+        get() = sp.getLong(KEY_MONTH_GOAL, 0L)
+        set(value) = sp.edit().putLong(KEY_MONTH_GOAL, value.coerceAtLeast(0L)).apply()
+
+    var yearGoalMin: Long
+        get() = sp.getLong(KEY_YEAR_GOAL, 0L)
+        set(value) = sp.edit().putLong(KEY_YEAR_GOAL, value.coerceAtLeast(0L)).apply()
+
     // ---- 凭据加解密（F.1，对调用方透明）----
 
     /** 读凭据：密文解密；旧版明文原样返回并顺手加密回写（惰性迁移）。
@@ -130,6 +142,8 @@ class SettingsStore(context: Context) {
         private const val KEY_HLTB_ONLINE = "hltb_online_enabled"
         private const val KEY_THEME_MODE = "theme_mode"
         private const val KEY_FINCH_THEME = "finch_theme"
+        private const val KEY_MONTH_GOAL = "month_goal_min"
+        private const val KEY_YEAR_GOAL = "year_goal_min"
         const val DEFAULT_BASE = "https://api.steampowered.com"
         const val THEME_SYSTEM = "system"
         const val THEME_LIGHT = "light"

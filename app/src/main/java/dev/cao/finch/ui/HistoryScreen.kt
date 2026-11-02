@@ -1,6 +1,7 @@
 package dev.cao.finch.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -15,6 +16,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
@@ -40,6 +42,7 @@ import androidx.compose.ui.unit.dp
 import dev.cao.finch.TimeFormatter
 import dev.cao.finch.data.SessionWithGame
 import dev.cao.finch.ui.design.FinchBadge
+import dev.cao.finch.ui.design.FinchChip
 import dev.cao.finch.ui.design.FinchConfirmDialog
 import dev.cao.finch.ui.design.FinchEmptyState
 import dev.cao.finch.ui.design.FinchHeader
@@ -66,7 +69,26 @@ import kotlinx.coroutines.launch
  */
 @Composable
 fun HistoryScreen(viewModel: FinchViewModel) {
-    val sessions by viewModel.recentSessions.collectAsState()
+    val allSessions by viewModel.recentSessions.collectAsState()
+
+    // v0.19 标签筛选：null = 全部；SessionTags.UNCATEGORIZED_MARK 代表「未分类」（tag == null）
+    var tagFilter by remember { mutableStateOf<String?>(null) }
+
+    // 筛选条只列出当前数据里真实出现过的标签（含「未分类」），避免空标签占位
+    val presentTags = remember(allSessions) {
+        val tags = allSessions.mapNotNull { it.session.tag }.distinct().sorted()
+        tags + if (allSessions.any { it.session.tag == null }) listOf(UNCATEGORIZED) else emptyList()
+    }
+    // 选中的标签被删空后自动回到「全部」
+    if (tagFilter != null && tagFilter !in presentTags) tagFilter = null
+
+    val sessions = remember(allSessions, tagFilter) {
+        when (tagFilter) {
+            null -> allSessions
+            UNCATEGORIZED -> allSessions.filter { it.session.tag == null }
+            else -> allSessions.filter { it.session.tag == tagFilter }
+        }
+    }
 
     // 有进行中的会话时每秒刷新一次“现在”，时长才会实时走（原来只在重组时算一次）
     var now by remember { mutableStateOf(LocalDateTime.now()) }
@@ -93,16 +115,33 @@ fun HistoryScreen(viewModel: FinchViewModel) {
         Spacer(Modifier.height(FinchSpace.sm))
         FinchHeader(
             title = "记录",
-            subtitle = if (sessions.isEmpty()) "最近 300 条游玩会话" else "最近 ${sessions.size} 条 · 按天分组",
+            subtitle = when {
+                allSessions.isEmpty() -> "最近 300 条游玩会话"
+                tagFilter != null -> "筛选「${if (tagFilter == UNCATEGORIZED) "未分类" else tagFilter}」· ${sessions.size} 条"
+                else -> "最近 ${sessions.size} 条 · 按天分组"
+            },
         )
         Spacer(Modifier.height(FinchSpace.md))
+
+        if (presentTags.isNotEmpty()) {
+            TagFilterRow(
+                tags = presentTags,
+                selected = tagFilter,
+                onSelect = { tagFilter = it },
+            )
+            Spacer(Modifier.height(FinchSpace.sm))
+        }
 
         if (sessions.isEmpty()) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
                 FinchEmptyState(
                     icon = Icons.Filled.History,
-                    title = "还没有游玩记录",
-                    message = "去「主页」点开一个游戏，按「开玩」开始计时，记录会自动出现在这里。",
+                    title = if (allSessions.isEmpty()) "还没有游玩记录" else "这个标签下没有记录",
+                    message = if (allSessions.isEmpty()) {
+                        "去「主页」点开一个游戏，按「开玩」开始计时，记录会自动出现在这里。"
+                    } else {
+                        "换一个标签，或点「全部」看所有记录。"
+                    },
                 )
             }
         } else {
@@ -129,6 +168,33 @@ fun HistoryScreen(viewModel: FinchViewModel) {
                     }
                 }
             }
+        }
+    }
+}
+
+/** 「未分类」在筛选条里的哨兵值（真实标签不会等于它） */
+private const val UNCATEGORIZED = "\u0000未分类"
+
+/** 标签筛选条：全部 + 数据里出现过的标签，横向可滚 */
+@Composable
+private fun TagFilterRow(
+    tags: List<String>,
+    selected: String?,
+    onSelect: (String?) -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(FinchSpace.xs),
+    ) {
+        FinchChip(label = "全部", selected = selected == null, onClick = { onSelect(null) })
+        tags.forEach { tag ->
+            FinchChip(
+                label = if (tag == UNCATEGORIZED) "未分类" else tag,
+                selected = selected == tag,
+                onClick = { onSelect(if (selected == tag) null else tag) },
+            )
         }
     }
 }
@@ -209,11 +275,17 @@ private fun SessionCard(
                         )
                     }
                 }
-                Text(
-                    TimeFormatter.range(s.startTime, s.endTime ?: now ?: s.startTime),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        TimeFormatter.range(s.startTime, s.endTime ?: now ?: s.startTime),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    if (s.tag != null) {
+                        Spacer(Modifier.width(FinchSpace.xs))
+                        FinchBadge(text = s.tag, tint = MaterialTheme.colorScheme.primary)
+                    }
+                }
             }
             Text(
                 if (running) TimeFormatter.hms(duration) else TimeFormatter.hoursMinutes(duration),
@@ -239,9 +311,9 @@ private fun SessionCard(
             session = s,
             error = editError,
             onDismiss = { showEdit = false; editError = null },
-            onConfirm = { start, end ->
+            onConfirm = { start, end, tag ->
                 scope.launch {
-                    val r = viewModel.updateSessionTimes(s.id, start, end)
+                    val r = viewModel.updateSessionTimes(s.id, start, end, tag)
                     if (r.isSuccess) {
                         showEdit = false
                         editError = null

@@ -1,8 +1,8 @@
 # Finch 路线图
 
-基线：`v0.18.8`（DB v19，versionCode 85）。
+基线：`v0.19.0`（DB v20，versionCode 86）。
 IGDB 已整体移除（国内直连不通）；HLTB 改走 Crashdummy 中转 API（Steam 直查+Nlib 英文名+按名搜，默认开、可一键关）；非英文库名走英文名解析链换英文线索再搜（Steam 中文反查/Bangumi 原名/eShop 英文段/游民星空/机翻已移除，v0.15.15–0.15.18）。
-下阶段主题：**让记录更细 → 让表达更强**（v0.19 候选，见文末）。
+下阶段主题：**让回顾更深 → 让分享更强**（v0.20 年度报告/backlog 漏斗，见文末）。
 
 ## 规划原则
 
@@ -39,6 +39,7 @@ IGDB 已整体移除（国内直连不通）；HLTB 改走 Crashdummy 中转 API
 | v0.18.6 ✅热修 | 本月时长修正 | 推算的历史会话加 `estimated` 标记（DB 18），本月/今年/热力图/作息/平台/Top 等区间统计一律排除；锚点改到上个月末之前、上限 400 天；旧云端来源会话迁移回标 | 17→18 | 无 |
 | v0.18.7 ✅热修 | 底栏透明玻璃 | 内容层单独挂 `contentBackdrop`，底栏采样源改为「氛围光 ＋ 内容层」合成，真正透出滚动内容；遮罩 alpha 0.34/0.46 → 0.18/0.26 | 不变 | 无 |
 | v0.18.8 ✅热修 | 记录只存真实 | 删掉「按官方累计差额摊历史会话」的对账逻辑与推算行，`play_sessions.estimated` 列移除（DB 19）；同步只写真实新增，首次同步仅落基线；详情页显示「本地记录 X · 差额 Y」；底栏去 vibrancy＋blur 8→3dp | 18→19 | 无 |
+| v0.19 ✅已交付 | 记录更细 | 会话标签（主线/支线/联机/多周目/自定义）＋记录页胶囊筛选＋总结页标签分布；时长目标（月/年，设置页可填，Hero 卡出进度）；海报拆到 v0.21 | 19→20 | 无 |
 | 远期 / 明确不做 | — | WebDAV 同步（可选）；前台自动识别、账号云同步、国际化明确不做 | — | — |
 
 ```mermaid
@@ -159,15 +160,16 @@ gantt
 - **实测修正（2026-10-26，v0.18.1）**：`trophyTitles` 概要接口实测**不含 npTitleId**（0/8），PS 行名字兜底又遇「合集 vs 单作重制」对不上 → v0.17.0 线上实际未写入任何奖杯；改为 `/trophy/v1/users/me/titles/trophyTitles?npTitleIds=`（每批 ≤5，实测 6 个报 400）按 `games.psnTitleId` 精确归认，多奖杯集四围求和、完成度按已获得/总数折算。
 - **工作量**：M（约 2 周，PSN 接口实测是风险点）。
 
-## v0.19 —— 记录粒度（DB 17→18，候选待拍板）
+## v0.19 ✅ 已交付 —— 记录粒度（DB 19→20）
 
-**为什么**：现在一条会话只有时长，「主线/联机/多周目」分不开，是记录粒度的最后一块短板；图片海报是 v0.14 文本战报欠下的自然延伸。
+会话标签与时长目标落地；图片海报拆到 v0.21 单独做（需要 FileProvider，单独一版更干净）。
 
-- **会话标签/备注**：`play_sessions` 加 `tag TEXT`（MIGRATION_17_18，主线/支线/联机/多周目/自定义）；记录页/详情页按标签筛选，统计页出标签分布
-- **时长目标**：`SettingsStore` 加年度/月度目标，总结页进度环（纯配置无 DB）
-- **战报图片海报 v1**：Hero 卡＋热力图＋Top1 拼 Bitmap 走 ShareSheet（静态拼图）
-- **验收**：标签升级迁移老会话不丢；`schemas/18.json` 入库；海报深浅主题都不糊
-- **工作量**：M（约 2 周）
+- ✅ **会话标签**：`play_sessions.tag TEXT`（`MIGRATION_19_20`，主线/支线/联机/多周目/自定义，null = 未分类）；记录页顶部胶囊筛选、编辑弹窗内打标、详情页同步可改
+- ✅ **标签分布**：总结页「标签分布」卡（本期时长＋条数＋占比条），战报文本带主打标签
+- ✅ **时长目标**：`SettingsStore.monthGoalMin / yearGoalMin`（纯配置无 DB），设置页可填可清，总结页 Hero 卡出进度与百分比
+- ⏭ **战报图片海报 v1**：改到 v0.21（与分享增强同批，需 `FileProvider`）
+- **验收**：`schemas/20.json` 入库；标签升级迁移老会话不丢；单测 5+1 新增全绿
+- **工作量**：M（约 2 周）→ 实际一轮完成
 
 ---
 
@@ -187,6 +189,7 @@ gantt
 | 17 | v0.17.0（已交付） | `games` 加奖杯 6 列（`trophyPlatinum/Gold/Silver/Bronze/Progress/UpdatedAt`）；`MIGRATION_12_13` 补建 `index_release_follows_key`（v12 新装库升级崩溃修复） |
 | 18 | v0.18.6（已交付） | `play_sessions.estimated`（0=真实/1=云端对账摊出的推算历史）；`MIGRATION_17_18` 回标旧 STEAM/SWITCH/PS 会话为估算，区间统计加 `estimated = 0` 过滤 |
 | 19 | v0.18.8（已交付） | 移除 `play_sessions.estimated`（`MIGRATION_18_19` 先 `DELETE ... WHERE estimated = 1` 清推算行，再重建表去列）；取消「按官方累计差额摊历史会话」，记录只存真实会话 |
+| 20 | v0.19.0（已交付） | `play_sessions.tag TEXT`（`MIGRATION_19_20`，无 DEFAULT；null = 未分类）；会话标签 + 记录页筛选 + 总结页标签分布；时长目标走 SettingsStore 不动 DB |
 
 备份恢复逻辑（`BackupManager.validate()`）按 `FINCH_DB_VERSION` 校验，跨版恢复走 Room 自动迁移，老备份可读。
 

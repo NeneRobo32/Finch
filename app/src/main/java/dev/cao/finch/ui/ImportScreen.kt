@@ -31,6 +31,7 @@ import androidx.compose.material.icons.filled.Computer
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.EditNote
 import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material.icons.filled.Flag
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.SportsEsports
@@ -323,6 +324,9 @@ fun ImportScreen(
         Spacer(Modifier.height(FinchSpace.md))
         SwitchImportCard(importViewModel)
         Spacer(Modifier.height(FinchSpace.xl))
+        FinchSectionTitle("时长目标")
+        GoalCard()
+        Spacer(Modifier.height(FinchSpace.xl))
         FinchSectionTitle("数据安全")
         BackupCard(importViewModel)
         Spacer(Modifier.height(FinchSpace.xl))
@@ -437,6 +441,66 @@ private fun HltbOnlineRow() {
         )
     }
 }
+
+/** 时长目标（v0.19）：月/年目标小时数，写 SettingsStore（纯配置不进 DB），总结页显示进度 */
+@Composable
+private fun GoalCard() {
+    val context = LocalContext.current
+    val store = remember { (context.applicationContext as dev.cao.finch.FinchApp).settings }
+    var monthField by remember { mutableStateOf(store.monthGoalMin.toHoursText()) }
+    var yearField by remember { mutableStateOf(store.yearGoalMin.toHoursText()) }
+    FinchCard(title = "时长目标", icon = Icons.Filled.Flag) {
+        Text(
+            "填 0 或留空 = 不设目标。设了之后总结页顶部会出现本月/本年进度。",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(FinchSpace.sm))
+        Row(horizontalArrangement = Arrangement.spacedBy(FinchSpace.sm)) {
+            FinchTextField(
+                value = monthField,
+                onValueChange = { monthField = it },
+                label = "每月目标（小时）",
+                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                    keyboardType = androidx.compose.ui.text.input.KeyboardType.Number,
+                ),
+                modifier = Modifier.weight(1f),
+            )
+            FinchTextField(
+                value = yearField,
+                onValueChange = { yearField = it },
+                label = "每年目标（小时）",
+                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                    keyboardType = androidx.compose.ui.text.input.KeyboardType.Number,
+                ),
+                modifier = Modifier.weight(1f),
+            )
+        }
+        Spacer(Modifier.height(FinchSpace.sm))
+        Row(horizontalArrangement = Arrangement.spacedBy(FinchSpace.sm)) {
+            FinchButton(
+                text = "保存目标",
+                onClick = {
+                    store.monthGoalMin = monthField.trim().toLongOrNull()?.times(60) ?: 0L
+                    store.yearGoalMin = yearField.trim().toLongOrNull()?.times(60) ?: 0L
+                },
+            )
+            FinchButton(
+                text = "清空",
+                variant = FinchButtonVariant.Glass,
+                onClick = {
+                    monthField = ""
+                    yearField = ""
+                    store.monthGoalMin = 0L
+                    store.yearGoalMin = 0L
+                },
+            )
+        }
+    }
+}
+
+/** 分钟数 → 输入框里的小时文本（0 显示空） */
+private fun Long.toHoursText(): String = if (this <= 0) "" else (this / 60).toString()
 
 /** PSN 导入卡片（gamelist 官方总时长：npsso 授权 → 快照差分写会话） */
 @Composable

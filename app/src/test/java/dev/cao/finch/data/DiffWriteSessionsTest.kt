@@ -55,7 +55,13 @@ class DiffWriteSessionsTest {
         override suspend fun fixFutureSessions(nowMillis: Long): Unit = TODO()
         override fun observeRunning(): Flow<PlaySession?> = TODO()
         override suspend fun running(): PlaySession? = TODO()
-        override suspend fun byId(id: Long): PlaySession? = TODO()
+        override suspend fun byId(id: Long): PlaySession? = rows.firstOrNull { it.id == id }
+        override suspend fun updateTag(id: Long, tag: String?) {
+            val i = rows.indexOfFirst { it.id == id }
+            if (i >= 0) rows[i] = rows[i].copy(tag = tag)
+        }
+        override fun observeTagTotals(fromMillis: Long, toMillis: Long): Flow<List<TagTotal>> = TODO()
+        override fun observeTagTotalsForGame(gameId: Long): Flow<List<TagTotal>> = TODO()
         override fun observeTotalsAll(): Flow<List<GameTotalMini>> = TODO()
         override fun observeLastPlayedAll(): Flow<List<LastPlayedRow>> = TODO()
         override fun observeDistinctGamesInRange(fromMillis: Long, toMillis: Long): Flow<Int> = TODO()

@@ -9,6 +9,7 @@ import dev.cao.finch.data.Game
 import dev.cao.finch.data.GameStatsRow
 import dev.cao.finch.data.GameStatus
 import dev.cao.finch.data.SessionWithGame
+import dev.cao.finch.data.SessionTags
 import dev.cao.finch.data.SwitchTitleClient
 import dev.cao.finch.data.SyncEngine
 import dev.cao.finch.data.buildNameVariants
@@ -55,6 +56,12 @@ class FinchViewModel(app: Application) : AndroidViewModel(app) {
     fun platformTotals(fromMillis: Long, toMillis: Long) = sessionDao.observePlatformTotals(fromMillis, toMillis)
     fun topGamesWithCover(fromMillis: Long, toMillis: Long) = sessionDao.observeTopGamesWithCover(fromMillis, toMillis)
     fun steamTotalMinutes() = sessionDao.observeSteamTotalMinutes().map { it ?: 0L }
+
+    /** 区间内按标签聚合（v0.19 统计页标签分布卡） */
+    fun tagTotals(fromMillis: Long, toMillis: Long) = sessionDao.observeTagTotals(fromMillis, toMillis)
+
+    /** 单游戏按标签聚合（v0.19 详情页标签筛选条） */
+    fun tagTotalsForGame(gameId: Long) = sessionDao.observeTagTotalsForGame(gameId)
 
     fun deleteGame(id: Long) {
         viewModelScope.launch { gameDao.deleteById(id) }
@@ -141,13 +148,18 @@ class FinchViewModel(app: Application) : AndroidViewModel(app) {
         .map { rows -> rows.mapNotNull { r -> r.totalMs?.let { r.gameId to it } }.toMap() }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
 
-    /** 会话起止编辑（结束必须晚于开始；只允许改已完成会话） */
-    suspend fun updateSessionTimes(id: Long, start: LocalDateTime, end: LocalDateTime): Result<Unit> {
+    /** 会话起止编辑（结束必须晚于开始；只允许改已完成会话）；tag 一并写回（v0.19） */
+    suspend fun updateSessionTimes(
+        id: Long,
+        start: LocalDateTime,
+        end: LocalDateTime,
+        tag: String?,
+    ): Result<Unit> {
         if (!end.isAfter(start)) return Result.failure(IllegalArgumentException("结束时间需晚于开始时间"))
         val s = sessionDao.byId(id) ?: return Result.failure(IllegalArgumentException("记录不存在"))
         if (s.endTime == null) return Result.failure(IllegalArgumentException("进行中的会话不能改时间，先停止"))
         if (start.isAfter(LocalDateTime.now())) return Result.failure(IllegalArgumentException("开始时间不能在未来"))
-        sessionDao.update(s.copy(startTime = start, endTime = end))
+        sessionDao.update(s.copy(startTime = start, endTime = end, tag = SessionTags.normalize(tag)))
         return Result.success(Unit)
     }
 
@@ -180,6 +192,20 @@ class FinchViewModel(app: Application) : AndroidViewModel(app) {
     /** 联网获取开关（导入页可关；关闭后自动获取直接走手动） */
     fun setHltbOnline(enabled: Boolean) {
         settings.hltbOnlineEnabled = enabled
+    }
+
+    /** 给一条会话打标签/清标签（v0.19）：空串或 null = 未分类 */
+    fun setSessionTag(id: Long, tag: String?) {
+        viewModelScope.launch { sessionDao.updateTag(id, SessionTags.normalize(tag)) }
+    }
+
+    /** 时长目标（v0.19，纯配置）：0 = 不设目标 */
+    fun setMonthGoal(minutes: Long) {
+        settings.monthGoalMin = minutes
+    }
+
+    fun setYearGoal(minutes: Long) {
+        settings.yearGoalMin = minutes
     }
 
     /**
