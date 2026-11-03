@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  分享临时文件的暴露范围（v0.22 战报海报）：
+  只开 cacheDir/share/，海报 PNG 写在这里，分享/保存完即可丢弃。
+  不要开 cache-path 根目录，否则连 Coil 图片缓存也一起暴露了。
+-->
+<paths>
+    <cache-path name="share" path="share/" />
+</paths>

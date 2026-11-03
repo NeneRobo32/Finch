@@ -1,5 +1,6 @@
 package dev.cao.finch.ui
 
+import android.graphics.Bitmap
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateDpAsState
@@ -45,6 +46,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -76,6 +78,10 @@ import dev.cao.finch.ui.design.FinchInsetDivider
 import dev.cao.finch.ui.design.FinchSegmented
 import dev.cao.finch.ui.design.FinchSlider
 import dev.cao.finch.ui.design.FinchSpace
+import dev.cao.finch.ui.share.PosterPreviewDialog
+import dev.cao.finch.ui.share.PosterShare
+import dev.cao.finch.ui.share.ReportPoster
+import dev.cao.finch.ui.share.posterPalette
 import dev.cao.finch.ui.theme.FinchShapes
 import java.time.Duration
 import java.time.LocalDate
@@ -265,41 +271,33 @@ fun StatsScreen(viewModel: FinchViewModel) {
         if (topGames.isNotEmpty()) item { TopGamesCard(topGames) }
     }
 
-    // 战报分享：本期关键数字拼文本走系统分享（图片模板后续再做）
+    // 战报分享（v0.22）：不再拼文本，直接出手绘海报图。
+    // 封面先异步拉一次（只取前三），拉不到就由海报自己用主题色块兜底，不阻塞分享。
     if (shareRequest) {
-        androidx.compose.runtime.LaunchedEffect(Unit) {
-            val top = topGames.firstOrNull()
-            val text = buildString {
-                append(if (mode == StatsMode.MONTH) TimeFormatter.monthTitle(anchorMonth) else TimeFormatter.yearTitle(anchorMonth.year))
-                append("游戏战报 · Finch\n")
-                append("总时长 ${TimeFormatter.hoursMinutes(Duration.ofMillis(total))}")
-                if (distinctGames > 0) append(" · $distinctGames 款")
-                append("\n")
-                if (top != null) {
-                    append("玩得最多「${top.name}」· ${TimeFormatter.hoursMinutes(Duration.ofMillis(top.totalMs))}\n")
-                }
-                val best = daily.maxByOrNull { it.totalMs }
-                if (best != null && best.totalMs > 0) {
-                    append("最高产 ${best.day} · ${TimeFormatter.hoursMinutes(Duration.ofMillis(best.totalMs))}")
-                }
-                val mainTag = tags.firstOrNull { it.tag.isNotEmpty() }
-                if (mainTag != null && mainTag.totalMs > 0) {
-                    append("\\n")
-                    append("主打「${mainTag.tag}」· ${TimeFormatter.hoursMinutes(Duration.ofMillis(mainTag.totalMs))}")
-                }
-            }
-            val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
-                type = "text/plain"
-                putExtra(android.content.Intent.EXTRA_TEXT, text)
-            }
-            context.startActivity(
-                android.content.Intent.createChooser(
-                    intent,
-                    shareChooserTitle,
-                )
-            )
-            shareRequest = false
+        var covers by remember { mutableStateOf<Map<Long, Bitmap?>>(emptyMap()) }
+        LaunchedEffect(topGames) {
+            covers = PosterShare.loadCovers(context, topGames)
         }
+        PosterPreviewDialog(
+            data = ReportPoster.Data(
+                title = title,
+                periodLabel = if (mode == StatsMode.MONTH) "月度战报" else "年度战报",
+                totalMs = total,
+                prevMs = prevTotal,
+                distinctGames = distinctGames,
+                topGames = topGames,
+                daily = daily,
+                tags = tags,
+                goalMin = goalMin,
+                isYear = mode == StatsMode.YEAR,
+                year = anchorMonth.year,
+                month = anchorMonth.monthValue,
+                palette = posterPalette(),
+            ),
+            covers = covers,
+            chooserTitle = shareChooserTitle,
+            onDismiss = { shareRequest = false },
+        )
     }
 }
 
