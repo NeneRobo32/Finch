@@ -211,8 +211,14 @@ fun FinchStatTile(
     value: String,
     modifier: Modifier = Modifier,
     style: GlassStyle = GlassStyle.Tile,
+    enterOrder: Int = 0,
+    animateIn: Boolean = true,
 ) {
-    GlassSurface(modifier = modifier, style = style, shape = FinchShapes.tile) {
+    GlassSurface(
+        modifier = modifier.then(Modifier.finchEnter(order = enterOrder, enabled = animateIn)),
+        style = style,
+        shape = FinchShapes.tile,
+    ) {
         Column(
             Modifier
                 .fillMaxWidth()
@@ -247,11 +253,18 @@ fun FinchListRow(
     leading: (@Composable () -> Unit)? = null,
     trailing: (@Composable RowScope.() -> Unit)? = null,
     onClick: (() -> Unit)? = null,
+    enterOrder: Int? = null,
+    animateIn: Boolean = false,
 ) {
-    val base = if (onClick != null) {
-        modifier.finchClickable(onClick = onClick)
+    val animated = if (animateIn) {
+        modifier.then(Modifier.finchEnter(order = enterOrder ?: 0))
     } else {
         modifier
+    }
+    val base = if (onClick != null) {
+        animated.finchClickable(onClick = onClick)
+    } else {
+        animated
     }
     Row(
         base.fillMaxWidth().padding(vertical = FinchSpace.sm),
@@ -300,7 +313,7 @@ fun FinchEmptyState(
     actionLabel: String? = null,
     onAction: (() -> Unit)? = null,
 ) {
-    GlassSurface(modifier = modifier.fillMaxWidth()) {
+    GlassSurface(modifier = modifier.fillMaxWidth().then(Modifier.finchEnter())) {
         Column(
             Modifier
                 .fillMaxWidth()

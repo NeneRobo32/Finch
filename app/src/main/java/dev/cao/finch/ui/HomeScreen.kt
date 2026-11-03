@@ -90,6 +90,7 @@ import dev.cao.finch.ui.design.FinchTextField
 import dev.cao.finch.ui.design.GlassStyle
 import dev.cao.finch.ui.design.GlassSurface
 import dev.cao.finch.ui.design.finchClickable
+import dev.cao.finch.ui.design.finchEnter
 import dev.cao.finch.ui.theme.FinchShapes
 import java.time.LocalDate
 import java.time.LocalDateTime
@@ -528,7 +529,8 @@ private fun MonthHeroCard(top: TopGameRow?, monthTotal: Long) {
     GlassSurface(
         modifier = Modifier
             .fillMaxWidth()
-            .height(196.dp),
+            .height(196.dp)
+            .finchEnter(),
         style = GlassStyle.Hero,
         shape = FinchShapes.hero,
     ) {
@@ -663,7 +665,9 @@ private fun GameRowCard(
     var confirmDelete by remember { mutableStateOf(false) }
     val scheme = MaterialTheme.colorScheme
     GlassSurface(
-        modifier = Modifier.fillMaxWidth(),
+        // 滚动时新滑进视野的卡片同样播一次浮现（order=0 不叠延迟：
+        // 它们本来就是依次出现的，再加错开反而像卡顿）
+        modifier = Modifier.fillMaxWidth().finchEnter(),
         style = GlassStyle.Card,
         shape = FinchShapes.card,
         onClick = onClick,

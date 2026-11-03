@@ -59,6 +59,7 @@ import dev.cao.finch.ui.liquid.LiquidButton
 import dev.cao.finch.ui.liquid.LiquidSlider
 import dev.cao.finch.ui.liquid.LiquidToggle
 import dev.cao.finch.ui.theme.FinchShapes
+import dev.cao.finch.ui.theme.LocalGlassEnabled
 import dev.cao.finch.ui.theme.glassPalette
 
 /**
@@ -84,8 +85,9 @@ enum class FinchButtonVariant {
 /**
  * 内嵌平面玻璃：卡片 / 弹窗内部的次级控件（筛选胶囊、次级按钮、分段轨道）。
  *
- * 不做折射采样——嵌套玻璃会采到根背景而不是父卡片，视觉上像「挖了个洞」；
- * 这里改用半透明表面 + 细描边，色调与玻璃一致，同时省掉一层 RenderEffect。
+ * 玻璃化打开时真的做折射采样：卡片会把自己的玻璃层导出成 [LocalFinchBackdrop]，
+ * 所以这里的控件采到的是「父卡片的玻璃面」，折射区域对得上，不会像挖洞。
+ * 关闭时退回半透明表面 + 细描边，色调与玻璃一致，同时省掉一层 RenderEffect。
  */
 @Composable
 fun InsetSurface(
@@ -95,6 +97,17 @@ fun InsetSurface(
     onClick: (() -> Unit)? = null,
     content: @Composable BoxScope.() -> Unit,
 ) {
+    if (LocalGlassEnabled.current) {
+        GlassSurface(
+            modifier = modifier,
+            style = GlassStyle.Tile,
+            shape = shape,
+            enabled = enabled,
+            onClick = onClick,
+            content = content,
+        )
+        return
+    }
     val scheme = MaterialTheme.colorScheme
     Box(
         modifier
@@ -385,6 +398,9 @@ fun FinchTextField(
 ) {
     val scheme = MaterialTheme.colorScheme
     val glass = glassPalette()
+    // 玻璃化打开时输入框不再自己铺底色：让父卡片的玻璃面透上来，
+    // 只留一条更亮的边，视觉上是「刻在玻璃上」，而不是在玻璃上贴了块不透明色板。
+    val glassOn = LocalGlassEnabled.current
     OutlinedTextField(        value = value,
         onValueChange = onValueChange,
         modifier = modifier,
@@ -404,12 +420,20 @@ fun FinchTextField(
             focusedTextColor = scheme.onSurface,
             unfocusedTextColor = scheme.onSurface,
             disabledTextColor = scheme.onSurfaceVariant,
-            focusedContainerColor = Color.Transparent,
-            unfocusedContainerColor = scheme.surfaceVariant.copy(alpha = 0.35f),
+            focusedContainerColor = if (glassOn) scheme.surface.copy(alpha = 0.18f) else Color.Transparent,
+            unfocusedContainerColor = if (glassOn) {
+                scheme.surface.copy(alpha = 0.14f)
+            } else {
+                scheme.surfaceVariant.copy(alpha = 0.35f)
+            },
             disabledContainerColor = Color.Transparent,
             cursorColor = scheme.primary,
             focusedBorderColor = scheme.primary.copy(alpha = 0.85f),
-            unfocusedBorderColor = scheme.outline.copy(alpha = 0.55f),
+            unfocusedBorderColor = if (glassOn) {
+                glass.edge.copy(alpha = 0.42f)
+            } else {
+                scheme.outline.copy(alpha = 0.55f)
+            },
             disabledBorderColor = glass.edge.copy(alpha = 0.2f),
             focusedLabelColor = scheme.primary,
             unfocusedLabelColor = scheme.onSurfaceVariant,

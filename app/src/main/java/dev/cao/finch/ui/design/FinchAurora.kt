@@ -2,12 +2,14 @@ package dev.cao.finch.ui.design
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import dev.cao.finch.ui.theme.finchBundle
+import kotlin.random.Random
 
 /**
  * 全屏氛围背景（2026-10 UI 重构的视觉底子）。
@@ -23,6 +25,8 @@ fun FinchAurora(modifier: Modifier = Modifier) {
     val bundle = finchBundle()
     val ambient = bundle.ambient
     val dark = bundle.isDark
+    // 固定种子 → 每次重组画出来的一模一样，采样层不会跳
+    val grains = remember { buildGrains() }
 
     Canvas(modifier) {
         val w = size.width
@@ -42,6 +46,63 @@ fun FinchAurora(modifier: Modifier = Modifier) {
                 0.82f to Color.Transparent,
                 1f to (if (dark) Color.Black.copy(alpha = 0.28f) else Color.White.copy(alpha = 0.22f)),
             )
+        )
+
+        // 细微颗粒：透镜折射本质是把采样源的像素挪位，源如果是纯平滑渐变，
+        // 挪几个像素前后几乎没区别——玻璃就成了半透明色板。
+        // 这层颗粒提供高频细节，折射边缘才看得出来；它只有十几个灰阶，仍是静态绘制。
+        drawGrains(grains)
+    }
+}
+
+/**
+ * 一颗氛围颗粒。[radius] 与 [dx]/[dy] 都是屏幕宽的相对比例，
+ * 换算放到绘制时做，这样不同屏幕密度下颗粒大小观感一致。
+ */
+private class Grain(
+    val dx: Float,
+    val dy: Float,
+    val radius: Float,
+    val alpha: Float,
+    val light: Boolean,
+)
+
+private const val GRAIN_COUNT = 620
+
+/**
+ * 三层颗粒：
+ * - 细粒（大多数）：提供纹理，让 blur 之后仍有颗粒感，不至于糊成一片纯色
+ * - 中团：尺寸正好落在折射位移量级上，透镜边缘能把它们「拉」出可见的弯曲
+ * - 大团散景（少数）：提供低频明暗结构，玻璃压在什么上就有区别
+ */
+private fun buildGrains(): List<Grain> {
+    val random = Random(20261005)
+    return List(GRAIN_COUNT) {
+        val tier = random.nextFloat()
+        val (radius, alpha) = when {
+            tier > 0.965f -> 0.05f + random.nextFloat() * 0.055f to 0.05f + random.nextFloat() * 0.05f
+            tier > 0.78f -> 0.012f + random.nextFloat() * 0.018f to 0.04f + random.nextFloat() * 0.05f
+            else -> 0.0018f + random.nextFloat() * 0.0045f to 0.02f + random.nextFloat() * 0.055f
+        }
+        Grain(
+            dx = random.nextFloat(),
+            dy = random.nextFloat(),
+            radius = radius,
+            alpha = alpha,
+            light = random.nextBoolean(),
+        )
+    }
+}
+
+private fun DrawScope.drawGrains(grains: List<Grain>) {
+    val w = size.width
+    val h = size.height
+    grains.forEach { grain ->
+        val paint = if (grain.light) Color.White else Color.Black
+        drawCircle(
+            color = paint.copy(alpha = grain.alpha),
+            radius = grain.radius * w,
+            center = Offset(grain.dx * w, grain.dy * h),
         )
     }
 }

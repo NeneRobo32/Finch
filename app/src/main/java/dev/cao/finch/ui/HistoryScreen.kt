@@ -53,6 +53,7 @@ import dev.cao.finch.ui.design.FinchSpace
 import dev.cao.finch.ui.design.GlassStyle
 import dev.cao.finch.ui.design.GlassSurface
 import dev.cao.finch.ui.design.finchClickable
+import dev.cao.finch.ui.design.finchEnter
 import dev.cao.finch.ui.theme.FinchShapes
 import java.time.Duration
 import java.time.LocalDate
@@ -233,7 +234,7 @@ private fun SessionCard(
     }
 
     GlassSurface(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().finchEnter(),
         style = GlassStyle.Tile,
         shape = FinchShapes.tile,
         onClick = if (running) null else ({ showEdit = true }),

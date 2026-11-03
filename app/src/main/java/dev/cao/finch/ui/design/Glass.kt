@@ -8,6 +8,8 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
@@ -32,8 +34,29 @@ import dev.cao.finch.ui.theme.glassPalette
 /**
  * 全局玻璃采样源：由 [dev.cao.finch.ui.FinchAppScaffold] 在根部提供，
  * 卡片/按钮/底栏共享同一块「静态氛围背景」，滚动时不重采样，玻璃不闪。
+ *
+ * 注意这个值会被 [GlassSurface] 在卡片内部改写：卡片的子控件采样到的是
+ * 「卡片自己的玻璃层」，于是按钮/开关能在卡片上做出真实的层间折射，
+ * 而不是去采最底下的氛围背景（那样看起来像挖了个洞）。
  */
 val LocalFinchBackdrop = staticCompositionLocalOf<Backdrop?> { null }
+
+/**
+ * 玻璃嵌套深度。只允许「根背景 → 卡片」这一层再导出采样源，
+ * 卡片里的卡片不再继续导出——每导出一层就要多录一张离屏层，
+ * 而视觉上再深一层已经看不出差别了。
+ */
+private val LocalGlassDepth = compositionLocalOf { 0 }
+
+/**
+ * 玻璃化打开后的折射配方。玻璃要"看得出是玻璃"，采样源必须有细节：
+ * 平滑渐变被位移几个像素后几乎不变，看起来就像一块半透明色板。
+ * 所以 [FinchAurora] 加了细微颗粒，这里的折射强度也调得比原来更明显。
+ */
+private const val GLASS_CHROMATIC = false
+
+/** 最多导出几层嵌套采样源（根背景 → 卡片 → 卡内控件用卡片层），再深不再导出 */
+private const val MAX_GLASS_DEPTH = 1
 
 /**
  * 玻璃层级：同一套折射配方，按「面板在视觉层级中的位置」调强度。
@@ -114,6 +137,18 @@ fun GlassSurface(
     val layer = if (backdrop != null) backdrop else rememberOwnBackdrop()
     val source = interactionSource ?: remember { MutableInteractionSource() }
 
+    // 嵌套玻璃：把这张面板「已经画好的玻璃结果」导出成一层采样源，交给卡内控件用。
+    // 没有这一步，卡里的按钮/开关只能采到根部的氛围背景，折射区域对不上，
+    // 看起来就是在卡片上挖了个洞——所以以前 InsetSurface 干脆放弃了采样。
+    //
+    // 只有大卡片（Card / Chrome）才导出：列表里的 Tile 行几十个一起滚动，
+    // 每行多录一张离屏层不划算，而且那些行里基本没有需要折射的控件。
+    // 深度也限一层——再深一眼看不出差别，纯属多录。
+    val depth = LocalGlassDepth.current
+    val canExport = depth < MAX_GLASS_DEPTH &&
+        (style == GlassStyle.Card || style == GlassStyle.Chrome)
+    val exportLayer = if (canExport) rememberLayerBackdrop() else null
+
     val edge = remember(glass, style) { glass.edge.copy(alpha = glass.edge.alpha * style.edgeAlpha) }
     val border = remember(edge) { BorderStroke(1.dp, edge) }
     val tint = remember(glass, style) { glass.tint.copy(alpha = glass.tint.alpha * style.tintScale) }
@@ -135,7 +170,7 @@ fun GlassSurface(
     // 整条玻璃绘制链锁成同一个 Modifier 实例：drawBackdrop 每次调用都会 new 一个 ShapeProvider，
     // 而 ShapeProvider 按引用比较 —— 卡片只要重组一次，就会重建 shader 链并重录 5 个离屏层
     // （shadow / highlight 的 BlurMaskFilter 也在其中）。锁住之后重组不再触发重录，视觉零变化。
-    val glassModifier = remember(layer, shape, style, tint, sheen, highlight, shadow) {
+    val glassModifier = remember(layer, shape, style, tint, sheen, highlight, shadow, exportLayer) {
         Modifier.drawBackdrop(
             backdrop = layer,
             shape = { shape },
@@ -149,6 +184,7 @@ fun GlassSurface(
             },
             highlight = { highlight },
             shadow = { shadow },
+            exportedBackdrop = exportLayer,
             onDrawSurface = {
                 drawRect(tint)
                 drawRect(sheen)
@@ -156,25 +192,35 @@ fun GlassSurface(
         )
     }
 
-    Box(
-        modifier
-            .clip(shape)
-            .then(
-                if (onClick != null) {
-                    Modifier.finchClickable(
-                        enabled = enabled,
-                        interactionSource = source,
-                        onClick = onClick,
-                        onLongClick = onLongClick,
-                    )
-                } else {
-                    Modifier
-                }
-            )
-            .then(glassModifier)
-            .border(border, shape),
-        content = content,
-    )
+    val boxModifier = modifier
+        .clip(shape)
+        .then(
+            if (onClick != null) {
+                Modifier.finchClickable(
+                    enabled = enabled,
+                    interactionSource = source,
+                    onClick = onClick,
+                    onLongClick = onLongClick,
+                )
+            } else {
+                Modifier
+            }
+        )
+        .then(glassModifier)
+        .border(border, shape)
+
+    if (exportLayer != null) {
+        // 卡内控件（开关/滑块/分段/芯片）采样这张面板自己的玻璃层，
+        // 才能在卡片上做出真实的层间折射，而不是去采最底下的氛围光。
+        CompositionLocalProvider(
+            LocalFinchBackdrop provides exportLayer,
+            LocalGlassDepth provides (depth + 1),
+        ) {
+            Box(boxModifier, content = content)
+        }
+    } else {
+        Box(boxModifier, content = content)
+    }
 }
 
 /** backdrop 缺省时的兜底采样源（单独抽出来，才能只在需要时创建） */

@@ -58,6 +58,7 @@ import dev.cao.finch.ui.design.FinchSpace
 import dev.cao.finch.ui.design.FinchTextField
 import dev.cao.finch.ui.design.GlassStyle
 import dev.cao.finch.ui.design.GlassSurface
+import dev.cao.finch.ui.design.finchEnter
 import dev.cao.finch.ui.theme.FinchShapes
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
@@ -294,7 +295,7 @@ private fun UpcomingRow(
     onAdd: () -> Unit,
 ) {
     GlassSurface(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().finchEnter(),
         style = GlassStyle.Tile,
         shape = FinchShapes.tile,
     ) {

@@ -4,7 +4,7 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
@@ -14,13 +14,16 @@ import kotlinx.coroutines.delay
 /**
  * 进场动画：淡入 + 上浮 + 轻微放大，按 [order] 依次错开。
  *
- * 只在第一次出现时播一次：错开延迟用 rememberSaveable 记账，列表回收重建、
- * 切 tab 回来都不会重播，避免「一滚动就闪一片」。
- * 关键点：延迟中途被移出组合（快速滚动）时协程会被取消，所以「已经等过了」和
- * 「已经播完了」要分开记——重进时如果只等到一半，就直接跳到 shown，绝不停在透明态。
+ * 「每次出现都播」：状态用 remember（不是 rememberSaveable）记账，所以
+ * · LazyColumn 里滚出屏幕被回收的卡片，滑回来时会重新播一次；
+ * · 切换 tab 回来后也会重新播。
+ * 这正是想要的「下滑页面，新出现的卡片自己浮现」。
  *
- * [order] 建议直接用列表下标，超过 [MAX_STAGGER] 后统一收尾，不让长列表等太久。
- * 动画全部落在 graphicsLayer 上，不触发重新布局，滚动时不掉帧。
+ * [order] 只用来给「同屏一起出现的一批卡片」错开先后（设置页那种整页
+ * 同时铺开的场景）。列表滚动时传 0 就行——从屏幕外滑进来的卡片本来就
+ * 是一张张依次出现的，再叠延迟反而像卡了。
+ *
+ * 动画全部落在 graphicsLayer 上，不触发重新测量，滚动时不掉布局。
  */
 fun Modifier.finchEnter(
     order: Int = 0,
@@ -30,15 +33,12 @@ fun Modifier.finchEnter(
 ): Modifier = composed {
     if (!enabled) return@composed this
 
-    // 错开的延迟只等一次；shown 等动画真正开始后才置位，防止白屏
-    var staggered by rememberSaveable { mutableStateOf(false) }
-    var shown by rememberSaveable { mutableStateOf(false) }
+    var shown by remember { mutableStateOf(false) }
+    // 从透明态起步：进入组合后立刻置位，由 animateFloatAsState 补间到终态。
+    // 延迟写在协程里而不是动画 spec 里，这样被打断时也不会停在半透明。
     LaunchedEffect(Unit) {
-        if (!staggered) {
-            staggered = true
-            val index = order.coerceIn(0, MAX_STAGGER)
-            if (index > 0) delay(index * step)
-        }
+        val index = order.coerceIn(0, MAX_STAGGER)
+        if (index > 0) delay(index * step)
         shown = true
     }
 
@@ -51,12 +51,12 @@ fun Modifier.finchEnter(
         label = "finchEnterAlpha",
     )
     val offsetAnim by animateFloatAsState(
-        targetValue = if (shown) 0f else 26f,
+        targetValue = if (shown) 0f else 28f,
         animationSpec = enterSpec,
         label = "finchEnterOffset",
     )
     val scaleAnim by animateFloatAsState(
-        targetValue = if (shown) 1f else 0.94f,
+        targetValue = if (shown) 1f else 0.95f,
         animationSpec = enterSpec,
         label = "finchEnterScale",
     )
