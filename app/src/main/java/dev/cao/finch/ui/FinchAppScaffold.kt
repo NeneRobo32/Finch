@@ -38,12 +38,14 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.kyant.backdrop.backdrops.layerBackdrop
 import com.kyant.backdrop.backdrops.rememberCombinedBackdrop
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
-import dev.cao.finch.ui.design.FinchAurora
+import dev.cao.finch.ui.design.FinchBackdrop
 import dev.cao.finch.ui.design.FinchBottomBar
 import dev.cao.finch.ui.design.FinchMotion
 import dev.cao.finch.ui.design.FinchSpace
 import dev.cao.finch.ui.design.FinchTab
 import dev.cao.finch.ui.design.LocalFinchBackdrop
+import dev.cao.finch.ui.theme.BackgroundState
+import dev.cao.finch.ui.theme.BackgroundStyle
 import dev.cao.finch.ui.theme.FinchThemeState
 import dev.cao.finch.ui.theme.GlassState
 import dev.cao.finch.ui.theme.ThemeState
@@ -73,6 +75,7 @@ fun FinchAppScaffold(
     themeState: ThemeState? = null,
     finchThemeState: FinchThemeState? = null,
     glassState: GlassState? = null,
+    backgroundState: BackgroundState? = null,
     initialGameId: Long? = null,
 ) {
     var tab by rememberSaveable { mutableStateOf(Tab.Home) }
@@ -86,13 +89,18 @@ fun FinchAppScaffold(
 
     CompositionLocalProvider(LocalFinchBackdrop provides backgroundBackdrop) {
         Box(Modifier.fillMaxSize()) {
-            // ① 背景层：静态氛围光，供全部玻璃采样
+            // ① 背景层：玻璃的采样源。换背景 = 换玻璃下面透出来的东西，
+            //    所以自定义图片/粒子星空都挂在这一层（静态一帧，采样不会逐帧重录）
             Box(
                 Modifier
                     .fillMaxSize()
                     .layerBackdrop(backgroundBackdrop),
             ) {
-                FinchAurora(Modifier.fillMaxSize())
+                FinchBackdrop(
+                    style = backgroundState?.style ?: BackgroundStyle.AURORA,
+                    imagePath = backgroundState?.imagePath.orEmpty(),
+                    modifier = Modifier.fillMaxSize(),
+                )
             }
 
             // ② 内容层
@@ -126,6 +134,7 @@ fun FinchAppScaffold(
                                 themeState = themeState,
                                 finchThemeState = finchThemeState,
                                 glassState = glassState,
+                                backgroundState = backgroundState,
                             )
                         }
                     }

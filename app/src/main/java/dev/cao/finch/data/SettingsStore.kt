@@ -92,6 +92,19 @@ class SettingsStore(context: Context) {
         set(value) = sp.edit().putBoolean(KEY_EXPERIMENTAL_GLASS, value).apply()
 
     /**
+     * 背景样式（v0.21）：aurora = 主题氛围光（默认）、ps5 = 粒子星空、custom = 自定义图片。
+     * 背景是玻璃的采样源，换背景等于换玻璃下面透出来的东西。
+     */
+    var backgroundStyle: String
+        get() = sp.getString(KEY_BACKGROUND_STYLE, "aurora") ?: "aurora"
+        set(value) = sp.edit().putString(KEY_BACKGROUND_STYLE, value).apply()
+
+    /** 自定义背景图的私有副本路径（选图后复制进 filesDir，避免 content:// 授权过期） */
+    var backgroundImagePath: String
+        get() = sp.getString(KEY_BACKGROUND_IMAGE, "") ?: ""
+        set(value) = sp.edit().putString(KEY_BACKGROUND_IMAGE, value).apply()
+
+    /**
      * 时长目标（v0.19，纯配置不进 DB）：
      * 月目标分钟数 / 年目标分钟数，0 = 未设置（总结页不显示进度环）。
      */
@@ -152,6 +165,8 @@ class SettingsStore(context: Context) {
         private const val KEY_THEME_MODE = "theme_mode"
         private const val KEY_FINCH_THEME = "finch_theme"
         private const val KEY_EXPERIMENTAL_GLASS = "experimental_glass_enabled"
+        private const val KEY_BACKGROUND_STYLE = "background_style"
+        private const val KEY_BACKGROUND_IMAGE = "background_image_path"
         private const val KEY_MONTH_GOAL = "month_goal_min"
         private const val KEY_YEAR_GOAL = "year_goal_min"
         const val DEFAULT_BASE = "https://api.steampowered.com"

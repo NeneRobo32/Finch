@@ -53,7 +53,7 @@ private val LocalGlassDepth = compositionLocalOf { 0 }
  * 平滑渐变被位移几个像素后几乎不变，看起来就像一块半透明色板。
  * 所以 [FinchAurora] 加了细微颗粒，这里的折射强度也调得比原来更明显。
  */
-private const val GLASS_CHROMATIC = false
+private const val GLASS_CHROMATIC = true
 
 /** 最多导出几层嵌套采样源（根背景 → 卡片 → 卡内控件用卡片层），再深不再导出 */
 private const val MAX_GLASS_DEPTH = 1
@@ -71,16 +71,16 @@ enum class GlassStyle(
     internal val edgeAlpha: Float,
 ) {
     /** 悬浮底栏 / 顶栏：最厚、折射最强，是「悬浮在内容之上」的层级 */
-    Chrome(tintScale = 0.62f, blurDp = 10f, refractionHeightDp = 26f, refractionAmountDp = 30f, sheen = 0.2f, edgeAlpha = 0.55f),
+    Chrome(tintScale = 0.30f, blurDp = 6f, refractionHeightDp = 30f, refractionAmountDp = 40f, sheen = 0.22f, edgeAlpha = 0.62f),
 
     /** 内容卡：默认层级 */
-    Card(tintScale = 0.5f, blurDp = 4f, refractionHeightDp = 14f, refractionAmountDp = 22f, sheen = 0.16f, edgeAlpha = 0.45f),
+    Card(tintScale = 0.22f, blurDp = 2.5f, refractionHeightDp = 24f, refractionAmountDp = 32f, sheen = 0.18f, edgeAlpha = 0.52f),
 
     /** 小格 / 列表行：轻量，列表里几十个也不至于糊成一片 */
-    Tile(tintScale = 0.42f, blurDp = 3f, refractionHeightDp = 10f, refractionAmountDp = 16f, sheen = 0.12f, edgeAlpha = 0.38f),
+    Tile(tintScale = 0.18f, blurDp = 2f, refractionHeightDp = 18f, refractionAmountDp = 24f, sheen = 0.14f, edgeAlpha = 0.46f),
 
     /** Hero / 封面容器：让封面透出来，只做轻微玻璃 */
-    Hero(tintScale = 0.3f, blurDp = 2f, refractionHeightDp = 8f, refractionAmountDp = 12f, sheen = 0.1f, edgeAlpha = 0.3f),
+    Hero(tintScale = 0.12f, blurDp = 1.5f, refractionHeightDp = 14f, refractionAmountDp = 18f, sheen = 0.10f, edgeAlpha = 0.38f),
     ;
 }
 
@@ -180,7 +180,15 @@ fun GlassSurface(
                 // blur 的增益主要体现在有高频内容的场景；关掉开关时根本不进 drawBackdrop，
                 // 所以这条更重的链路只在用户主动开启时承担开销。
                 if (GLASS_BLUR) blur(style.blurDp.dp.toPx())
-                lens(style.refractionHeightDp.dp.toPx(), style.refractionAmountDp.dp.toPx())
+                // depthEffect：边缘折射带上一点纵深变形，玻璃「有厚度」的主要来源；
+                // chromaticAberration：虹彩边——真实玻璃折射短波长的偏差，是这个效果最像玻璃的地方。
+                // 两个开关都由运行时着色器实现，不支持时库内部会自己跳过。
+                lens(
+                    refractionHeight = style.refractionHeightDp.dp.toPx(),
+                    refractionAmount = style.refractionAmountDp.dp.toPx(),
+                    depthEffect = true,
+                    chromaticAberration = GLASS_CHROMATIC,
+                )
             },
             highlight = { highlight },
             shadow = { shadow },

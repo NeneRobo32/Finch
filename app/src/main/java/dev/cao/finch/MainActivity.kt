@@ -17,10 +17,13 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
 import dev.cao.finch.data.SettingsStore
 import dev.cao.finch.ui.FinchAppScaffold
+import dev.cao.finch.ui.theme.BackgroundState
+import dev.cao.finch.ui.theme.BackgroundStyle
 import dev.cao.finch.ui.theme.FinchTheme
 import dev.cao.finch.ui.theme.FinchThemeState
 import dev.cao.finch.ui.theme.GlassState
 import dev.cao.finch.ui.theme.ThemeMode
+import dev.cao.finch.ui.theme.rememberBackgroundState
 import dev.cao.finch.ui.theme.rememberFinchThemeState
 import dev.cao.finch.ui.theme.rememberGlassState
 import dev.cao.finch.ui.theme.rememberThemeState
@@ -94,6 +97,13 @@ private fun AppRoot(store: SettingsStore, initialGameId: Long? = null) {
         current = store.experimentalGlassEnabled,
         save = { store.experimentalGlassEnabled = it },
     )
+    // 背景：玻璃的采样源。默认氛围光，可换成自定义图片或粒子星空
+    val backgroundState = rememberBackgroundState(
+        currentStyle = BackgroundStyle.fromPersist(store.backgroundStyle),
+        currentImage = store.backgroundImagePath,
+        saveStyle = { store.backgroundStyle = it },
+        saveImage = { store.backgroundImagePath = it },
+    )
     val darkTheme = when (themeState.mode) {
         ThemeMode.SYSTEM -> androidx.compose.foundation.isSystemInDarkTheme()
         ThemeMode.LIGHT -> false
@@ -120,6 +130,7 @@ private fun AppRoot(store: SettingsStore, initialGameId: Long? = null) {
             themeState = themeState,
             finchThemeState = finchThemeState,
             glassState = glassState,
+            backgroundState = backgroundState,
             initialGameId = initialGameId,
         )
     }

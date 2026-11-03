@@ -84,6 +84,81 @@ fun rememberGlassState(
 ): GlassState =
     androidx.compose.runtime.remember { GlassState(current, save) }
 
+// ============ 背景样式 ============
+
+/**
+ * 背景样式。背景是玻璃的采样源——玻璃「像不像玻璃」几乎全看它下面透出什么，
+ * 所以换背景不只是换壁纸，等于换整套玻璃的观感。
+ */
+enum class BackgroundStyle(val label: String) {
+    /** 主题自带的氛围光（默认，最省电） */
+    AURORA("氛围光"),
+
+    /** PS5 开机粒子：深空底 + 蓝青粒子 + 地平线辉光 */
+    PS5("粒子星空"),
+
+    /** 用户自己选的图片 */
+    CUSTOM("自定义图片"),
+    ;
+
+    val persistKey: String
+        get() = when (this) {
+            AURORA -> "aurora"
+            PS5 -> "ps5"
+            CUSTOM -> "custom"
+        }
+
+    companion object {
+        fun fromPersist(value: String?): BackgroundStyle =
+            entries.firstOrNull { it.persistKey == value } ?: AURORA
+    }
+}
+
+/**
+ * 可观察的背景设置：样式 + 自定义图片路径。
+ * 选图时自动切到 [BackgroundStyle.CUSTOM]，省得用户再点一次。
+ */
+class BackgroundState(
+    initialStyle: BackgroundStyle,
+    initialImage: String,
+    private val saveStyle: (String) -> Unit,
+    private val saveImage: (String) -> Unit,
+) {
+    var style by mutableStateOf(initialStyle)
+        private set
+
+    var imagePath by mutableStateOf(initialImage)
+        private set
+
+    fun select(style: BackgroundStyle) {
+        this.style = style
+        saveStyle(style.persistKey)
+    }
+
+    fun selectImage(path: String) {
+        imagePath = path
+        saveImage(path)
+        if (path.isNotEmpty()) select(BackgroundStyle.CUSTOM)
+    }
+
+    fun clearImage() {
+        imagePath = ""
+        saveImage("")
+        if (style == BackgroundStyle.CUSTOM) select(BackgroundStyle.AURORA)
+    }
+}
+
+@Composable
+fun rememberBackgroundState(
+    currentStyle: BackgroundStyle,
+    currentImage: String,
+    saveStyle: (String) -> Unit,
+    saveImage: (String) -> Unit,
+): BackgroundState =
+    androidx.compose.runtime.remember {
+        BackgroundState(currentStyle, currentImage, saveStyle, saveImage)
+    }
+
 // ============ CompositionLocal：当前主题 + 玻璃 + 场景色 ============
 
 /** 当前风格主题（默认琉璃） */
