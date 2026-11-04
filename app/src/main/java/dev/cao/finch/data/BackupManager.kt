@@ -58,6 +58,27 @@ object BackupManager {
         return out.use { writeBackupZip(context, db, it) }
     }
 
+    /** 导出成字节数组（v0.25 WebDAV 上传用）：与 [export] 同一套打包流程，只是写进内存 */
+    fun exportBytes(context: Context, db: FinchDatabase): ByteArray =
+        java.io.ByteArrayOutputStream().use { out ->
+            writeBackupZip(context, db, out)
+            out.toByteArray()
+        }
+
+    /**
+     * 从字节数组恢复（v0.25 WebDAV 下载用）：先落成临时文件，再走与本地导入完全相同的
+     * 校验 → 解包 → 关库 → 覆盖 → 重启流程（成功路径不返回）。
+     */
+    fun restoreFromBytes(context: Context, db: FinchDatabase, bytes: ByteArray) {
+        val tmp = File(context.cacheDir, "cloud-$DB_NAME")
+        tmp.writeBytes(bytes)
+        try {
+            restoreFromZip(context, db, tmp)
+        } finally {
+            tmp.delete()
+        }
+    }
+
     /** 自动备份（v0.16）：整库 zip 写应用私有目录，保留最近 [AUTO_BACKUP_KEEP] 份，返回写入字节数 */
     fun autoBackup(context: Context, db: FinchDatabase): Long {
         val dir = File(context.filesDir, AUTO_BACKUP_DIR).apply { mkdirs() }

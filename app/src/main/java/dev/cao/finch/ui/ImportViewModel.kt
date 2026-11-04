@@ -15,6 +15,7 @@ import dev.cao.finch.data.networkErrorKind
 import dev.cao.finch.data.SwitchClient
 import dev.cao.finch.data.SyncEngine
 import dev.cao.finch.data.UpdateChecker
+import dev.cao.finch.data.WebDavClient
 import dev.cao.finch.timer.TimerServiceBridge
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -28,6 +29,11 @@ import java.time.LocalTime
 import java.time.format.DateTimeFormatter
 
 class ImportViewModel(app: Application) : AndroidViewModel(app) {
+    private companion object {
+        /** PSN refresh_token 实测只有约 10 天，剩不到 2 天才值得打扰用户重新授权 */
+        const val PSN_EXPIRING_WINDOW_MS = 2L * 24 * 3600 * 1000
+    }
+
     private val db = (app as FinchApp).database
     private val sessionDao = db.sessionDao()
     private val settings = (app as FinchApp).settings
@@ -185,9 +191,10 @@ class ImportViewModel(app: Application) : AndroidViewModel(app) {
     private val _psnState = MutableStateFlow<SyncState>(SyncState.Idle)
     val psnState: StateFlow<SyncState> = _psnState
 
-    /** npsso 授权是否快过期（7 天内），用于卡片提示 */
+    /** PSN 授权是否快过期，用于卡片提示。refresh_token 实测只有约 10 天，
+     *  原本按「7 天内」判会在授权后第 4 天起长期提示，改按「2 天内」才提醒。 */
     private val _psnExpiringSoon = MutableStateFlow(
-        settings.psnRefreshExpiresAtMillis in 1..(System.currentTimeMillis() + 7L * 24 * 3600 * 1000)
+        settings.psnRefreshExpiresAtMillis in 1..(System.currentTimeMillis() + PSN_EXPIRING_WINDOW_MS)
     )
     val psnExpiringSoon: StateFlow<Boolean> = _psnExpiringSoon
 
@@ -232,7 +239,7 @@ class ImportViewModel(app: Application) : AndroidViewModel(app) {
                 settings.psnRefreshToken = r.refreshTokenOut
                 settings.psnRefreshExpiresAtMillis = r.refreshExpiresAtMillis
                 _psnExpiringSoon.value =
-                    r.refreshExpiresAtMillis in 1..(System.currentTimeMillis() + 7L * 24 * 3600 * 1000)
+                    r.refreshExpiresAtMillis in 1..(System.currentTimeMillis() + PSN_EXPIRING_WINDOW_MS)
                 _psnState.value = SyncState.Done(
                     "同步完成：新增 ${r.created} 款，匹配更新 ${r.matched} 款，跳过 ${r.skipped} 款，写入 ${r.sessionsAdded} 条游玩记录"
                 )
@@ -332,6 +339,115 @@ class ImportViewModel(app: Application) : AndroidViewModel(app) {
                 _backupState.value = SyncState.Failed("恢复失败：" + (e.message ?: e.toString()))
             }
         }
+    }
+
+    // ---- WebDAV 云备份（v0.25）：只有手动触发，不做后台定时 ----
+
+    private val _cloudState = MutableStateFlow<SyncState>(SyncState.Idle)
+    val cloudState: StateFlow<SyncState> = _cloudState
+
+    private val _webDavUrl = MutableStateFlow(settings.webDavUrl)
+    val webDavUrl: StateFlow<String> = _webDavUrl
+    private val _webDavUser = MutableStateFlow(settings.webDavUser)
+    val webDavUser: StateFlow<String> = _webDavUser
+    private val _webDavPassword = MutableStateFlow(settings.webDavPassword)
+    val webDavPassword: StateFlow<String> = _webDavPassword
+    private val _webDavEnabled = MutableStateFlow(settings.webDavEnabled)
+    val webDavEnabled: StateFlow<Boolean> = _webDavEnabled
+    private val _lastWebDavBackupAt = MutableStateFlow(settings.lastWebDavBackupAt)
+    val lastWebDavBackupAt: StateFlow<Long> = _lastWebDavBackupAt
+
+    /** 保存 WebDAV 配置；地址会被归一化成「带协议、以 / 结尾」的目录形式 */
+    fun saveWebDavConfig(url: String, user: String, password: String) {
+        val normalized = WebDavClient.normalizeBase(url)
+        settings.webDavUrl = normalized
+        settings.webDavUser = user
+        settings.webDavPassword = password
+        _webDavUrl.value = normalized
+        _webDavUser.value = user
+        _webDavPassword.value = password
+    }
+
+    /** 云备份开关唯一入口（UI 不直写状态） */
+    fun setWebDavEnabled(enabled: Boolean) {
+        settings.webDavEnabled = enabled
+        _webDavEnabled.value = enabled
+    }
+
+    private fun webDavConfig(): WebDavClient.Config = WebDavClient.Config(
+        baseUrl = _webDavUrl.value,
+        username = _webDavUser.value,
+        password = _webDavPassword.value,
+    )
+
+    /** 探活：只发一次 PROPFIND，验证地址/账号/密码 */
+    fun testWebDav() {
+        _cloudState.value = SyncState.Running
+        viewModelScope.launch {
+            try {
+                val server = withContext(Dispatchers.IO) { WebDavClient.probe(webDavConfig()) }
+                _cloudState.value = SyncState.Done(
+                    if (server.isBlank()) "连接成功" else "连接成功（$server）"
+                )
+            } catch (e: Exception) {
+                _cloudState.value = SyncState.Failed("连接失败：" + cloudErrorText(e))
+            }
+        }
+    }
+
+    /** 上传一份新的整库备份到云端（不删远端旧文件，用户在网盘侧自己清理） */
+    fun uploadCloudBackup() {
+        _cloudState.value = SyncState.Running
+        viewModelScope.launch {
+            try {
+                val stamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss"))
+                val name = WebDavClient.buildName(stamp)
+                val bytes = withContext(Dispatchers.IO) {
+                    val data = BackupManager.exportBytes(getApplication(), db)
+                    WebDavClient.upload(webDavConfig(), name, data)
+                    data.size
+                }
+                settings.lastWebDavBackupAt = System.currentTimeMillis()
+                _lastWebDavBackupAt.value = settings.lastWebDavBackupAt
+                _cloudState.value = SyncState.Done("已上传 ${bytes / 1024} KB 到云端")
+            } catch (e: Exception) {
+                _cloudState.value = SyncState.Failed("上传失败：" + cloudErrorText(e))
+            }
+        }
+    }
+
+    /** 从云端最新一份备份恢复：校验后整库替换并重启应用（成功路径不会返回） */
+    fun restoreCloudBackup() {
+        _cloudState.value = SyncState.Running
+        viewModelScope.launch {
+            try {
+                val latest = withContext(Dispatchers.IO) {
+                    WebDavClient.pickLatest(WebDavClient.list(webDavConfig()))
+                } ?: throw IllegalArgumentException("云端还没有备份文件")
+
+                _cloudState.value = SyncState.Done("正在恢复 ${latest.name}…")
+                withContext(Dispatchers.IO) {
+                    val bytes = WebDavClient.download(webDavConfig(), latest.name)
+                    BackupManager.restoreFromBytes(getApplication(), db, bytes)
+                }
+                // restore 成功会重启进程，走不到这里
+            } catch (e: Exception) {
+                _cloudState.value = SyncState.Failed("恢复失败：" + cloudErrorText(e))
+            }
+        }
+    }
+
+    /**
+     * 云端错误文案：网络类错误按 Steam/PSN 那套分类给提示，
+     * WebDAV 特有的状态码文案已经在 [WebDavClient] 里写好，这里只兜底转换。
+     */
+    private fun cloudErrorText(e: Exception): String = when (e.networkErrorKind()) {
+        dev.cao.finch.data.NetworkErrorKind.DNS -> "域名解析失败：这个地址不通"
+        dev.cao.finch.data.NetworkErrorKind.CONNECT -> "连接失败：地址或端口不通"
+        dev.cao.finch.data.NetworkErrorKind.TIMEOUT -> "连接超时：云端响应太慢"
+        dev.cao.finch.data.NetworkErrorKind.SSL -> "SSL 握手失败：自签证书需要用 https 且证书受信"
+        dev.cao.finch.data.NetworkErrorKind.IO -> e.message ?: "网络中断"
+        dev.cao.finch.data.NetworkErrorKind.OTHER -> e.message ?: e.toString()
     }
 
     // ---- 版本检查（v0.16）：点按钮才查一次，不后台轮询 ----

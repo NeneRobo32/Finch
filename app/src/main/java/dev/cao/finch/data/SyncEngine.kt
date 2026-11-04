@@ -353,11 +353,19 @@ object SyncEngine {
         var sessionAdded = 0
         val now = LocalDateTime.now()
         val zone = ZoneId.systemDefault()
+        // v0.25 真机联调：PSN 官方名普遍带商标符号（`Uncharted™: ...`、`Rise of the Ronin™`），
+        // 而库里手输/Steam 导入的多半没有，等值 `allByName` 永远落空 → 每次都新建一条重复的 PS 游戏。
+        // 这里额外挂一份「归一化名字 → 候选行」索引做二次认领；库名本身不改写。
+        val normalizedIndex = HashMap<String, MutableList<Game>>()
+        for (g in gameDao.all()) {
+            normalizedIndex.getOrPut(matchKey(g.name)) { mutableListOf() }.add(g)
+        }
         db.withTransaction {
             for (t in titles) {
                 if (t.totalMinutes <= 0) { skipped++; continue } // 0 时长（未玩/仅入库）不建条目
                 // 同名多行时只认领 PS 行（PC + PS 同名常见，旧版 LIMIT 1 命中另一平台就永远跳过）
                 val candidates = gameDao.allByName(t.name)
+                    .ifEmpty { normalizedIndex[matchKey(t.name)].orEmpty() }
                 val existing = candidates.firstOrNull { it.platform == Platform.PS }
                 if (existing == null) {
                     if (candidates.isNotEmpty()) {

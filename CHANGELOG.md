@@ -1,5 +1,61 @@
 # Changelog
 
+## 0.25.0 (2026-11-04)
+
+v0.25 三条候选一次做完（无 DB 变更）：PSN 真机联调、`GameDetailScreen` 拆分、WebDAV 云备份。
+
+### PSN 真机联调（用真 npsso 打进真实接口后发现并修掉三个问题）
+
+- **修：媒体 App 被当成游戏导入**。真机 gamelist 里除了 `ps5_native_game` / `ps4_game`，
+  还有 `ps5_web_based_media_app`（bilibili）与 `ps5_native_media_app`（Apple Music），
+  而且它们**同样带 `playDuration`**（实测 `PT41M21S` / `PT5M34S`），原来的「有游玩时长就收」
+  会把这两个 App 变成两款假游戏。新增 `PsnClient.isPlayableCategory(category)`：
+  空值/空白按可玩处理（宁多勿丢），否则只认 `_game` 结尾
+- **修：带 ™ 的官方名认领不到老条目，每次同步都新建一款重复游戏**。PSN 返回的
+  `name` 带商标符号（`Uncharted™: The Nathan Drake Collection`），而库里用户自己录的名字没有，
+  `allByName` 精确匹配落空就走「新建」。新增 `NameVariants.matchKey(name)`
+  （剥商标/装饰符号 → 小写 → 压空白），`SyncEngine.runPSN` 在精确匹配落空后按 `matchKey`
+  查一次归一索引；**归一值只用于认领，绝不写回库名**，也不剥副标题——那是搜索口径
+  `buildNameVariants` 的职责，拿来判同一性会把 `Foo Remastered` 和 `Foo` 并成一条
+- **修：refresh_token 有效期文案与实现差了一个量级**。真机实测 `refresh_token_expires_in`
+  = 863999（≈10 天），代码注释与设置页文案原写「约两个月」。三处文案统一改成 10 天，
+  并把 `ImportViewModel` 的「快过期」提示窗口从 7 天收到 2 天（10 天的票用 7 天窗口，
+  授权后第 4 天起就会长期挂警告）
+- **实测确认无需改动的部分**：`playDuration` 是 ISO-8601（`PT30H51M4S`）；`titleId` 形如
+  `PPSA34579_00`；奖杯批次**带「0 奖杯集」条目不会整批失败**（HTTP 200 + 空数组），
+  所以 `fetchTrophiesForTitles` 里「必须退回逐个查」的注释假设不成立（代码留着无害）；
+  refresh 换票时 `refresh_token` 不轮换、旧票可重复使用，「立即写回最新值」的做法仍保留
+- **测试**：新增 7 条 `PsnNameMatchTest`（类目过滤三组 + `matchKey` 三组）
+
+### `GameDetailScreen` 拆分（669 → 约 260 行，视觉零变化）
+
+- 抽出 `ui/GameDetailCards.kt`：`DetailCover`（封面把原来的 `Animatable` 改成传 `coverScale: Float`，
+  避免把状态对象塞进子组件）/ `DetailTitle` / `TimerConsole` / `DetailStatRow` / `RecordGapNote` /
+  `StatusRatingCard` / `ThoughtsCard` / `SessionsCard` / `DetailTopBar` / `CoverCircleButton` /
+  `TrophyCard` + `TrophyCount`
+- 主文件只剩状态计算与排版顺序；`StarGold` 常量随星级代码一起挪走后删除
+- **踩坑**：`Icons.AutoMirrored.Filled.ArrowBack` 需要单独 `import
+  androidx.compose.material.icons.automirrored.filled.ArrowBack`，写全限定名会 Unresolved
+
+### WebDAV 云备份（新增）
+
+- 新增 `data/WebDavClient.kt`：只做四件事——探活（PROPFIND Depth 0，目录不存在先 MKCOL）、
+  上传（PUT）、列出（PROPFIND Depth 1）、下载（GET）；HTTP Basic 认证；**从不删除远端文件**
+- 命名约定 `finch-cloud-yyyyMMdd-HHmmss.zip`，恢复时按文件名时间戳取最新一份
+- 新增 `BackupManager.exportBytes(...)` / `restoreFromBytes(...)`，与已有的 zip 导出/恢复共用同一套
+  写入与 schema 校验逻辑（不复制代码）
+- 设置页「数据安全」分组内新增「云端备份」卡：地址 / 账号 / 应用密码 + 「保存并测试」
+  「上传备份」「从云端最新备份恢复」（恢复前二次确认，destructive）
+- 密码存 `SharedPreferences` 且走已有的 Keystore 加密路径（`readSecret`/`writeSecret`），
+  与 Steam Key / PSN token 同等待遇；地址会被归一化成「带协议 + 以 / 结尾」
+- **不做后台定时上传**：网盘流量与密码都在用户手里，什么时候传由他决定；开关只表示「保留配置」
+- **测试**：新增 11 条 `WebDavClientTest`（地址归一化、备份名识别、PROPFIND 命名空间解析、
+  href 解码、取最新、文件名与 URL 编码）
+
+### 合计
+
+- 测试 159 → **177** 全过（PSN 7 条 + WebDAV 11 条）
+
 ## 0.24.0 (2026-11-04)
 
 年度报告 + 库存漏斗（无 DB 变更）：

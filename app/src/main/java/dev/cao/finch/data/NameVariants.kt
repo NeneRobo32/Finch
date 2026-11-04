@@ -84,6 +84,20 @@ internal fun isHltbSearchable(name: String): Boolean {
 }
 
 /**
+ * 跨源名字归一（v0.25 PSN 真机联调新增）：**只用于「认领已有条目」，绝不写回库名**。
+ *
+ * 起因：PSN 官方名普遍带商标符号——实测库里 11 条有 `Uncharted™: The Nathan Drake Collection`、
+ * `Rise of the Ronin™`、`The Last of Us™ Part I`，而用户手工录入/Steam 导入的多半没有 ™，
+ * 于是 `allByName(name)` 等值比较永远落空，同步结果就是「新建一条重复的 PS 游戏」。
+ *
+ * 归一 = 剥 So/Sk 符号 + 折叠空白 + 小写。不剥副标题、不剥平台尾巴——那是搜索口径
+ * （[buildNameVariants]），拿来做「是不是同一款游戏」的判定会把 `Foo Remastered` 和 `Foo` 合并，
+ * 属于过度认领。
+ */
+internal fun matchKey(name: String): String =
+    stripMarks(name).lowercase().replace(Regex("\\s+"), " ").trim()
+
+/**
  * 是否含假名（日文名）：日区 eShop 搜索的合法查询词（日区标题索引是日文），
  * 也是「名字不可直搜」的旁证之一。
  */

@@ -16,7 +16,8 @@ import java.time.OffsetDateTime
  *  1. GET {AUTH}/authz/v3/oauth/authorize（Cookie: npsso=...，禁跟随重定向）
  *     → 302 Location 的 query 带 code（error_code=4165 表示 npsso 过期/错误）
  *  2. POST {AUTH}/authz/v3/oauth/token（Basic client_id:client_secret）
- *     → access_token（约 1 小时）+ refresh_token（约 2 个月，可能轮换）
+ *     → access_token（expires_in 3599 ≈ 1 小时）+ refresh_token
+ *       （refresh_token_expires_in 863999 ≈ **10 天**，2026-11 真机实测取值）
  *  3. GET {DMS}/v1/devices/accounts/me → accountId（也可直接用 "me"）
  *  4. GET {GAMELIST}/users/me/titles?limit=200&offset=N（分页）
  *     → titles[]: titleId/name/imageUrl/category(ps4_game|ps5_native_game)/playCount/
@@ -136,7 +137,14 @@ object PsnClient {
         }
     }
 
-    /** 拉全部游戏时长统计（自动分页） */
+    /**
+     * 拉全部游戏时长统计（自动分页）。
+     *
+     * v0.25 真机联调修复：`titles[]` 里混着**媒体 App**（`ps5_web_based_media_app` /
+     * `ps5_native_media_app`，实测有 bilibili、Apple Music），它们同样带 `playDuration`，
+     * 早先会原样进库变成「PS 游戏」。这里只保留 `category` 以 `_game` 结尾的条目。
+     * category 缺失时按可玩处理（宁多勿丢，老数据不会因为字段缺失被砍掉）。
+     */
     suspend fun fetchTitleStats(accessToken: String, accountId: String = "me"): List<PsnTitle> {
         val out = ArrayList<PsnTitle>(64)
         var offset = 0
@@ -151,13 +159,23 @@ object PsnClient {
                 b
             }
             val page = parseTitlePage(body)
-            out += page.titles
+            out += page.titles.filter { isPlayableCategory(it.category) }
             val next = page.nextOffset
             // next 不前进（next <= offset）即到头/异常，防死循环
             if (next <= offset || page.titles.isEmpty()) break
             offset = next
         }
         return out
+    }
+
+    /**
+     * PSN `category` 是否算「游戏」：`ps4_game` / `ps5_native_game` / `ps3_game` 这类以 `_game`
+     * 结尾的才是；`ps5_native_media_app`、`ps5_web_based_media_app` 是媒体 App。
+     * null/空白（接口没给该字段）按可玩处理。
+     */
+    internal fun isPlayableCategory(category: String?): Boolean {
+        val c = category?.trim().orEmpty()
+        return c.isEmpty() || c.endsWith("_game")
     }
 
     /** gameList 单页解析结果：标题列表 + 分页游标 */

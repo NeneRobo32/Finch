@@ -46,7 +46,7 @@ internal fun PsnImportCard(importViewModel: ImportViewModel) {
     ) {
         Text(
             "拉取 PS4 / PS5 库内官方总时长，按快照差分写入记录（与 Steam 同机制，历史时长不会误算成增量）。" +
-                "获取 npsso：电脑浏览器登录 playstation.com → F12 → Application → Cookies → 复制 npsso（约两个月有效）。",
+                "获取 npsso：电脑浏览器登录 playstation.com → F12 → Application → Cookies → 复制 npsso。授权有效期约 10 天，到期后需要重新授权。",
             style = MaterialTheme.typography.bodySmall,
             color = scheme.onSurfaceVariant,
         )

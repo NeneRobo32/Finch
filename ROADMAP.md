@@ -1,8 +1,8 @@
 # Finch 路线图
 
-基线：`v0.24.0`（DB v21，versionCode 93）。
+基线：`v0.25.0`（DB v21，versionCode 94）。
 IGDB 已整体移除（国内直连不通）；HLTB 改走 Crashdummy 中转 API（Steam 直查+Nlib 英文名+按名搜，默认开、可一键关）；非英文库名走英文名解析链换英文线索再搜（Steam 中文反查/Bangumi 原名/eShop 英文段/游民星空/机翻已移除，v0.15.15–0.15.18）。
-下阶段主题：**待定**（v0.24 已把原 v0.20 的年度报告与 backlog 漏斗补完）。v0.18–v0.22 连续五版动 UI，v0.23 还了清理债，v0.24 兑现了最后一条功能旧承诺；至此四条旧承诺（战报图片海报 v1、清理版、年度报告、backlog 漏斗）全部兑现，只剩 PSN 真机联调（需 npsso token，用户明确暂不做）。
+下阶段主题：**待定**。v0.25 把最后三条候选一次做完——PSN 真机联调（真 npsso 打进真实接口，修掉媒体 App 误入、商标符号重复建条、refresh 有效期文案三处问题）、`GameDetailScreen` 拆分、WebDAV 云备份。至此旧承诺与技术债清空：v0.18–v0.22 连续五版动 UI，v0.23 还清理债，v0.24 补年度报告，v0.25 收尾 PSN 与云备份。
 
 ## 规划原则
 
@@ -47,7 +47,8 @@ IGDB 已整体移除（国内直连不通）；HLTB 改走 Crashdummy 中转 API
 | v0.22 ✅已交付 | 战报海报 | 1080×1920 图片海报；预览 / 分享 / 存相册；FileProvider | 21（不变） | 无 |
 | v0.23 ✅已交付 | 清理版重构 | 四个巨型文件拆分：`StatsScreen` 1079→288、`ImportScreen` 1185→396、`HomeScreen` 806→479、`FinchViewModel` 551→285；HLTB 解析链抽成扩展函数；**视觉零变化** | 21（不变） | 无 |
 | v0.24 ✅已交付 | 年度报告＋库存漏斗 | 新增整页年度报告（一句话总结 / 今年通关 / 库存变动 / 复用 8 张卡片 / 库存漏斗）；`ui/report/YearReportData.kt` 纯口径（连续天数、峰值、本年通关入库、完成率、吃灰最久）；无新增 DAO | 21（不变） | 无 |
-| 远期 / 明确不做 | — | WebDAV 同步（可选）；前台自动识别、账号云同步、国际化明确不做 | — | — |
+| v0.25 ✅已交付 | PSN 联调＋详情拆分＋云备份 | PSN 真机实测修三处（媒体 App 类目过滤 `isPlayableCategory`、`matchKey` 归一认领防重复建条、refresh 有效期 10 天文案与 2 天预警窗口）；`GameDetailScreen` 669→约 260 行（`GameDetailCards.kt`）；WebDAV 云备份（探活/上传/列出/下载，Basic 认证，从不删远端文件） | 21（不变） | 无 |
+| 远期 / 明确不做 | — | 前台自动识别、账号云同步、国际化明确不做 | — | — |
 
 ```mermaid
 gantt
@@ -77,6 +78,8 @@ gantt
     四个巨型文件拆分             :a11, after a10, 4d
     section v0.24 年度报告
     年度报告页+库存漏斗          :a12, after a11, 3d
+    section v0.25 收尾三件
+    PSN联调+详情拆分+云备份      :a13, after a12, 5d
 ```
 
 ---
@@ -306,13 +309,55 @@ gantt
   与详情页 `statusResolved()` 完全同一口径
 - **验收**：编译 0 warning、159 条单测全过（新增 16 条 `YearReportDataTest`）
 
-## v0.25 ⏳ 候选（待拍板）
+## v0.25 ✅ —— PSN 真机联调 ＋ 详情页拆分 ＋ WebDAV 云备份（DB 不变）
 
-四条旧承诺已全部兑现。备选：
+**为什么做**：最后三条候选一次清空——PSN 从 v0.13 挂到现在的技术债（终于有真 npsso 可实测）、
+`GameDetailScreen` 是剩余唯一超大 UI 文件、WebDAV 是「换机/多端」唯一不靠服务器又不太贵的解法。
 
-- **`GameDetailScreen` 拆分** —— 669 行，剩余的唯一超大 UI 文件；顺带可收窄列表项重组范围
-- **PSN 真机联调** —— 从 v0.13 挂到现在的技术债，需 npsso token（用户已明确暂时不做）
-- **WebDAV 同步** —— 远期可选项，需要先设计冲突合并策略
+### PSN 真机联调：三个只有在真实账号上才暴露的问题
+
+- **媒体 App 被当游戏导入**：真机 gamelist 除 `ps5_native_game` / `ps4_game` 外还有
+  `ps5_web_based_media_app`（bilibili）与 `ps5_native_media_app`（Apple Music），
+  **它们同样带 `playDuration`**（`PT41M21S` / `PT5M34S`）。原逻辑「有游玩时长就收」
+  会把两个 App 变两款假游戏。新增 `PsnClient.isPlayableCategory()`：空值按可玩处理（宁多勿丢），
+  否则只认 `_game` 结尾
+- **带 ™ 的官方名认领不到老条目**：PSN 返回 `Uncharted™: The Nathan Drake Collection`，
+  库里手录的是 `Uncharted: The Nathan Drake Collection`，`allByName` 精确匹配落空 → 每次同步新建一条重复。
+  新增 `NameVariants.matchKey()`（剥商标装饰符号 → 小写 → 压空白），`SyncEngine.runPSN`
+  在精确匹配落空后查一次归一索引
+- **refresh_token 有效期差一个量级**：实测 `refresh_token_expires_in = 863999`（≈10 天），
+  代码注释与设置页文案原写「约两个月」。三处文案统一，`ImportViewModel` 的「快过期」提示窗口
+  从 7 天收到 2 天（10 天的票用 7 天窗口，授权后第 4 天起长期挂警告）
+- **实测确认不用改的**：`playDuration` 是 ISO-8601；`titleId` 形如 `PPSA34579_00`；
+  奖杯批次**带「0 奖杯集」条目不会整批失败**（HTTP 200 + 空数组），
+  `fetchTrophiesForTitles` 里「必须退回逐个查」的注释假设不成立（代码留着无害）；
+  refresh 换票时 `refresh_token` 不轮换、旧票可重复用，「立即写回」仍保留
+
+### `GameDetailScreen` 拆分（669 → 约 260 行，视觉零变化）
+
+- 抽出 `ui/GameDetailCards.kt`：`DetailCover` / `DetailTitle` / `TimerConsole` / `DetailStatRow` /
+  `RecordGapNote` / `StatusRatingCard` / `ThoughtsCard` / `SessionsCard` / `DetailTopBar` /
+  `CoverCircleButton` / `TrophyCard` + `TrophyCount`
+- **关键决策**：封面把原来的 `Animatable` 改成传 `coverScale: Float`，状态对象留在主函数——
+  否则子组件会绑死动画实现，以后换动效要改两处
+- **踩坑**：`Icons.AutoMirrored.Filled.ArrowBack` 需要单独
+  `import androidx.compose.material.icons.automirrored.filled.ArrowBack`，写全限定名会 Unresolved
+
+### WebDAV 云备份
+
+- 新增 `data/WebDavClient.kt`：探活（PROPFIND Depth 0，目录不存在先 MKCOL）／上传（PUT）／
+  列出（PROPFIND Depth 1）／下载（GET），HTTP Basic 认证，**从不删除远端文件**
+- 命名 `finch-cloud-yyyyMMdd-HHmmss.zip`，恢复按文件名时间戳取最新
+- `BackupManager.exportBytes()` / `restoreFromBytes()` 与已有 zip 导出/恢复复用同一套写入与
+  schema 校验，不复制代码
+- 设置页「数据安全」分组新增「云端备份」卡：地址／账号／应用密码 + 保存并测试 / 上传 /
+  从云端最新恢复（destructive 二次确认）
+- **关键决策**：密码走已有的 Keystore 加密路径（`readSecret`/`writeSecret`），与 Steam Key、
+  PSN token 同级；**不做后台定时上传**——网盘流量与密码都在用户手里，开关只表示「保留配置」
+- **关键决策**：只上传不删除、不做增量合并。冲突合并需要一套真正的版本协商，
+  而一周一份整库 zip（几百 KB）的代价远低于写错合并逻辑丢数据的代价
+
+- **验收**：编译 0 warning、177 条单测全过（PSN 7 条 + WebDAV 11 条）
 
 ---
 
@@ -340,7 +385,7 @@ gantt
 ## 明确不做
 
 - 启动自动同步（README 已定，不改）。
-- 账号体系＋云同步（成本爆炸；WebDAV 可列为远期可选，优先级低于上面全部）。
+- 账号体系＋自建服务器同步（成本爆炸）。v0.25 已用「用户自带 WebDAV」满足多端备份需求，不自己承担同步后端。
 - 前台应用自动识别在玩什么（`UsageStats` 权限重、耗电、易被差评）。
 - 国际化（README 已定，不做）。
 
@@ -359,4 +404,4 @@ gantt
 10. **v0.22 ✅ 已交付**（v0.22.0）：战报图片海报 v1——1080×1920 竖版海报、预览 / 分享 / 存相册、FileProvider。
 11. **v0.23 ✅ 已交付**（v0.23.0）：清理版重构——`StatsScreen` / `ImportScreen` / `HomeScreen` / `FinchViewModel` 四个巨型文件拆分，视觉零变化。
 12. **v0.24 ✅ 已交付**（v0.24.0）：年度报告 ＋ 库存漏斗——新增 `ui/report/` 三个文件，复用既有卡片与海报。
-13. **v0.25 ⏳ 待拍板**：`GameDetailScreen` 拆分／PSN 真机联调／WebDAV 同步。
+13. **v0.25 ✅ 已交付**（v0.25.0）：PSN 真机联调 ＋ `GameDetailScreen` 拆分 ＋ WebDAV 云备份——三条候选一次清空。

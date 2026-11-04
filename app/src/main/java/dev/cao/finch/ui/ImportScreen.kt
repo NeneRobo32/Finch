@@ -330,6 +330,8 @@ fun ImportScreen(
             enterOrder = 3,
         ) {
             BackupCard(importViewModel)
+            Spacer(Modifier.height(FinchSpace.md))
+            CloudBackupCard(importViewModel)
         }
         Spacer(Modifier.height(FinchSpace.md))
 

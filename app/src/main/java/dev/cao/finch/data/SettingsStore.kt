@@ -33,7 +33,7 @@ class SettingsStore(context: Context) {
         get() = sp.getString(KEY_SWITCH_NAID, "") ?: ""
         set(value) = sp.edit().putString(KEY_SWITCH_NAID, value.trim()).apply()
 
-    /** PSN refresh token（npsso 换取，约两个月有效；每次同步可能轮换，同步后写回；加密落盘） */
+    /** PSN refresh token（npsso 换取，实测约 10 天有效；同步后写回最新值；加密落盘） */
     var psnRefreshToken: String
         get() = readSecret(KEY_PSN_REFRESH)
         set(value) = writeSecret(KEY_PSN_REFRESH, value)
@@ -105,6 +105,34 @@ class SettingsStore(context: Context) {
         set(value) = sp.edit().putString(KEY_BACKGROUND_IMAGE, value).apply()
 
     /**
+     * WebDAV 云端备份（v0.25，默认关）：
+     * 目录地址留空即未配置；账号明文、应用密码走 Keystore 加密（Basic 认证要还原明文）。
+     * 只上传一份最新 zip，不删远端文件、不做双向合并。
+     */
+    var webDavUrl: String
+        get() = sp.getString(KEY_WEBDAV_URL, "") ?: ""
+        set(value) = sp.edit().putString(KEY_WEBDAV_URL, value.trim()).apply()
+
+    var webDavUser: String
+        get() = sp.getString(KEY_WEBDAV_USER, "") ?: ""
+        set(value) = sp.edit().putString(KEY_WEBDAV_USER, value.trim()).apply()
+
+    /** WebDAV 应用密码（与 Steam Key 同一条加密路径） */
+    var webDavPassword: String
+        get() = readSecret(KEY_WEBDAV_PASSWORD)
+        set(value) = writeSecret(KEY_WEBDAV_PASSWORD, value)
+
+    /** 上次云端备份成功的时间戳（epochMillis，0=从未） */
+    var lastWebDavBackupAt: Long
+        get() = sp.getLong(KEY_WEBDAV_LAST, 0L)
+        set(value) = sp.edit().putLong(KEY_WEBDAV_LAST, value).apply()
+
+    /** 云备份开关（默认关）：关闭时设置页只保留配置，不触发任何上传 */
+    var webDavEnabled: Boolean
+        get() = sp.getBoolean(KEY_WEBDAV_ENABLED, false)
+        set(value) = sp.edit().putBoolean(KEY_WEBDAV_ENABLED, value).apply()
+
+    /**
      * 时长目标（v0.19，纯配置不进 DB）：
      * 月目标分钟数 / 年目标分钟数，0 = 未设置（总结页不显示进度环）。
      */
@@ -167,6 +195,11 @@ class SettingsStore(context: Context) {
         private const val KEY_EXPERIMENTAL_GLASS = "experimental_glass_enabled"
         private const val KEY_BACKGROUND_STYLE = "background_style"
         private const val KEY_BACKGROUND_IMAGE = "background_image_path"
+        private const val KEY_WEBDAV_URL = "webdav_url"
+        private const val KEY_WEBDAV_USER = "webdav_user"
+        private const val KEY_WEBDAV_PASSWORD = "webdav_password"
+        private const val KEY_WEBDAV_LAST = "webdav_last_backup_at"
+        private const val KEY_WEBDAV_ENABLED = "webdav_enabled"
         private const val KEY_MONTH_GOAL = "month_goal_min"
         private const val KEY_YEAR_GOAL = "year_goal_min"
         const val DEFAULT_BASE = "https://api.steampowered.com"
