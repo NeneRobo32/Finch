@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.23.0 (2026-11-04)
+
+清理版重构（无 DB 变更，**视觉零变化**）：只拆文件、不改绘制逻辑。
+
+- **`StatsScreen.kt`** 1079 → 288 行：8 个卡片（Hero / 月度报告 / 平台 / 标签 / 活跃度 /
+  Top 游戏 / 热力图 / 作息）搬到新的 `StatsCards.kt`（857 行），`private fun` 改 `internal fun`
+- **`ImportScreen.kt`** 1185 → 396 行：按主题拆成 6 个文件 —— `SettingsBackground.kt`（背景选择 /
+  图片副本 / 清理）、`SettingsTheme.kt`（主题色板）、`SettingsGoal.kt`（HLTB 行 / 时长目标）、
+  `SettingsSync.kt`（PSN / Switch 卡＋同步状态）、`SettingsBackup.kt`（备份 / 更新）、
+  `SettingsSwitch.kt`（任天堂网页登录 + 深链回调）
+- **`HomeScreen.kt`** 806 → 479 行：主视觉卡与游戏行卡搬到 `HomeCards.kt`（350 行）
+- **`FinchViewModel.kt`** 551 → 285 行：255 行的 HLTB 英文名解析链整段搬到 `HltbFetch.kt`，
+  签名从成员函数改成扩展函数 `internal fun FinchViewModel.fetchHltbTimes(...)`；
+  为让扩展能摸到成员，`gameDao` / `settings` / `updateGame` 由 `private` 放宽到 `internal`
+- **实现细节**：拆分全程只做搬运——函数体、绘制顺序、颜色、间距、弹簧参数一字未改，
+  所以视觉可回归点为零；`internal` 而非 `public` 是为了不把内部组合函数暴露成 API
+- **实现细节**：`HltbSection.kt` 的调用点需要显式 `import dev.cao.finch.ui.fetchHltbTimes`，
+  扩展函数不会跟着 `FinchViewModel` 一起被带进来（漏了就是 `Unresolved reference`）
+- **测试**：仍是 143 条全过；编译 0 warning
+
 ## 0.22.0 (2026-11-03)
 
 战报图片海报 v1（无 DB 变更）：

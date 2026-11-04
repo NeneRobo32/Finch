@@ -25,6 +25,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
 import dev.cao.finch.TimeFormatter
 import dev.cao.finch.ui.FinchViewModel
+import dev.cao.finch.ui.fetchHltbTimes
 import dev.cao.finch.ui.design.FinchButton
 import dev.cao.finch.ui.design.FinchButtonVariant
 import dev.cao.finch.ui.design.FinchCard

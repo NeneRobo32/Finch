@@ -1,8 +1,8 @@
 # Finch 路线图
 
-基线：`v0.22.0`（DB v21，versionCode 91）。
+基线：`v0.23.0`（DB v21，versionCode 92）。
 IGDB 已整体移除（国内直连不通）；HLTB 改走 Crashdummy 中转 API（Steam 直查+Nlib 英文名+按名搜，默认开、可一键关）；非英文库名走英文名解析链换英文线索再搜（Steam 中文反查/Bangumi 原名/eShop 英文段/游民星空/机翻已移除，v0.15.15–0.15.18）。
-下阶段主题：**清理版（重构 / 性能）**。v0.18–v0.22 连续五版都在动 UI，按规划原则第 3 条该跟一个清理版；之后回补原定的 v0.20「年度报告 / backlog 漏斗」。唯一悬空的旧承诺（战报图片海报 v1）已在 v0.22 兑现。
+下阶段主题：**年度报告 / backlog 漏斗**（原定 v0.20 主题，清理版 v0.23 完成后回归）。v0.18–v0.22 连续五版动 UI，v0.23 已按规划原则第 3 条还了清理债；两条旧承诺（战报图片海报 v1、清理版）均已兑现，只剩 PSN 真机联调（需 npsso token，用户明确暂不做）。
 
 ## 规划原则
 
@@ -45,6 +45,7 @@ IGDB 已整体移除（国内直连不通）；HLTB 改走 Crashdummy 中转 API
 | v0.20.1 ✅热修 | 玻璃覆盖全组件 | 卡片导出自己的玻璃层（`exportedBackdrop`）供卡内控件采样，原先前者只采根部氛围光、只剩磨砂感；`InsetSurface`/输入框一并玻璃化；进场动画改回 `remember` 记账，滚动新出现的卡片也会播 | 21（不变） | 无 |
 | v0.21.0 ✅已交付 | 玻璃变浓＋背景可换 | 四档染色减半、折射翻倍、打开 `depthEffect` 与 `chromaticAberration`；进场幅度加大（42dp/0.88/回弹）；新增背景预设三档（氛围光 / 粒子星空 / 自定义图片），背景即玻璃采样源 | 21（不变） | 无 |
 | v0.22 ✅已交付 | 战报海报 | 1080×1920 图片海报；预览 / 分享 / 存相册；FileProvider | 21（不变） | 无 |
+| v0.23 ✅已交付 | 清理版重构 | 四个巨型文件拆分：`StatsScreen` 1079→288、`ImportScreen` 1185→396、`HomeScreen` 806→479、`FinchViewModel` 551→285；HLTB 解析链抽成扩展函数；**视觉零变化** | 21（不变） | 无 |
 | 远期 / 明确不做 | — | WebDAV 同步（可选）；前台自动识别、账号云同步、国际化明确不做 | — | — |
 
 ```mermaid
@@ -71,6 +72,8 @@ gantt
     配方重调+背景可换            :a9, after a8, 3d
     section v0.22 战报海报
     海报渲染+分享+存相册         :a10, after a9, 3d
+    section v0.23 清理版
+    四个巨型文件拆分             :a11, after a10, 4d
 ```
 
 ---
@@ -257,14 +260,34 @@ gantt
 - **兼容**：Android 10+ 存相册走 MediaStore `RELATIVE_PATH`，无需权限；更老系统退回 `insertImage`
 - **测试**：11 条单测覆盖 `monthCells` / `yearCells` / `deltaLabel` / `heroParts`
 
-## v0.23 ⏳ 候选（待拍板）
+## v0.23 ✅ —— 清理版重构（DB 不变）
 
-原定的「年度报告 / backlog 漏斗」主题仍未重排。按规划原则第 3 条（功能版与重构版交替），
-v0.18–v0.22 已连续五版动 UI，下一版建议先做清理。备选：
+**为什么做**：v0.18–v0.22 连续五版都在动 UI，规划原则第 3 条要求功能版与重构版交替。
+四个文件都长到「改一行要滚半天、review 时找不到边界」的地步。**硬约束：视觉零变化**。
 
-- **清理版重构 / 性能** —— 大 UI 文件拆分（`StatsScreen` 1000+ 行、`ImportScreen` 1100+ 行、
-  `GameDetailScreen`、`HomeScreen`），`FinchViewModel` 单例拆分子 VM；列表项重组范围收窄
-- **年度报告 / backlog 漏斗** —— 原 v0.20 主题，体量大，能把「看」变成「回看一年」
+- **`ui/StatsScreen.kt`** 1079 → 288 行：8 张卡片搬到 `ui/StatsCards.kt`（857 行）
+- **`ui/ImportScreen.kt`** 1185 → 396 行：拆成 `SettingsBackground` / `SettingsTheme` /
+  `SettingsGoal` / `SettingsSync` / `SettingsBackup` / `SettingsSwitch` 六个文件
+- **`ui/HomeScreen.kt`** 806 → 479 行：主视觉卡＋游戏行卡搬到 `ui/HomeCards.kt`（350 行）
+- **`ui/FinchViewModel.kt`** 551 → 285 行：255 行 HLTB 英文名解析链搬到 `ui/HltbFetch.kt`
+- **关键决策**：只做搬运，**函数体一字未改**——绘制顺序、颜色、间距、弹簧参数全部原样。
+  视觉零变化是可验证的约束（用户明确要求），任何顺手优化都会让这次重构失去验收标准
+- **关键决策**：拆分后的组合函数用 `internal` 而非 `public`。它们在同一个 package 里互相调用，
+  没有跨模块需求；`private` 又不行（跨文件）。`internal` 既满足可见性又不扩大公开 API
+- **关键决策**：`fetchHltbTimes` 抽成**扩展函数**而不是搬进新的子 VM。
+  它只读 `gameDao` / `settings` / `updateGame`，挂在新 VM 上会引入状态同步问题；
+  扩展函数保持「无新状态」的同时把 255 行从 `FinchViewModel` 里挪走
+- **代价**：`gameDao` / `settings` / `updateGame` 必须由 `private` 放宽到 `internal`
+- **坑**：扩展函数不会跟着接收者类型一起被带进作用域，`HltbSection.kt` 需显式
+  `import dev.cao.finch.ui.fetchHltbTimes`，漏了就是 `Unresolved reference`
+- **验收**：编译 0 warning、143 条单测全过、视觉与 v0.22.0 逐屏一致
+
+## v0.24 ⏳ 候选（待拍板）
+
+清理版的债已在 v0.23 还掉，下一版回到功能主线。备选：
+
+- **年度报告 / backlog 漏斗** —— 原 v0.20 主题，体量大，能把「看」变成「回看一年」（建议优先）
+- **`GameDetailScreen` 拆分** —— 669 行仍偏大，剩余的唯一超大 UI 文件；顺带可收窄列表项重组范围
 - **PSN 真机联调** —— 从 v0.13 挂到现在的技术债，需 npsso token（用户已明确暂时不做）
 
 ---
@@ -310,4 +333,5 @@ v0.18–v0.22 已连续五版动 UI，下一版建议先做清理。备选：
 8. **v0.20 ✅ 已交付**（v0.20.0 / v0.20.1）：全面玻璃化——实验性开关＋双路渲染、设置页折叠分组、进场动画；热修补齐"玻璃只有底栏看得出来"与"动画只播一次"。
 9. **v0.21 ✅ 已交付**（v0.21.0）：玻璃变浓（纵深变形＋边缘色散）＋背景可换三预设。
 10. **v0.22 ✅ 已交付**（v0.22.0）：战报图片海报 v1——1080×1920 竖版海报、预览 / 分享 / 存相册、FileProvider。
-11. **v0.23 ⏳ 待拍板**：清理版重构（大 UI 文件拆分、ViewModel 拆分）／年度报告与 backlog 漏斗（原 v0.20 主题）／PSN 真机联调。
+11. **v0.23 ✅ 已交付**（v0.23.0）：清理版重构——`StatsScreen` / `ImportScreen` / `HomeScreen` / `FinchViewModel` 四个巨型文件拆分，视觉零变化。
+12. **v0.24 ⏳ 待拍板**：年度报告与 backlog 漏斗（原 v0.20 主题）／`GameDetailScreen` 拆分／PSN 真机联调。
