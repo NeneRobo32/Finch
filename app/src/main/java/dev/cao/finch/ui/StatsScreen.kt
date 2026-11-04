@@ -35,6 +35,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.TrendingDown
 import androidx.compose.material.icons.automirrored.filled.TrendingUp
+import androidx.compose.material.icons.filled.Assessment
 import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.IosShare
@@ -78,6 +79,7 @@ import dev.cao.finch.ui.design.FinchInsetDivider
 import dev.cao.finch.ui.design.FinchSegmented
 import dev.cao.finch.ui.design.FinchSlider
 import dev.cao.finch.ui.design.FinchSpace
+import dev.cao.finch.ui.report.YearReportScreen
 import dev.cao.finch.ui.share.PosterPreviewDialog
 import dev.cao.finch.ui.share.PosterShare
 import dev.cao.finch.ui.share.ReportPoster
@@ -102,6 +104,18 @@ private data class Quint<A, B, C, D, E>(val first: A, val second: B, val third: 
 fun StatsScreen(viewModel: FinchViewModel) {
     var mode by remember { mutableStateOf(StatsMode.MONTH) }
     var anchorMonth by remember { mutableStateOf(YearMonth.now()) }
+    // v0.24：年度报告是独立的一整页（纵向叙事），从总结页进入，返回时回到原来的月/年视图
+    var showYearReport by remember { mutableStateOf(false) }
+    val allGames by viewModel.games.collectAsState()
+    if (showYearReport) {
+        YearReportScreen(
+            year = anchorMonth.year,
+            games = allGames,
+            viewModel = viewModel,
+            onBack = { showYearReport = false },
+        )
+        return
+    }
 
     val zone = ZoneId.systemDefault()
     val (title, fromMillis, toMillis, prevFromMillis, prevToMillis) = if (mode == StatsMode.MONTH) {
@@ -164,6 +178,13 @@ fun StatsScreen(viewModel: FinchViewModel) {
                 title = "总结",
                 subtitle = "${if (mode == StatsMode.MONTH) "按月" else "按年"}回顾你的游玩节奏",
                 actions = {
+                    // v0.24：年度报告入口，全年有记录时才给
+                    FinchIconButton(
+                        icon = Icons.Filled.Assessment,
+                        contentDescription = "年度报告",
+                        ghost = true,
+                        onClick = { showYearReport = true },
+                    )
                     if (total > 0) {
                         FinchIconButton(
                             icon = Icons.Filled.IosShare,
