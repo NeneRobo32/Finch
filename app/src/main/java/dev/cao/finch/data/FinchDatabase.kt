@@ -20,7 +20,7 @@ class Converters {
 }
 
 /** Room schema 版本（迁移与备份校验共用） */
-const val FINCH_DB_VERSION = 21
+const val FINCH_DB_VERSION = 22
 
 @Database(
     entities = [Game::class, PlaySession::class, PlaytimeSnapshot::class, ReleaseFollow::class],
@@ -316,13 +316,41 @@ abstract class FinchDatabase : RoomDatabase() {
             }
         }
 
+        // v0.26.1（DB 22）：删掉会话标签列。标签只用于「记录」页筛选与「总结」页的标签分布，
+        // 两者都已移除，留着列只会让每次写入多带一个永远没人读的字段。
+        // 重建表按 Room 生成的 schema 顺序排（tag 在 note 之前），数据原样搬过去。
+        val MIGRATION_21_22 = object : Migration(21, 22) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `play_sessions_new` (" +
+                        "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "`gameId` INTEGER NOT NULL, " +
+                        "`startTime` INTEGER NOT NULL, " +
+                        "`endTime` INTEGER, " +
+                        "`source` TEXT NOT NULL, " +
+                        "`pauseAccumMs` INTEGER NOT NULL DEFAULT 0, " +
+                        "`pauseStartedAt` INTEGER, " +
+                        "`note` TEXT, " +
+                        "FOREIGN KEY(`gameId`) REFERENCES `games`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE)"
+                )
+                db.execSQL(
+                    "INSERT INTO play_sessions_new (id, gameId, startTime, endTime, source, pauseAccumMs, pauseStartedAt, note) " +
+                        "SELECT id, gameId, startTime, endTime, source, pauseAccumMs, pauseStartedAt, note FROM play_sessions"
+                )
+                db.execSQL("DROP TABLE play_sessions")
+                db.execSQL("ALTER TABLE play_sessions_new RENAME TO play_sessions")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_play_sessions_gameId` ON `play_sessions` (`gameId`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_play_sessions_startTime` ON `play_sessions` (`startTime`)")
+            }
+        }
+
         /** 全量手写迁移（生产 build 与迁移测试共用一份，避免两处链不同步） */
         val ALL_MIGRATIONS = arrayOf(
             MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5,
             MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9,
             MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13,
             MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17, MIGRATION_17_18,
-            MIGRATION_18_19, MIGRATION_19_20, MIGRATION_20_21,
+            MIGRATION_18_19, MIGRATION_19_20, MIGRATION_20_21, MIGRATION_21_22,
         )
 
         fun build(context: Context): FinchDatabase =

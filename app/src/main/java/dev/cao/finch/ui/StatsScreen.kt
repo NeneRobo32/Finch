@@ -36,7 +36,6 @@ import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.TrendingDown
 import androidx.compose.material.icons.automirrored.filled.TrendingUp
 import androidx.compose.material.icons.filled.Assessment
-import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.IosShare
 import androidx.compose.material.icons.filled.Leaderboard
@@ -70,7 +69,6 @@ import dev.cao.finch.FinchApp
 import dev.cao.finch.TimeFormatter
 import dev.cao.finch.data.DailyTotal
 import dev.cao.finch.data.PlatformTotal
-import dev.cao.finch.data.TagTotal
 import dev.cao.finch.data.TopGameRow
 import dev.cao.finch.ui.design.FinchCard
 import dev.cao.finch.ui.design.FinchHeader
@@ -96,8 +94,9 @@ private data class Quint<A, B, C, D, E>(val first: A, val second: B, val third: 
 
 /**
  * 总结页（2026-10 UI 重构）：
- * 页头 +「月/年 + 期数切换」控制卡 → 渐变大数字 hero → 本期报告 / 奖杯 / 热力 / 活动 /
+ * 页头 +「月/年 + 期数切换」控制卡 → 玻璃大数字 hero → 本期报告 / 奖杯 / 热力 /
  * 平台 / 作息 / 排行，全部落在同一套 FinchCard 与图表配色里。
+ * v0.26：「活动」卡被热力图完全覆盖，已删除；作息与高峰时段改看最近 90 天。
  * 数据查询与分享逻辑不变。
  */
 @Composable
@@ -145,15 +144,18 @@ fun StatsScreen(viewModel: FinchViewModel) {
     val distinctGames by remember(fromMillis, toMillis) { viewModel.distinctGamesInRange(fromMillis, toMillis) }
         .collectAsState(initial = 0)
     // v0.19.2：月视图按周几看作息，年视图按月看（一年里周几分布没有意义）
-    val weekday by remember(fromMillis, toMillis) { viewModel.weekdayTotals(fromMillis, toMillis) }
+    // v0.26：周几/高峰时段不再跟「当期」走，统一看最近 90 天——只选一个月时
+    // 上一周的数据还占着位置，那不是「作息」，是「这个月的作息」，读起来是错的。
+    val rhythmFrom = remember { LocalDate.now().minusDays(RHYTHM_DAYS.toLong()).atStartOfDay(zone).toInstant().toEpochMilli() }
+    val rhythmTo = remember { LocalDate.now().plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli() }
+    val spans by remember(rhythmFrom, rhythmTo) { viewModel.sessionSpans(rhythmFrom, rhythmTo) }
         .collectAsState(initial = emptyList())
+    val rhythm = remember(spans, rhythmFrom, rhythmTo) { partitionRhythm(spans, rhythmFrom, rhythmTo, zone) }
+    val weekday = rhythm.weekday
+    val hours = rhythm.hours
     val months by remember(fromMillis, toMillis) { viewModel.monthTotals(fromMillis, toMillis) }
         .collectAsState(initial = emptyList())
-    val hours by remember(fromMillis, toMillis) { viewModel.hourTotals(fromMillis, toMillis) }
-        .collectAsState(initial = emptyList())
-    // v0.19：标签分布（null 归「未分类」）与时长目标（纯配置，导入页设置）
-    val tags by remember(fromMillis, toMillis) { viewModel.tagTotals(fromMillis, toMillis) }
-        .collectAsState(initial = emptyList())
+    // 时长目标（纯配置，导入页设置）
     val context = androidx.compose.ui.platform.LocalContext.current
     val store = remember(context) { (context.applicationContext as FinchApp).settings }
     val goalMin = if (mode == StatsMode.MONTH) store.monthGoalMin else store.yearGoalMin
@@ -266,11 +268,9 @@ fun StatsScreen(viewModel: FinchViewModel) {
         item { HeroTotalCard(total, prevTotal, steamMin, mode, goalMin) }
 
         if (total > 0) item { MonthReportCard(distinctGames, daily, topGames, mode) }
-        if (tags.isNotEmpty()) item { TagDistributionCard(tags, total) }
         if (daily.isNotEmpty()) {
             item { HeatmapCard(daily = daily, mode = mode, anchorMonth = anchorMonth) }
         }
-        if (daily.isNotEmpty()) item { ActivityCard(daily, mode) }
         if (platforms.isNotEmpty()) item { PlatformCard(platforms, total) }
         if (weekday.isNotEmpty() || months.isNotEmpty() || hours.isNotEmpty()) {
             item { RhythmCard(weekday, months, hours, mode) }
@@ -294,7 +294,6 @@ fun StatsScreen(viewModel: FinchViewModel) {
                 distinctGames = distinctGames,
                 topGames = topGames,
                 daily = daily,
-                tags = tags,
                 goalMin = goalMin,
                 isYear = mode == StatsMode.YEAR,
                 year = anchorMonth.year,

@@ -56,12 +56,6 @@ class DiffWriteSessionsTest {
         override fun observeRunning(): Flow<PlaySession?> = TODO()
         override suspend fun running(): PlaySession? = TODO()
         override suspend fun byId(id: Long): PlaySession? = rows.firstOrNull { it.id == id }
-        override suspend fun updateTag(id: Long, tag: String?) {
-            val i = rows.indexOfFirst { it.id == id }
-            if (i >= 0) rows[i] = rows[i].copy(tag = tag)
-        }
-        override fun observeTagTotals(fromMillis: Long, toMillis: Long): Flow<List<TagTotal>> = TODO()
-        override fun observeTagTotalsForGame(gameId: Long): Flow<List<TagTotal>> = TODO()
         override fun observeTotalsAll(): Flow<List<GameTotalMini>> = TODO()
         override fun observeLastPlayedAll(): Flow<List<LastPlayedRow>> = TODO()
         override fun observeDistinctGamesInRange(fromMillis: Long, toMillis: Long): Flow<Int> = TODO()
@@ -80,9 +74,8 @@ class DiffWriteSessionsTest {
             rows.filter { it.gameId == gameId && it.endTime != null }
                 .sumOf { Duration.between(it.startTime, it.endTime).toMillis() - it.pauseAccumMs }
                 .coerceAtLeast(0L)
-        override fun observeWeekdayTotals(fromMillis: Long, toMillis: Long): Flow<List<BucketTotal>> = TODO()
         override fun observeMonthTotals(fromMillis: Long, toMillis: Long): Flow<List<BucketTotal>> = TODO()
-        override fun observeHourTotals(fromMillis: Long, toMillis: Long): Flow<List<BucketTotal>> = TODO()
+        override fun observeSessionSpans(fromMillis: Long, toMillis: Long): Flow<List<SessionSpan>> = TODO()
     }
 
     private fun snapshot(totalMin: Long, at: LocalDateTime) =

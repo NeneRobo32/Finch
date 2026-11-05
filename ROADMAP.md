@@ -1,8 +1,8 @@
 # Finch 路线图
 
-基线：`v0.25.0`（DB v21，versionCode 94）。
+基线：`v0.26.1`（DB v22，versionCode 95）。
 IGDB 已整体移除（国内直连不通）；HLTB 改走 Crashdummy 中转 API（Steam 直查+Nlib 英文名+按名搜，默认开、可一键关）；非英文库名走英文名解析链换英文线索再搜（Steam 中文反查/Bangumi 原名/eShop 英文段/游民星空/机翻已移除，v0.15.15–0.15.18）。
-下阶段主题：**待定**。v0.25 把最后三条候选一次做完——PSN 真机联调（真 npsso 打进真实接口，修掉媒体 App 误入、商标符号重复建条、refresh 有效期文案三处问题）、`GameDetailScreen` 拆分、WebDAV 云备份。至此旧承诺与技术债清空：v0.18–v0.22 连续五版动 UI，v0.23 还清理债，v0.24 补年度报告，v0.25 收尾 PSN 与云备份。
+下阶段主题：**待定**。v0.26 系列只做减法与纠错、不加功能——v0.26 修总结页三处显示口径（作息／高峰时段改看最近 90 天并按时长摊分、删与热力图重复的「活动」卡、总时长 hero 改玻璃），v0.26.1 把标签功能整体删掉（连同 `play_sessions.tag` 列，DB 21→22）。到此已经没有待办的技术债。
 
 ## 规划原则
 
@@ -48,6 +48,8 @@ IGDB 已整体移除（国内直连不通）；HLTB 改走 Crashdummy 中转 API
 | v0.23 ✅已交付 | 清理版重构 | 四个巨型文件拆分：`StatsScreen` 1079→288、`ImportScreen` 1185→396、`HomeScreen` 806→479、`FinchViewModel` 551→285；HLTB 解析链抽成扩展函数；**视觉零变化** | 21（不变） | 无 |
 | v0.24 ✅已交付 | 年度报告＋库存漏斗 | 新增整页年度报告（一句话总结 / 今年通关 / 库存变动 / 复用 8 张卡片 / 库存漏斗）；`ui/report/YearReportData.kt` 纯口径（连续天数、峰值、本年通关入库、完成率、吃灰最久）；无新增 DAO | 21（不变） | 无 |
 | v0.25 ✅已交付 | PSN 联调＋详情拆分＋云备份 | PSN 真机实测修三处（媒体 App 类目过滤 `isPlayableCategory`、`matchKey` 归一认领防重复建条、refresh 有效期 10 天文案与 2 天预警窗口）；`GameDetailScreen` 669→约 260 行（`GameDetailCards.kt`）；WebDAV 云备份（探活/上传/列出/下载，Basic 认证，从不删远端文件） | 21（不变） | 无 |
+| v0.26 ✅已交付 | 总结页口径修复 | 作息/高峰时段固定看最近 90 天（不再跟当期月/年走）且按时长摊分到各小时（`ui/StatsRhythm.kt`，`observeSessionSpans`）；删掉与热力图重复的「活动」卡；本月总时长 hero 从主题色渐变改为 `GlassSurface(Hero)` | 21（不变） | 无 |
+| v0.26.1 ✅已交付 | 删标签功能 | 会话标签整个拆掉：记录页胶囊筛选、编辑弹窗打标、总结页「标签分布」卡、战报「主打标签」格全部移除；`play_sessions.tag` 列真删（重建表）；备注功能保留 | 21→22 | 无 |
 | 远期 / 明确不做 | — | 前台自动识别、账号云同步、国际化明确不做 | — | — |
 
 ```mermaid
@@ -114,7 +116,7 @@ gantt
 **为什么**：`StatsScreen.kt` 已有 `dailyTotals/topGames`，全是现成数据做展示，零联调、传播最强。
 
 - **热力图** ✅：月视图按周对齐，年视图 12 月横滑
-- **作息** ✅：周几条形（周一开头）+ 24 小时高峰柱
+- **作息** ✅：周几条形（周一开头）+ 24 小时高峰柱（v0.26 起固定看最近 90 天且按时长摊分）
 - **回本率** ❌已移除（v0.14.1：详情页价格卡 + `SteamStoreClient.fetchPrice` + `FinchViewModel.fetchPriceOnce` + 价格单测全删；DB 11 重建 games 表去掉价格列）
 - **战报分享 v1** ✅：文本版走系统分享（图片模板延到 v0.17）
 
@@ -186,8 +188,7 @@ gantt
 
 会话标签与时长目标落地；图片海报拆到 v0.21 单独做（需要 FileProvider，单独一版更干净）。
 
-- ✅ **会话标签**：`play_sessions.tag TEXT`（`MIGRATION_19_20`，主线/支线/联机/多周目/自定义，null = 未分类）；记录页顶部胶囊筛选、编辑弹窗内打标、详情页同步可改
-- ✅ **标签分布**：总结页「标签分布」卡（本期时长＋条数＋占比条），战报文本带主打标签
+- ❌ **会话标签**：`play_sessions.tag TEXT`（`MIGRATION_19_20`）与记录页胶囊筛选、编辑弹窗打标、总结页「标签分布」卡——在 v0.26.1 全部删除，标签维度对时长统计没有结论，只增录入成本
 - ✅ **时长目标**：`SettingsStore.monthGoalMin / yearGoalMin`（纯配置无 DB），设置页可填可清，总结页 Hero 卡出进度与百分比
 - ⏭ **战报图片海报 v1**：改到 v0.21（与分享增强同批，需 `FileProvider`）
 - **验收**：`schemas/20.json` 入库；标签升级迁移老会话不丢；单测 5+1 新增全绿
@@ -297,7 +298,7 @@ gantt
   峰值月份／星期／单日、本年通关／入库（按 `completedAt` / `createdAt` 年份）、完成率、吃灰最久。
   全部无状态纯函数，UI 只负责排版
 - **新增 `ui/report/YearReportScreen.kt`**：整页纵向叙事——总量／同比／目标 → 一句话总结 →
-  今年通关清单 → 库存变动 → 热力／作息／平台／标签／Top → 库存漏斗 → 页脚
+  今年通关清单 → 库存变动 → 热力／作息／平台／Top → 库存漏斗 → 页脚
 - **新增 `ui/report/BacklogFunnelCard.kt`**：五段堆叠条 + 每段款数/占比/合计时长 + 完成率 + 吃灰三款
 - **入口**：总结页页头加了「年度报告」按钮；年份取当前 `anchorMonth`，所以翻到 2024 年再点进去
   看到的就是 2024 的报告；`BackHandler` 与左上箭头都回原视图
@@ -359,6 +360,57 @@ gantt
 
 - **验收**：编译 0 warning、177 条单测全过（PSN 7 条 + WebDAV 11 条）
 
+## v0.26 ✅ 已交付 —— 总结页口径修复（DB 不变）
+
+**为什么做**：三处都是「显示得不对」而不是「功能不够」——总结页复读出三个问题：
+只选一个月时作息里上一周的数据还占着位置（那不是「作息」，是「这个月的作息」）；
+高峰时段把整条会话算进开始那一小时，20:00 玩到 02:00 被记成「20 点玩了 6 小时」；
+「活动」卡与热力图表达同一件事；本月总时长 hero 是主题色实色渐变，跟本页其它玻璃卡摆在一起像拼贴。
+
+- **作息 / 高峰时段改口径**：固定看最近 90 天（`RHYTHM_DAYS`），不再跟当期月/年走；
+  新增 `ui/StatsRhythm.kt` 的 `partitionRhythm(spans, from, to, zone)`，按小时切段、
+  按「有效时长／墙钟时长」占比摊到每一格，跨零点的会话落到各自日期的周几桶。
+  暂停只能按比例摊（库里只存 `pauseAccumMs`，没有暂停起止），KDoc 写明。
+- **新增 DAO**：`SessionDao.observeSessionSpans(fromMillis, toMillis): Flow<List<SessionSpan>>`
+  只捞区间与有效时长，**删掉** `observeWeekdayTotals` / `observeHourTotals`（原口径的根因）。
+  新增 `data/RowPojos.kt` 的 `SessionSpan(startMillis, endMillis, effectiveMs)`。
+- **删「活动」卡**：`StatsCards.kt` 的 `ActivityCard` / `BarChart` / `Bar` 整段移除——
+  它与热力图是同一份 `dailyTotals` 的两种画法，热力图信息更密（还能看连续与断档）。
+- **hero 改玻璃**：`HeroTotalCard` 从 `.shadow + Brush.linearGradient(primary→tertiary)` 换成
+  `GlassSurface(style = GlassStyle.Hero, shape = FinchShapes.hero)`，文字从固定 `Color.White`
+  换成 `onSurface` 系；关掉「全面玻璃化」时由 `SolidPanel` 接管，不会退回刺眼的纯色。
+- **改动范围**：`ui/StatsCards.kt`（-107 行）、`ui/StatsScreen.kt`、`ui/report/YearReportScreen.kt`、
+  `ui/FinchViewModel.kt`、`data/FinchDaos.kt`、`data/RowPojos.kt`；新增 `ui/StatsRhythm.kt`
+  与 `ui/StatsRhythmTest.kt`（7 条）。
+- **验收**：编译 0 warning；单测新增 7 条覆盖「两小时各分一半 / 跨零点换天 / 暂停按比例摊 /
+  窗口裁剪 / 零长度脏数据 / 周几 0=周日 / 空输入」。
+
+## v0.26.1 ✅ 已交付 —— 删掉标签功能（DB 21→22）
+
+**为什么做**：标签是 v0.19 加的「记录更细」的一半，上线后没有任何一次用它得出结论——
+「主线 8 小时 / 支线 3 小时」这种数字既不影响玩什么，也不影响买什么，只让每次记录多两次点击。
+真正会写的那个字段是备注（记这次玩到哪了），备注留下来。留着 tag 列还要让每次插入多带一个
+没人读的字段，索性连列一起删。
+
+- **删除的入口**：记录页顶部胶囊筛选条（`TagFilterRow` + `tagFilter` state + 「这个标签下没有记录」
+  这套分支）、编辑弹窗里的 `TagPicker`（四档预设 + 自定义）、记录卡上的标签徽章、详情页会话行的「· 标签」。
+  现在记录页只有一种视图：最近 300 条按天分组。
+- **删除的统计**：总结页「标签分布」卡（`TagDistributionCard`，-66 行）、年度报告里的同一张卡、
+  `SessionDao.observeTagTotals/observeTagTotalsForGame/updateTag`、`FinchViewModel.tagTotals/tagTotalsForGame/setSessionTag`
+  （`setSessionTag` 本来就是零调用者的死方法）。
+- **战报海报**：三格速览第三格「主打标签」改成「日均」（有记录的那些天的平均时长，
+  `ReportPoster.dailyAverageLabel`）——原来那个格子是海报上唯一的标签出口。
+- **`play_sessions.tag` 真删**：`MIGRATION_21_22` 重建表（保留 `id/gameId/startTime/endTime/source/
+  pauseAccumMs/pauseStartedAt/note` + 两个索引 + 外键 CASCADE），DB 21→22。历史迁移
+  `MIGRATION_19_20`（ADD COLUMN tag）**保留不动**——迁移链要能重放，改历史迁移等于让老库升不上来。
+- **备注能力保留**：`data/SessionTag.kt` 拆成 `data/SessionNote.kt`（只剩 `MAX_LENGTH = 120` 与
+  `normalize()`），`updateSessionTimes` 去掉 tag 参数；`SessionTagTest` 换成 `SessionNoteTest`（3 条）。
+- **改动范围**：`data/{PlaySession,RowPojos,FinchDaos,FinchDatabase,SessionTag→SessionNote}.kt`、
+  `ui/{HistoryScreen,SessionEditDialog,GameDetailScreen,FinchViewModel,StatsCards,StatsScreen}.kt`、
+  `ui/report/YearReportScreen.kt`、`ui/share/ReportPoster.kt`；删除 `SessionTagTest.kt`，新增 `SessionNoteTest.kt`。
+- **验收**：编译 0 warning；`MigrationTest` 加 `v21升级到当前_数据保留` 与
+  `v21到22_标签列被移除_备注与其余数据保留`（PRAGMA 里无 tag、note 与时长口径不变）。
+
 ---
 
 ## DB 演进一览
@@ -379,6 +431,7 @@ gantt
 | 19 | v0.18.8（已交付） | 移除 `play_sessions.estimated`（`MIGRATION_18_19` 先 `DELETE ... WHERE estimated = 1` 清推算行，再重建表去列）；取消「按官方累计差额摊历史会话」，记录只存真实会话 |
 | 20 | v0.19.0（已交付） | `play_sessions.tag TEXT`（`MIGRATION_19_20`，无 DEFAULT；null = 未分类）；会话标签 + 记录页筛选 + 总结页标签分布；时长目标走 SettingsStore 不动 DB |
 | 21 | v0.19.1（已交付） | `play_sessions.note TEXT`（`MIGRATION_20_21`，无 DEFAULT；null = 没写）；单条记录备注，记录页/详情页可写可看，不进统计口径 |
+| 22 | v0.26.1（已交付） | 重建 `play_sessions` 去掉 `tag` 列（`MIGRATION_21_22`，保留 `note`）；标签功能整体删除，标签相关 DAO/ViewModel/卡片/筛选与海报格全部移除 |
 
 备份恢复逻辑（`BackupManager.validate()`）按 `FINCH_DB_VERSION` 校验，跨版恢复走 Room 自动迁移，老备份可读。
 
@@ -405,3 +458,5 @@ gantt
 11. **v0.23 ✅ 已交付**（v0.23.0）：清理版重构——`StatsScreen` / `ImportScreen` / `HomeScreen` / `FinchViewModel` 四个巨型文件拆分，视觉零变化。
 12. **v0.24 ✅ 已交付**（v0.24.0）：年度报告 ＋ 库存漏斗——新增 `ui/report/` 三个文件，复用既有卡片与海报。
 13. **v0.25 ✅ 已交付**（v0.25.0）：PSN 真机联调 ＋ `GameDetailScreen` 拆分 ＋ WebDAV 云备份——三条候选一次清空。
+14. **v0.26 ✅**：总结页口径修复——作息/高峰时段改 90 天窗口并按时长摊分、删「活动」卡、hero 改玻璃。纯修显示，无新功能。
+15. **v0.26.1 ✅**：删标签功能——会话标签、记录页筛选、总结页标签分布、战报主打标签全部移除，`tag` 列真删（DB 21→22）。减法版，备注功能保留。

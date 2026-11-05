@@ -2,8 +2,6 @@ package dev.cao.finch.ui
 
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -29,7 +27,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.TrendingDown
 import androidx.compose.material.icons.automirrored.filled.TrendingUp
-import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Leaderboard
 import androidx.compose.material.icons.filled.Phonelink
@@ -43,10 +40,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -55,11 +49,13 @@ import androidx.compose.ui.unit.sp
 import dev.cao.finch.TimeFormatter
 import dev.cao.finch.data.DailyTotal
 import dev.cao.finch.data.PlatformTotal
-import dev.cao.finch.data.TagTotal
 import dev.cao.finch.data.TopGameRow
 import dev.cao.finch.ui.design.FinchCard
 import dev.cao.finch.ui.design.FinchInsetDivider
 import dev.cao.finch.ui.design.FinchSpace
+import dev.cao.finch.ui.design.GlassStyle
+import dev.cao.finch.ui.design.GlassSurface
+import dev.cao.finch.ui.design.finchEnter
 import dev.cao.finch.ui.theme.FinchShapes
 import java.time.Duration
 import java.time.LocalDate
@@ -79,48 +75,24 @@ private fun rankColor(i: Int) = when (i) {
     else -> RankNeutral
 }
 
-/** 渐变 hero：总时长 + 环比 + Steam 终身时长 */
+/** 玻璃 hero：总时长 + 环比 + Steam 终身时长 */
 @Composable
 internal fun HeroTotalCard(totalMs: Long, prevMs: Long, steamMin: Long, mode: StatsMode, goalMin: Long) {
     val scheme = MaterialTheme.colorScheme
-    val shape = FinchShapes.hero
     val delta = if (prevMs > 0) (totalMs - prevMs) * 100.0 / prevMs else null
     val up = delta == null || delta >= 0
-    Box(
-        Modifier
+    // v0.26：原来是自绘主题色渐变 + 两个白色光斑的实色 hero，跟本页其它 FinchCard 摆在一起
+    // 像从另一个 App 贴过来的。改用 GlassSurface 的 Hero 档（底色最淡、折射最轻），
+    // 让氛围背景直接透上来；文字也随之从固定的 Color.White 换成主题 onSurface 系。
+    // 关掉「全面玻璃化」时由 SolidPanel 接管，不会退回一块刺眼的纯色。
+    GlassSurface(
+        modifier = Modifier
             .fillMaxWidth()
             .height(188.dp)
-            .shadow(
-                18.dp, shape,
-                ambientColor = scheme.primary.copy(alpha = 0.30f),
-                spotColor = scheme.primary.copy(alpha = 0.38f),
-            )
-            .clip(shape)
-            .background(
-                Brush.linearGradient(
-                    listOf(scheme.primary, scheme.tertiary),
-                )
-            ),
+            .finchEnter(),
+        style = GlassStyle.Hero,
+        shape = FinchShapes.hero,
     ) {
-        // 装饰光斑（径向渐变，避免出现一块生硬的白色圆盘）
-        Box(
-            Modifier
-                .align(Alignment.TopEnd)
-                .size(180.dp)
-                .background(
-                    Brush.radialGradient(listOf(Color.White.copy(alpha = 0.24f), Color.Transparent)),
-                    CircleShape,
-                ),
-        )
-        Box(
-            Modifier
-                .align(Alignment.BottomStart)
-                .size(110.dp)
-                .background(
-                    Brush.radialGradient(listOf(Color.White.copy(alpha = 0.18f), Color.Transparent)),
-                    CircleShape,
-                ),
-        )
         Column(
             Modifier
                 .fillMaxSize()
@@ -130,7 +102,7 @@ internal fun HeroTotalCard(totalMs: Long, prevMs: Long, steamMin: Long, mode: St
             Text(
                 if (mode == StatsMode.MONTH) "本月总时长" else "今年总时长",
                 style = MaterialTheme.typography.labelMedium,
-                color = Color.White.copy(alpha = 0.85f),
+                color = scheme.onSurfaceVariant,
             )
             AnimatedContent(
                 targetState = TimeFormatter.hoursMinutes(Duration.ofMillis(totalMs)),
@@ -146,7 +118,7 @@ internal fun HeroTotalCard(totalMs: Long, prevMs: Long, steamMin: Long, mode: St
                     txt,
                     style = MaterialTheme.typography.displayMedium,
                     fontWeight = FontWeight.Bold,
-                    color = Color.White,
+                    color = scheme.onSurface,
                     maxLines = 1,
                 )
             }
@@ -159,14 +131,14 @@ internal fun HeroTotalCard(totalMs: Long, prevMs: Long, steamMin: Long, mode: St
                         Text(
                             if (frac >= 1f) "已达成目标 $goalTxt" else "目标 $goalTxt · 还差 ${TimeFormatter.hoursMinutes(Duration.ofMillis((goalMin * 60_000L - totalMs).coerceAtLeast(0L)))}",
                             style = MaterialTheme.typography.bodySmall,
-                            color = Color.White.copy(alpha = 0.92f),
+                            color = scheme.onSurfaceVariant,
                         )
                         Spacer(Modifier.width(FinchSpace.sm))
                         Text(
                             "${(frac * 100).roundToInt()}%",
                             style = MaterialTheme.typography.labelMedium,
                             fontWeight = FontWeight.SemiBold,
-                            color = Color.White,
+                            color = scheme.onSurface,
                         )
                     }
                     Spacer(Modifier.height(FinchSpace.xs))
@@ -175,14 +147,14 @@ internal fun HeroTotalCard(totalMs: Long, prevMs: Long, steamMin: Long, mode: St
                             .fillMaxWidth()
                             .height(6.dp)
                             .clip(FinchShapes.pill)
-                            .background(Color.White.copy(alpha = 0.24f)),
+                            .background(scheme.surfaceVariant.copy(alpha = 0.75f)),
                     ) {
                         Box(
                             Modifier
                                 .fillMaxHeight()
                                 .fillMaxWidth(frac)
                                 .clip(FinchShapes.pill)
-                                .background(Color.White.copy(alpha = 0.92f)),
+                                .background(scheme.primary),
                         )
                     }
                 }
@@ -192,7 +164,7 @@ internal fun HeroTotalCard(totalMs: Long, prevMs: Long, steamMin: Long, mode: St
                             Icon(
                                 if (up) Icons.AutoMirrored.Filled.TrendingUp else Icons.AutoMirrored.Filled.TrendingDown,
                                 contentDescription = null,
-                                tint = Color.White.copy(alpha = 0.9f),
+                                tint = scheme.onSurface.copy(alpha = 0.9f),
                                 modifier = Modifier.size(16.dp),
                             )
                             Spacer(Modifier.width(FinchSpace.xs))
@@ -203,7 +175,7 @@ internal fun HeroTotalCard(totalMs: Long, prevMs: Long, steamMin: Long, mode: St
                                 else -> "较上期 ${if (up) "+" else ""}${"%.0f".format(delta)}%"
                             },
                             style = MaterialTheme.typography.bodySmall,
-                            color = Color.White.copy(alpha = 0.9f),
+                            color = scheme.onSurfaceVariant,
                         )
                     }
                 }
@@ -211,7 +183,7 @@ internal fun HeroTotalCard(totalMs: Long, prevMs: Long, steamMin: Long, mode: St
                     Text(
                         "Steam 库累计 ${TimeFormatter.hoursMinutes(Duration.ofMinutes(steamMin))}（终身）",
                         style = MaterialTheme.typography.labelSmall,
-                        color = Color.White.copy(alpha = 0.8f),
+                        color = scheme.onSurfaceVariant,
                     )
                 }
             }
@@ -341,159 +313,6 @@ internal fun PlatformCard(platforms: List<PlatformTotal>, totalMs: Long) {
                     modifier = Modifier.width(38.dp),
                     textAlign = TextAlign.End,
                 )
-            }
-        }
-    }
-}
-
-/** 标签分布（v0.19）：按标签聚合本期时长，未打标的归「未分类」 */
-@Composable
-internal fun TagDistributionCard(tags: List<TagTotal>, totalMs: Long) {
-    val shown = tags.take(5)
-    FinchCard(title = "标签分布", icon = Icons.Filled.Leaderboard) {
-        if (tags.all { it.tag.isEmpty() }) {
-            Text(
-                "这些记录还没打标签。在「记录」页点一条记录，选主线 / 支线 / 联机 / 多周目，这里就会有分布。",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            return@FinchCard
-        }
-        shown.forEach { t ->
-            val frac = if (totalMs > 0) (t.totalMs.toFloat() / totalMs).coerceIn(0f, 1f) else 0f
-            Column(Modifier.padding(vertical = 3.dp)) {
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        if (t.tag.isEmpty()) "未分类" else t.tag,
-                        style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.weight(1f),
-                    )
-                    Text(
-                        TimeFormatter.hoursMinutes(Duration.ofMillis(t.totalMs)),
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.Medium,
-                    )
-                    Spacer(Modifier.width(FinchSpace.sm))
-                    Text(
-                        "${(frac * 100).roundToInt()}% · ${t.sessionCount} 条",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                Spacer(Modifier.height(4.dp))
-                Box(
-                    Modifier
-                        .fillMaxWidth()
-                        .height(6.dp)
-                        .clip(FinchShapes.pill)
-                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)),
-                ) {
-                    Box(
-                        Modifier
-                            .fillMaxHeight()
-                            .fillMaxWidth(frac)
-                            .clip(FinchShapes.pill)
-                            .background(
-                                if (t.tag.isEmpty()) MaterialTheme.colorScheme.outline
-                                else MaterialTheme.colorScheme.primary
-                            ),
-                    )
-                }
-            }
-        }
-        if (tags.size > shown.size) {
-            Spacer(Modifier.height(FinchSpace.xs))
-            Text(
-                "还有 ${tags.size - shown.size} 个标签未显示",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-    }
-}
-
-/** 活动柱状图：渐变圆角柱，峰值高亮；月=按天、年=按月聚合 */
-@Composable
-internal fun ActivityCard(daily: List<DailyTotal>, mode: StatsMode) {
-    val bars = if (mode == StatsMode.MONTH) {
-        daily.map { Bar(it.day, it.totalMs) }
-    } else {
-        daily.groupBy { it.day.substring(0, 7) }
-            .toSortedMap()
-            .map { Bar(it.key, it.value.sumOf { d -> d.totalMs }) }
-    }
-    FinchCard(title = "活动", icon = Icons.Filled.BarChart) {
-        BarChart(bars, mode)
-    }
-}
-
-private data class Bar(val label: String, val totalMs: Long)
-
-@Composable
-private fun BarChart(bars: List<Bar>, mode: StatsMode) {
-    val maxMs = max(1L, bars.maxOf { it.totalMs })
-    val peakMs = bars.maxOfOrNull { it.totalMs } ?: 0
-    Column {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(132.dp),
-            verticalAlignment = Alignment.Bottom,
-            horizontalArrangement = Arrangement.spacedBy(3.dp),
-        ) {
-            bars.forEach { b ->
-                val target = (b.totalMs.toFloat() / maxMs * 112f).dp.coerceAtLeast(3.dp)
-                val h by animateDpAsState(target, animationSpec = spring(Spring.DampingRatioNoBouncy, Spring.StiffnessMediumLow), label = "barH")
-                val peak = b.totalMs >= peakMs && b.totalMs > 0
-                val alpha by animateFloatAsState(if (peak) 1f else 0.72f, animationSpec = spring(Spring.DampingRatioNoBouncy, Spring.StiffnessMediumLow), label = "barA")
-                Box(
-                    Modifier
-                        .weight(1f)
-                        .fillMaxHeight(),
-                    contentAlignment = Alignment.BottomCenter,
-                ) {
-                    Box(
-                        Modifier
-                            .fillMaxWidth(0.85f)
-                            .height(h)
-                            .clip(RoundedCornerShape(topStart = 5.dp, topEnd = 5.dp, bottomStart = 3.dp, bottomEnd = 3.dp))
-                            .graphicsLayer { this.alpha = alpha }
-                            .background(
-                                Brush.verticalGradient(
-                                    listOf(
-                                        if (peak) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.primary,
-                                        MaterialTheme.colorScheme.primary.copy(alpha = 0.32f),
-                                    )
-                                )
-                            ),
-                    )
-                }
-            }
-        }
-        Spacer(Modifier.height(FinchSpace.sm))
-        if (mode == StatsMode.MONTH) {
-            Row(Modifier.fillMaxWidth()) {
-                bars.forEachIndexed { i, b ->
-                    Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                        if (i % 5 == 0 || i == bars.size - 1) {
-                            Text(b.label.takeLast(2), fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                    }
-                }
-            }
-        } else {
-            Row(Modifier.fillMaxWidth()) {
-                bars.forEachIndexed { i, b ->
-                    Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                        if (i == 0 || i % 3 == 0 || i == bars.size - 1) {
-                            Text(
-                                (b.label.substringAfter('-').toIntOrNull()?.let { "${it}月" } ?: b.label),
-                                fontSize = 9.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    }
-                }
             }
         }
     }
@@ -695,6 +514,9 @@ private fun heatColor(frac: Float, blank: Boolean): Color {
  * - 月视图 → 按周几（一…日）
  * - 年视图 → 按月（1…12）
  * - 两者都带「高峰时段」（按小时）
+ *
+ * v0.26 起周几/小时一律取最近 90 天，不再跟当期月/年走；时长按小时摊分，
+ * 跨时段的会话不会整条算进开始那一格（口径见 [partitionRhythm]）。
  */
 @Composable
 internal fun RhythmCard(
@@ -704,7 +526,11 @@ internal fun RhythmCard(
     mode: StatsMode,
 ) {
     val byMonth = mode == StatsMode.YEAR
-    FinchCard(title = if (byMonth) "每月分布" else "作息", icon = Icons.Filled.Schedule) {
+    FinchCard(
+        title = if (byMonth) "每月分布" else "作息",
+        subtitle = if (byMonth) "按月 · 高峰时段取最近 $RHYTHM_DAYS 天" else "最近 $RHYTHM_DAYS 天",
+        icon = Icons.Filled.Schedule,
+    ) {
         if (byMonth) {
             if (months.isNotEmpty()) MonthlyBars(months)
         } else if (weekday.isNotEmpty()) {

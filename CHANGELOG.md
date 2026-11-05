@@ -1,5 +1,55 @@
 # Changelog
 
+## 0.26.1 (2026-11-05)
+
+只做减法与纠错，不加功能：总结页三处口径修好，标签功能整体删掉（DB 21→22）。
+
+### 总结页口径修复（DB 不变）
+
+- **作息 / 高峰时段改看最近 90 天**。原来的区间跟着当期月/年走，于是「只选这个月」时作息里
+  上一周的数据还占着位置——那不是作息，是「这个月的作息」。新增 `RHYTHM_DAYS = 90`，
+  窗口固定为「今天往前 90 天到明天零点」，与月/年切换无关。卡片副标题直接写明口径
+- **高峰时段按小时摊分**。原 SQL 用 `strftime('%H', startTime)` 把整条会话算进开始那一小时，
+  20:00 玩到 02:00 会被记成「20 点玩了 6 小时」。新增 `ui/StatsRhythm.kt` 的
+  `partitionRhythm(spans, from, to, zone)`：按小时切段、按「有效时长／墙钟时长」占比摊到每一格，
+  跨零点的会话按各自日期落进不同周几桶；先裁剪窗口再摊分
+- **暂停只能按比例摊**：库里只存 `pauseAccumMs` 累计值，没有暂停起止时间，无法精确定位到哪一小时。
+  KDoc 已写明这个取舍
+- **删「活动」卡**：它与热力图是同一份 `dailyTotals` 的两种画法，热力图信息更密（还能看连续与断档）。
+  `StatsCards.kt` 的 `ActivityCard` / `BarChart` / `Bar` 与三个专用 import 一起移除
+- **总时长 hero 改玻璃**：从 `.shadow(18.dp) + Brush.linearGradient(primary→tertiary) + 两个白色光斑`
+  换成 `GlassSurface(style = GlassStyle.Hero, shape = FinchShapes.hero)`，文字从固定 `Color.White`
+  改成 `onSurface` 系。关掉「全面玻璃化」时由 `SolidPanel` 接管，不会退回刺眼的纯色
+
+### 删掉标签功能（DB 21→22）
+
+- **为什么删**：标签是 v0.19「记录更细」的一半，上线后没有任何一次用它得出结论——
+  「主线 8 小时 / 支线 3 小时」既不影响玩什么也不影响买什么，只让每次记录多两次点击。
+  真正会写的字段是备注（记这次玩到哪了），备注留下
+- **删掉的入口**：记录页顶部胶囊筛选条（`TagFilterRow` + `tagFilter` + 「这个标签下没有记录」分支）、
+  编辑弹窗的 `TagPicker`（四档预设 + 自定义输入）、记录卡上的标签徽章、详情页会话行的「· 标签」。
+  记录页现在只有一种视图：最近 300 条按天分组
+- **删掉的统计**：总结页「标签分布」卡（`TagDistributionCard`）、年度报告里的同一张卡，
+  以及 `SessionDao.observeTagTotals/observeTagTotalsForGame/updateTag`、
+  `FinchViewModel.tagTotals/tagTotalsForGame/setSessionTag`（`setSessionTag` 本来就是零调用者的死方法）
+- **战报海报**：三格速览第三格「主打标签」换成「日均」（有记录的那些天的平均时长，
+  `ReportPoster.dailyAverageLabel`）——原来那格是海报上唯一的标签出口
+- **`play_sessions.tag` 真删**：`MIGRATION_21_22` 重建表（保留
+  `id/gameId/startTime/endTime/source/pauseAccumMs/pauseStartedAt/note` + 两个索引 + 外键 CASCADE），DB 21→22。
+  历史迁移 `MIGRATION_19_20`（`ADD COLUMN tag`）**保留不动**——迁移链要能重放，
+  改历史迁移等于让老库升不上来
+- **备注能力保留**：`data/SessionTag.kt` 拆成 `data/SessionNote.kt`（只剩 `MAX_LENGTH = 120` 与
+  `normalize()`），`updateSessionTimes(id, start, end, note)` 去掉 tag 参数
+- **注意**：升级后旧的标签数据会随列一起消失，不去读也不先导出——它从来没有被任何统计口径读过；
+  备注与其余字段原样保留
+
+### 合计
+
+- 测试 177 → **183** 全过（新增 7 条 `StatsRhythmTest`、3 条 `SessionNoteTest`，
+  `MigrationTest` 加 `v21升级到当前_数据保留` 与 `v21到22_标签列被移除_备注与其余数据保留`，
+  删掉 5 条 `SessionTagTest`）
+- 编译 `:app:compileDebugKotlin --rerun-tasks` **0 warning**；`git diff --stat` 19 files，+225/−569
+
 ## 0.25.0 (2026-11-04)
 
 v0.25 三条候选一次做完（无 DB 变更）：PSN 真机联调、`GameDetailScreen` 拆分、WebDAV 云备份。

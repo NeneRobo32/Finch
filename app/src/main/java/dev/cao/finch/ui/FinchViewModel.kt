@@ -8,7 +8,7 @@ import dev.cao.finch.data.Game
 import dev.cao.finch.data.GameStatsRow
 import dev.cao.finch.data.GameStatus
 import dev.cao.finch.data.SessionWithGame
-import dev.cao.finch.data.SessionTags
+import dev.cao.finch.data.SessionNote
 import dev.cao.finch.data.SyncEngine
 import dev.cao.finch.data.snapRefForCompleted
 import dev.cao.finch.timer.TimerServiceBridge
@@ -41,23 +41,21 @@ class FinchViewModel(app: Application) : AndroidViewModel(app) {
 
     fun totalBetween(fromMillis: Long, toMillis: Long) =
         sessionDao.observeTotalBetween(fromMillis, toMillis).map { it ?: 0L }
-    fun weekdayTotals(fromMillis: Long, toMillis: Long) = sessionDao.observeWeekdayTotals(fromMillis, toMillis)
 
     /** 区间内按月聚合（1..12）：年视图「按月」用（v0.19.2） */
     fun monthTotals(fromMillis: Long, toMillis: Long) = sessionDao.observeMonthTotals(fromMillis, toMillis)
-    fun hourTotals(fromMillis: Long, toMillis: Long) = sessionDao.observeHourTotals(fromMillis, toMillis)
+
+    /**
+     * 区间内的会话原始区间（v0.26）。周几/高峰时段不再是 SQL 一条一桶，
+     * 由 [partitionRhythm] 在 Kotlin 里按时长摊分。
+     */
+    fun sessionSpans(fromMillis: Long, toMillis: Long) = sessionDao.observeSessionSpans(fromMillis, toMillis)
     fun distinctGamesInRange(fromMillis: Long, toMillis: Long) =
         sessionDao.observeDistinctGamesInRange(fromMillis, toMillis)
     fun dailyTotals(fromMillis: Long, toMillis: Long) = sessionDao.observeDailyTotals(fromMillis, toMillis)
     fun platformTotals(fromMillis: Long, toMillis: Long) = sessionDao.observePlatformTotals(fromMillis, toMillis)
     fun topGamesWithCover(fromMillis: Long, toMillis: Long) = sessionDao.observeTopGamesWithCover(fromMillis, toMillis)
     fun steamTotalMinutes() = sessionDao.observeSteamTotalMinutes().map { it ?: 0L }
-
-    /** 区间内按标签聚合（v0.19 统计页标签分布卡） */
-    fun tagTotals(fromMillis: Long, toMillis: Long) = sessionDao.observeTagTotals(fromMillis, toMillis)
-
-    /** 单游戏按标签聚合（v0.19 详情页标签筛选条） */
-    fun tagTotalsForGame(gameId: Long) = sessionDao.observeTagTotalsForGame(gameId)
 
     fun deleteGame(id: Long) {
         viewModelScope.launch { gameDao.deleteById(id) }
@@ -144,12 +142,11 @@ class FinchViewModel(app: Application) : AndroidViewModel(app) {
         .map { rows -> rows.mapNotNull { r -> r.totalMs?.let { r.gameId to it } }.toMap() }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
 
-    /** 会话起止编辑（结束必须晚于开始；只允许改已完成会话）；tag 一并写回（v0.19） */
+    /** 会话起止编辑（结束必须晚于开始；只允许改已完成会话）；备注一并写回（v0.19.1） */
     suspend fun updateSessionTimes(
         id: Long,
         start: LocalDateTime,
         end: LocalDateTime,
-        tag: String?,
         note: String?,
     ): Result<Unit> {
         if (!end.isAfter(start)) return Result.failure(IllegalArgumentException("结束时间需晚于开始时间"))
@@ -160,8 +157,7 @@ class FinchViewModel(app: Application) : AndroidViewModel(app) {
             s.copy(
                 startTime = start,
                 endTime = end,
-                tag = SessionTags.normalize(tag),
-                note = SessionTags.normalizeNote(note),
+                note = SessionNote.normalize(note),
             )
         )
         return Result.success(Unit)
@@ -196,11 +192,6 @@ class FinchViewModel(app: Application) : AndroidViewModel(app) {
     /** 联网获取开关（导入页可关；关闭后自动获取直接走手动） */
     fun setHltbOnline(enabled: Boolean) {
         settings.hltbOnlineEnabled = enabled
-    }
-
-    /** 给一条会话打标签/清标签（v0.19）：空串或 null = 未分类 */
-    fun setSessionTag(id: Long, tag: String?) {
-        viewModelScope.launch { sessionDao.updateTag(id, SessionTags.normalize(tag)) }
     }
 
     /** 时长目标（v0.19，纯配置）：0 = 不设目标 */

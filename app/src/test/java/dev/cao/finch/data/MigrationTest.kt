@@ -26,7 +26,7 @@ import org.robolectric.annotation.SQLiteMode
  * Room 挂全量 MIGRATION_* 打开（Room 自带 schema 校验，迁移 SQL 与实体不一致会抛
  * IllegalStateException —— v0.15.0 的启动闪退就是这么炸的）→ 断言样例数据保留、列值正确。
  *
- * 覆盖起始版本 7..20 逐版升到 FINCH_DB_VERSION=21。
+ * 覆盖起始版本 7..21 逐版升到 FINCH_DB_VERSION=22。
  * 1..6 无 schema JSON（schemas 从 7 起入库），无法起测，已在报告注明。
  */
 @RunWith(RobolectricTestRunner::class)
@@ -94,38 +94,37 @@ class MigrationTest {
     @Test
     fun `v20升级到当前_数据保留`() = checkFrom(20)
 
-    // ---- 专项：19→20 会话标签列 ----
+    @Test
+    fun `v21升级到当前_数据保留`() = checkFrom(21)
+
+    // ---- 专项：21→22 删掉会话标签列 ----
 
     @Test
-    fun `v19到20_tag列加入_老会话为null_可写入标签`() {
-        createOldDb(19)
+    fun `v21到22_标签列被移除_备注与其余数据保留`() {
+        createOldDb(21)
         val room = openWithMigrations()
         try {
             val db = room.openHelper.writableDatabase
             var hasTag = false
-            var tagDefault: String? = null
+            var hasNote = false
             db.query("PRAGMA table_info(`play_sessions`)").use { c ->
                 val nameIdx = c.getColumnIndex("name")
-                val dfltIdx = c.getColumnIndex("dflt_value")
                 while (c.moveToNext()) {
-                    if (c.getString(nameIdx) == "tag") {
-                        hasTag = true
-                        tagDefault = if (c.isNull(dfltIdx)) null else c.getString(dfltIdx)
+                    when (c.getString(nameIdx)) {
+                        "tag" -> hasTag = true
+                        "note" -> hasNote = true
                     }
                 }
             }
-            assertTrue("v0.19 起 play_sessions 应有 tag 列", hasTag)
-            // 没有 DEFAULT：老会话静默为 null = 未分类，不猜用户当年在跑哪条线
-            assertEquals(null, tagDefault)
+            assertTrue("v0.26.1 起 play_sessions 不应再有 tag 列", !hasTag)
+            assertTrue("note 列必须活下来", hasNote)
             runBlocking {
                 val sessions = room.sessionDao()
-                // 老会话的标签为空
-                assertEquals(null, sessions.byId(1L)!!.tag)
-                // 打标后能读回；清空也能读回 null
-                sessions.updateTag(1L, SessionTags.SIDE)
-                assertEquals(SessionTags.SIDE, sessions.byId(1L)!!.tag)
-                sessions.updateTag(1L, null)
-                assertEquals(null, sessions.byId(1L)!!.tag)
+                val s = sessions.byId(1L)!!
+                assertEquals(1L, s.gameId)
+                assertEquals(42L, s.pauseAccumMs)
+                assertEquals("旧备注", s.note)
+                assertEquals(3_600_000L - 42L, sessions.totalMsForGame(1L))
             }
         } finally {
             room.close()
@@ -256,8 +255,8 @@ class MigrationTest {
     }
 
     @Test
-    fun `新装库直接建v21_可正常读写`() {
-        // 无旧文件：Room 直接按实体建 v21（与迁移结果同构是 Room 校验口径统一的前提）
+    fun `新装库直接建v22_可正常读写`() {
+        // 无旧文件：Room 直接按实体建 v22（与迁移结果同构是 Room 校验口径统一的前提）
         val room = openWithMigrations()
         try {
             runBlocking {
@@ -406,7 +405,7 @@ class MigrationTest {
                 db, "play_sessions", mapOf(
                     "id" to 1L, "gameId" to 1L,
                     "startTime" to 1700000000000L, "endTime" to 1700003600000L,
-                    "source" to "TIMER", "pauseAccumMs" to 42L,
+                    "source" to "TIMER", "pauseAccumMs" to 42L, "note" to "旧备注",
                 )
             )
         }

@@ -302,9 +302,9 @@ fun GameDetailScreen(
             session = s,
             error = sessionEditError,
             onDismiss = { pendingEdit = null; sessionEditError = null },
-            onConfirm = { start, end, tag, note ->
+            onConfirm = { start, end, note ->
                 scope.launch {
-                    val r = viewModel.updateSessionTimes(s.id, start, end, tag, note)
+                    val r = viewModel.updateSessionTimes(s.id, start, end, note)
                     if (r.isSuccess) {
                         pendingEdit = null
                         sessionEditError = null

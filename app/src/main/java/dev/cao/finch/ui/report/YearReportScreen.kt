@@ -49,10 +49,11 @@ import dev.cao.finch.ui.FinchViewModel
 import dev.cao.finch.ui.HeatmapCard
 import dev.cao.finch.ui.HeroTotalCard
 import dev.cao.finch.ui.PlatformCard
+import dev.cao.finch.ui.RHYTHM_DAYS
 import dev.cao.finch.ui.RhythmCard
 import dev.cao.finch.ui.StatsMode
-import dev.cao.finch.ui.TagDistributionCard
 import dev.cao.finch.ui.TopGamesCard
+import dev.cao.finch.ui.partitionRhythm
 import dev.cao.finch.ui.design.FinchCard
 import dev.cao.finch.ui.design.FinchHeader
 import dev.cao.finch.ui.design.FinchIconButton
@@ -105,13 +106,15 @@ fun YearReportScreen(
         .collectAsState(emptyList())
     val months by remember(fromMillis, toMillis) { viewModel.monthTotals(fromMillis, toMillis) }
         .collectAsState(emptyList())
-    val weekday by remember(fromMillis, toMillis) { viewModel.weekdayTotals(fromMillis, toMillis) }
+    // v0.26：周几/高峰时段固定看最近 RHYTHM_DAYS 天，与年度报告本身的时间范围无关
+    val rhythmFrom = remember { LocalDate.now().minusDays(RHYTHM_DAYS.toLong()).atStartOfDay(zone).toInstant().toEpochMilli() }
+    val rhythmTo = remember { LocalDate.now().plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli() }
+    val spans by remember(rhythmFrom, rhythmTo) { viewModel.sessionSpans(rhythmFrom, rhythmTo) }
         .collectAsState(emptyList())
-    val hours by remember(fromMillis, toMillis) { viewModel.hourTotals(fromMillis, toMillis) }
-        .collectAsState(emptyList())
+    val rhythm = remember(spans, rhythmFrom, rhythmTo) { partitionRhythm(spans, rhythmFrom, rhythmTo, zone) }
+    val weekday = rhythm.weekday
+    val hours = rhythm.hours
     val platforms by remember(fromMillis, toMillis) { viewModel.platformTotals(fromMillis, toMillis) }
-        .collectAsState(emptyList())
-    val tags by remember(fromMillis, toMillis) { viewModel.tagTotals(fromMillis, toMillis) }
         .collectAsState(emptyList())
     val topGames by remember(fromMillis, toMillis) { viewModel.topGamesWithCover(fromMillis, toMillis) }
         .collectAsState(emptyList())
@@ -310,7 +313,6 @@ fun YearReportScreen(
             item { RhythmCard(weekday, months, hours, StatsMode.YEAR) }
         }
         if (platforms.isNotEmpty()) item { PlatformCard(platforms, total) }
-        if (tags.isNotEmpty()) item { TagDistributionCard(tags, total) }
         if (topGames.isNotEmpty()) item { TopGamesCard(topGames) }
 
         item { BacklogFunnelCard(games = games, totalsMs = totalsMap) }
@@ -337,7 +339,6 @@ fun YearReportScreen(
                 distinctGames = distinctGames,
                 topGames = topGames,
                 daily = daily,
-                tags = tags,
                 goalMin = goalMin,
                 isYear = true,
                 year = year,

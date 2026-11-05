@@ -56,9 +56,12 @@ data class BucketTotal(
     val totalMs: Long?,
 )
 
-/** 标签聚合（v0.19）：tag 空串 = 未分类 */
-data class TagTotal(
-    val tag: String,
-    val totalMs: Long,
-    val sessionCount: Long,
+/**
+ * 会话的原始区间（v0.26 高峰时段摊分用）。
+ * [effectiveMs] 已扣暂停；[endMillis] 一定非空（只取已完成会话）。
+ */
+data class SessionSpan(
+    val startMillis: Long,
+    val endMillis: Long,
+    val effectiveMs: Long,
 )

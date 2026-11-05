@@ -8,7 +8,6 @@ import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.Typeface
 import dev.cao.finch.data.DailyTotal
-import dev.cao.finch.data.TagTotal
 import dev.cao.finch.data.TopGameRow
 import java.time.YearMonth
 import kotlin.math.max
@@ -55,7 +54,6 @@ object ReportPoster {
         val distinctGames: Int,
         val topGames: List<TopGameRow>,
         val daily: List<DailyTotal>,
-        val tags: List<TagTotal>,
         /** 时长目标（分钟）；0 = 未设 */
         val goalMin: Long,
         val isYear: Boolean,
@@ -123,6 +121,14 @@ object ReportPoster {
         val rest = minutes % 60
         return if (hours > 0) hours.toString() to "$rest 分"
         else minutes.toString() to "分钟"
+    }
+
+    /** 日均：有记录的那些天的平均时长；一天都没有时返回「—」 */
+    fun dailyAverageLabel(daily: List<DailyTotal>): String {
+        val days = daily.filter { it.totalMs > 0L }
+        if (days.isEmpty()) return "—"
+        val avgMs = days.sumOf { it.totalMs } / days.size
+        return dev.cao.finch.TimeFormatter.hoursMinutes(java.time.Duration.ofMillis(avgMs))
     }
 
     // ---------- 绘制 ----------
@@ -221,12 +227,11 @@ object ReportPoster {
         val cellWidth = (WIDTH - MARGIN * 2 - gap * 2) / 3f
 
         val bestDay = data.daily.maxByOrNull { it.totalMs }
-        val mainTag = data.tags.firstOrNull { it.tag.isNotEmpty() && it.totalMs > 0L }
 
         val cells = listOf(
             "游戏数" to if (data.distinctGames > 0) "${data.distinctGames} 款" else "—",
             "最高产" to (bestDay?.let { shortDay(it.day) } ?: "—"),
-            "主打标签" to (mainTag?.tag ?: "未分类"),
+            "日均" to dailyAverageLabel(data.daily),
         )
 
         cells.forEachIndexed { index, (label, value) ->

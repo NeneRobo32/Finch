@@ -94,38 +94,6 @@ interface SessionDao {
     @Query("SELECT * FROM play_sessions WHERE id = :id")
     suspend fun byId(id: Long): PlaySession?
 
-    /** 只改标签（v0.19）：记录页/详情页快速打标，不碰起止时间 */
-    @Query("UPDATE play_sessions SET tag = :tag WHERE id = :id")
-    suspend fun updateTag(id: Long, tag: String?)
-
-    /** 区间内按标签聚合（v0.19 统计页标签分布；null 归到「未分类」，由 UI 兜底） */
-    @Query(
-        """
-        SELECT COALESCE(tag, '') AS tag,
-               SUM(MAX(0, endTime - startTime - COALESCE(pauseAccumMs, 0))) AS totalMs,
-               COUNT(*) AS sessionCount
-        FROM play_sessions
-        WHERE endTime IS NOT NULL AND startTime >= :fromMillis AND startTime < :toMillis
-        GROUP BY COALESCE(tag, '')
-        ORDER BY totalMs DESC
-        """
-    )
-    fun observeTagTotals(fromMillis: Long, toMillis: Long): Flow<List<TagTotal>>
-
-    /** 某游戏按标签聚合（详情页标签筛选条用，时间范围不限；null 归「未分类」） */
-    @Query(
-        """
-        SELECT COALESCE(tag, '') AS tag,
-               SUM(MAX(0, endTime - startTime - COALESCE(pauseAccumMs, 0))) AS totalMs,
-               COUNT(*) AS sessionCount
-        FROM play_sessions
-        WHERE gameId = :gameId AND endTime IS NOT NULL
-        GROUP BY COALESCE(tag, '')
-        ORDER BY totalMs DESC
-        """
-    )
-    fun observeTagTotalsForGame(gameId: Long): Flow<List<TagTotal>>
-
     /** 每款游戏的已完成会话累计（扣暂停），主页按总时长排序用 */
     @Query(
         "SELECT gameId, SUM(MAX(0, endTime - startTime - COALESCE(pauseAccumMs, 0))) AS totalMs " +
@@ -242,18 +210,6 @@ interface SessionDao {
     )
     suspend fun totalMsForGame(gameId: Long): Long
 
-    /** 时段分布：按周几聚合（0=周日..6=周六，SQLite %w 口径），时长扣暂停 */
-    @Query(
-        """
-        SELECT CAST(strftime('%w', startTime / 1000, 'unixepoch', 'localtime') AS INTEGER) AS bucket,
-               SUM(MAX(0, endTime - startTime - COALESCE(pauseAccumMs, 0))) AS totalMs
-        FROM play_sessions
-        WHERE endTime IS NOT NULL AND startTime >= :fromMillis AND startTime < :toMillis
-        GROUP BY bucket ORDER BY bucket
-        """
-    )
-    fun observeWeekdayTotals(fromMillis: Long, toMillis: Long): Flow<List<BucketTotal>>
-
     /** 时段分布：按月聚合（1..12，本地时间），年视图用；时长扣暂停 */
     @Query(
         """
@@ -266,17 +222,24 @@ interface SessionDao {
     )
     fun observeMonthTotals(fromMillis: Long, toMillis: Long): Flow<List<BucketTotal>>
 
-    /** 时段分布：按小时聚合（0..23，本地时间），时长扣暂停 */
+    /**
+     * 区间内的会话原始区间（v0.26 高峰时段按小时摊分用）。
+     *
+     * 旧口径把整条会话按时长全算进 startTime 那个小时，一次 20:00 玩到 02:00 的记录
+     * 会被记成 20 点玩了 6 小时，峰值时段直接失真。摊分只能在 Kotlin 里做
+     * （SQL 逐小时展开要递归 CTE，不值得），所以这里只把区间捞出来。
+     * 只取已完成会话；跨窗口边界的会话由调用方再裁。
+     */
     @Query(
         """
-        SELECT CAST(strftime('%H', startTime / 1000, 'unixepoch', 'localtime') AS INTEGER) AS bucket,
-               SUM(MAX(0, endTime - startTime - COALESCE(pauseAccumMs, 0))) AS totalMs
+        SELECT startTime AS startMillis,
+               endTime AS endMillis,
+               MAX(0, endTime - startTime - COALESCE(pauseAccumMs, 0)) AS effectiveMs
         FROM play_sessions
-        WHERE endTime IS NOT NULL AND startTime >= :fromMillis AND startTime < :toMillis
-        GROUP BY bucket ORDER BY bucket
+        WHERE endTime IS NOT NULL AND endTime > :fromMillis AND startTime < :toMillis
         """
     )
-    fun observeHourTotals(fromMillis: Long, toMillis: Long): Flow<List<BucketTotal>>
+    fun observeSessionSpans(fromMillis: Long, toMillis: Long): Flow<List<SessionSpan>>
 }
 
 @Dao

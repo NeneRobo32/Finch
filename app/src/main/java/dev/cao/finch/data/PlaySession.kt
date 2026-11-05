@@ -32,8 +32,6 @@ data class PlaySession(
     val pauseStartedAt: LocalDateTime? = null,
     // v0.18.8（DB 19）：曾短暂有 estimated 标记（云端累计对账摊出的历史会话），
     // 现已彻底取消「造假记录」——记录页只显示真实会话，云端累计与本地记录的差额在详情页说明。
-    // v0.19（DB 20）：会话标签（主线/支线/联机/多周目/自定义），null = 未分类；老会话迁移后保持 null。
-    val tag: String? = null,
     // v0.19.1（DB 21）：备注，记这次玩到哪了；null/空串 = 没写。不进任何统计口径。
     val note: String? = null,
 ) {
