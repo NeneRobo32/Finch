@@ -48,7 +48,9 @@
 - 测试 177 → **183** 全过（新增 7 条 `StatsRhythmTest`、3 条 `SessionNoteTest`，
   `MigrationTest` 加 `v21升级到当前_数据保留` 与 `v21到22_标签列被移除_备注与其余数据保留`，
   删掉 5 条 `SessionTagTest`）
-- 编译 `:app:compileDebugKotlin --rerun-tasks` **0 warning**；`git diff --stat` 19 files，+225/−569
+- 编译 `:app:compileDebugKotlin --rerun-tasks` **0 warning**；单测 183 条全过；
+  `assembleDebug` / `assembleRelease` 均通过（release APK 已签名，versionCode 95 / versionName 0.26.1）；
+  提交 `ed7698e`，25 files、+922/−574
 
 ## 0.25.0 (2026-11-04)
 
