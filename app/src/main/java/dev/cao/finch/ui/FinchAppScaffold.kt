@@ -26,6 +26,7 @@ import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -44,6 +45,7 @@ import dev.cao.finch.ui.design.FinchMotion
 import dev.cao.finch.ui.design.FinchSpace
 import dev.cao.finch.ui.design.FinchTab
 import dev.cao.finch.ui.design.LocalFinchBackdrop
+import dev.cao.finch.ui.gamedetail.PlatinumCelebrationOverlay
 import dev.cao.finch.ui.theme.BackgroundState
 import dev.cao.finch.ui.theme.BackgroundStyle
 import dev.cao.finch.ui.theme.FinchThemeState
@@ -155,6 +157,15 @@ fun FinchAppScaffold(
                     .navigationBarsPadding()
                     .padding(horizontal = FinchSpace.screen, vertical = 10.dp),
             )
+
+            // ④ 白金庆祝（v0.27）：挂在最外层，所以不管当时停在哪个 tab 都能弹出来
+            val celebrating by viewModel.platinumCelebration.collectAsState()
+            celebrating?.let { game ->
+                PlatinumCelebrationOverlay(
+                    gameName = game.name,
+                    onDone = { viewModel.markPlatinumCelebrated(game.id) },
+                )
+            }
         }
     }
 }

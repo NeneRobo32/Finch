@@ -1,8 +1,8 @@
 # Finch 路线图
 
-基线：`v0.26.1`（DB v22，versionCode 95）。
+基线：`v0.27.0`（DB v22，versionCode 96）。
 IGDB 已整体移除（国内直连不通）；HLTB 改走 Crashdummy 中转 API（Steam 直查+Nlib 英文名+按名搜，默认开、可一键关）；非英文库名走英文名解析链换英文线索再搜（Steam 中文反查/Bangumi 原名/eShop 英文段/游民星空/机翻已移除，v0.15.15–0.15.18）。
-下阶段主题：**待定**。v0.26 系列只做减法与纠错、不加功能——v0.26 修总结页三处显示口径（作息／高峰时段改看最近 90 天并按时长摊分、删与热力图重复的「活动」卡、总时长 hero 改玻璃），v0.26.1 把标签功能整体删掉（连同 `play_sessions.tag` 列，DB 21→22）。到此已经没有待办的技术债。
+下阶段主题：**待定**。v0.26 系列只做减法与纠错、不加功能——v0.26 修总结页三处显示口径（作息／高峰时段改看最近 90 天并按时长摊分、删与热力图重复的「活动」卡、总时长 hero 改玻璃），v0.26.1 把标签功能整体删掉（连同 `play_sessions.tag` 列，DB 21→22）。v0.27 修掉「90 天窗口把上周末算进本周」的读法问题（作息改按自然周独立、可翻页），并把通关进度写出超出／剩余、PSN 拿到白金时弹手绘庆祝。到此已经没有待办的技术债。
 
 ## 规划原则
 
@@ -50,6 +50,7 @@ IGDB 已整体移除（国内直连不通）；HLTB 改走 Crashdummy 中转 API
 | v0.25 ✅已交付 | PSN 联调＋详情拆分＋云备份 | PSN 真机实测修三处（媒体 App 类目过滤 `isPlayableCategory`、`matchKey` 归一认领防重复建条、refresh 有效期 10 天文案与 2 天预警窗口）；`GameDetailScreen` 669→约 260 行（`GameDetailCards.kt`）；WebDAV 云备份（探活/上传/列出/下载，Basic 认证，从不删远端文件） | 21（不变） | 无 |
 | v0.26 ✅已交付 | 总结页口径修复 | 作息/高峰时段固定看最近 90 天（不再跟当期月/年走）且按时长摊分到各小时（`ui/StatsRhythm.kt`，`observeSessionSpans`）；删掉与热力图重复的「活动」卡；本月总时长 hero 从主题色渐变改为 `GlassSurface(Hero)` | 21（不变） | 无 |
 | v0.26.1 ✅已交付 | 删标签功能 | 会话标签整个拆掉：记录页胶囊筛选、编辑弹窗打标、总结页「标签分布」卡、战报「主打标签」格全部移除；`play_sessions.tag` 列真删（重建表）；备注功能保留 | 21→22 | 无 |
+| v0.27.0 ✅已交付 | 作息按周＋通关超出＋白金庆祝 | 作息改按自然周独立（`weekStartOf`，卡片内可翻周，右箭头卡在本周不越未来）；高峰时段跟着这一周；年度报告的作息改看整年。通关进度写出「已超出主线参考 X」／「还差 X」，超出时补一句离支线／全收集还差多少（`mainOverrunMin` / `mainRemainingMin`）。PSN 同步首次拿到白金弹全屏手绘奖杯动画（`PlatinumWatch` 比对 0→≥1，每游戏只播一次，实验性开关） | 22（不变） | 无 |
 | 远期 / 明确不做 | — | 前台自动识别、账号云同步、国际化明确不做 | — | — |
 
 ```mermaid
@@ -413,6 +414,41 @@ gantt
 
 ---
 
+## v0.27.0 ✅ 已交付 —— 作息按周＋通关超出＋白金庆祝（DB 不变）
+
+**为什么做**：用户报的一个读法问题暴露了 v0.26 的取舍有坑——「周五周六周日还没玩怎么又有时间了」。
+90 天滚动窗口本身没错（周几/几点确实需要多天样本才有意义），但它把上周、上上周的周末也摊进来，
+看着就像本周的。另外两件是用户直接提的：玩得比标准通关时间还长时想看见超了多少；
+拿到白金时想有个 PS5 那样的反馈。
+
+- **作息改按自然周独立**：`ui/StatsRhythm.kt` 新增 `weekStartOf(date)`（`DayOfWeek.value - 1`
+  天回退，周一为一周起点）。`StatsScreen` 的取数窗口从「最近 90 天」改成「本周一零点 ~ 下周一零点」，
+  与月/年切换脱钩；`RHYTHM_DAYS` 常量删除（全仓库零引用）。
+- **周切换**：`RhythmCard` 新增 `weekStart` / `thisWeekStart` / `onWeekChange` 三个可选参数
+  （默认 null 时行为与原来一致，年度报告不用翻周）。卡片顶部 `←` / 标题 / `→`，本周显示「本周」，
+  其他周显示 `M/d – M/d`；右箭头 `enabled = !atCurrent`，翻不到未来。
+- **没记录也保留卡片**：月视图下卡片恒渲染（原来 `weekday` 为空就整张卡消失，那样就再也翻不回上周）。
+  空周 7 行都显示 `0m`。
+- **年度报告的作息改看整年**：原来借的是同一个 90 天窗口，名不副实；改成直接用当期
+  `viewModel.sessionSpans(fromMillis, toMillis)` + `partitionRhythm`。
+- **通关进度写出超出／剩余**：`data/GameProgress.kt` 新增 `mainOverrunMin` / `mainRemainingMin`。
+  单独存在的理由是 `progressFraction` 会把比例钳到 1，进度条本身永远看不出超了多少。
+  `HltbSection.kt` 在主文案下加一行（超了用 `tertiary` 着色），超出时再补一句离支线／全收集还差多少。
+- **白金庆祝**：`ui/gamedetail/PlatinumCelebration.kt` 全 Canvas 手绘奖杯（杯身 Path、两侧
+  `drawArc` 把手、杯脚与底座、背后径向光晕、扫过的高光），3400ms 三段时间轴。
+  **没有引入任何外部素材**——零资源体积、无版权问题、不依赖网络。
+  「首次获得」由 `data/PlatinumWatch.kt` 判定：同步前拍 `游戏id → 白金数` 快照，同步后只认 0→≥1；
+  播完把 gameId 记进 `settings.platinumCelebratedGameIds`（否则每次同步都重弹）。
+  两条 PSN 同步入口（`FinchViewModel.syncNow`、`ImportViewModel.syncPSN`）都接上；
+  挂在 `FinchAppScaffold` 根 `Box`，哪个 tab 都能弹；实验性开关默认开。
+- **改动范围**：`data/{GameProgress,PlatinumWatch,SettingsStore}.kt`、
+  `ui/{StatsRhythm,StatsCards,StatsScreen,FinchViewModel,ImportViewModel,ImportScreen,FinchAppScaffold}.kt`、
+  `ui/gamedetail/{HltbSection,PlatinumCelebration}.kt`、`ui/report/YearReportScreen.kt`；
+  新增 `GameProgressTest.kt`（5 条）、`StatsRhythmTest` 补 4 条周起点用例。
+- **验收**：编译 0 warning；测试 183 → 192 全过；DB 仍 22，无迁移。
+
+---
+
 ## DB 演进一览
 
 | DB | 版本 | 变更 |
@@ -460,3 +496,4 @@ gantt
 13. **v0.25 ✅ 已交付**（v0.25.0）：PSN 真机联调 ＋ `GameDetailScreen` 拆分 ＋ WebDAV 云备份——三条候选一次清空。
 14. **v0.26 ✅**：总结页口径修复——作息/高峰时段改 90 天窗口并按时长摊分、删「活动」卡、hero 改玻璃。纯修显示，无新功能。
 15. **v0.26.1 ✅**：删标签功能——会话标签、记录页筛选、总结页标签分布、战报主打标签全部移除，`tag` 列真删（DB 21→22）。减法版，备注功能保留。
+16. **v0.27.0 ✅**：作息按自然周独立（可翻页）＋ 通关进度写出超出/剩余 ＋ 白金奖杯手绘庆祝。修读法问题 + 两处手感，DB 不变。

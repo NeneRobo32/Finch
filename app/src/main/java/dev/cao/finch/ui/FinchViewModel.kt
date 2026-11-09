@@ -7,6 +7,7 @@ import dev.cao.finch.FinchApp
 import dev.cao.finch.data.Game
 import dev.cao.finch.data.GameStatsRow
 import dev.cao.finch.data.GameStatus
+import dev.cao.finch.data.PlatinumWatch
 import dev.cao.finch.data.SessionWithGame
 import dev.cao.finch.data.SessionNote
 import dev.cao.finch.data.SyncEngine
@@ -213,6 +214,26 @@ class FinchViewModel(app: Application) : AndroidViewModel(app) {
     private val _syncMessage = kotlinx.coroutines.flow.MutableSharedFlow<String>(extraBufferCapacity = 1)
     val syncMessage: kotlinx.coroutines.flow.SharedFlow<String> = _syncMessage
 
+    /**
+     * 刚拿到白金、还没庆祝过的游戏（v0.27，一次性事件）。
+     *
+     * PSN 同步只会把 trophyPlatinum 从 0 刷到 1，没有「获得时刻」这种东西，
+     * 所以只能自己比对新旧值；播过之后由 UI 调 [markPlatinumCelebrated] 记住，
+     * 否则每次同步都会再弹一次。
+     */
+    val platinumCelebration: StateFlow<Game?> = PlatinumWatch.pending
+
+    /** 庆祝动画播完：记下这个游戏，下次同步不再弹 */
+    fun markPlatinumCelebrated(gameId: Long) {
+        PlatinumWatch.consume(settings, gameId)
+    }
+
+    /** 设置页开关：关掉后不再弹白金庆祝（已播记录保留，重新打开也不会补播旧的） */
+    fun setTrophyCelebration(enabled: Boolean) {
+        settings.trophyCelebrationEnabled = enabled
+        if (!enabled) PlatinumWatch.cancel()
+    }
+
     /** 下拉刷新：手动同步 Steam + Switch，完成后 message 事件通知 UI */
     fun syncNow() {
         if (_syncing.value) return // 同步中不重复触发
@@ -243,6 +264,8 @@ class FinchViewModel(app: Application) : AndroidViewModel(app) {
                 }
                 if (hasPsn) {
                     try {
+                        // v0.27：同步前记下谁还没白金，同步后挑出「刚拿到」的那款弹庆祝
+                        val before = PlatinumWatch.snapshot(gameDao)
                         val r = SyncEngine.runPSN(db, settings.psnRefreshToken) { t ->
                             // 轮换后的 token 立即落盘：后续拉取失败也不掉登录
                             settings.psnRefreshToken = t.refreshToken.ifBlank { settings.psnRefreshToken }
@@ -251,6 +274,7 @@ class FinchViewModel(app: Application) : AndroidViewModel(app) {
                         settings.psnRefreshToken = r.refreshTokenOut
                         settings.psnRefreshExpiresAtMillis = r.refreshExpiresAtMillis
                         parts += "PSN +${r.sessionsAdded}条"
+                        PlatinumWatch.scan(gameDao, settings, before)
                     } catch (e: Exception) {
                         parts += "PSN ✗(${e.message?.take(60)})"
                     }

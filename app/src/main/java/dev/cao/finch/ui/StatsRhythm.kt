@@ -14,10 +14,17 @@ internal data class RhythmBuckets(
     val hours: List<BucketTotal>,
 )
 
-/** 作息/高峰时段的观察窗口（天）：不跟当期月/年走，看最近这么久 */
-internal const val RHYTHM_DAYS = 90
-
 private const val HOUR_MS = 3_600_000L
+
+/**
+ * 一周的起点（周一）。
+ *
+ * v0.27 起作息按「周」独立看：周五还没到就不该有周五的柱子，
+ * 所以窗口必须落在单个自然周内，而不是滚动 90 天把过去几周的五六日累加进来。
+ * `DayOfWeek.value` 周一=1…周日=7，减 1 即本周已过几天。
+ */
+internal fun weekStartOf(date: java.time.LocalDate): java.time.LocalDate =
+    date.minusDays((date.dayOfWeek.value - 1).toLong())
 
 /**
  * 把会话区间摊到「周几」与「小时」两个桶里（v0.26）。

@@ -20,3 +20,16 @@ internal fun snapRefForCompleted(playedMin: Long, refMin: Long?): Long? {
  */
 internal fun progressFraction(playedMin: Long, hltbMin: Long): Float =
     (playedMin.toFloat() / hltbMin).coerceIn(0f, 1f)
+
+/**
+ * 已玩超出主线参考多少分钟；没超出返回 0（v0.27）。
+ *
+ * 进度条本身在 100% 就封顶了，看不出「玩过头多少」——HLTB 的参考时长是众数不是上限，
+ * 玩得比它久很常见，所以要单独把这个差值算出来给详情页显示。
+ */
+internal fun mainOverrunMin(playedMin: Long, hltbMin: Long): Long =
+    (playedMin - hltbMin).coerceAtLeast(0L)
+
+/** 距离主线参考还差多少分钟；已超出返回 0（v0.27，与 [mainOverrunMin] 互补） */
+internal fun mainRemainingMin(playedMin: Long, hltbMin: Long): Long =
+    (hltbMin - playedMin).coerceAtLeast(0L)

@@ -42,6 +42,7 @@ import dev.cao.finch.ui.design.FinchCard
 import dev.cao.finch.ui.design.FinchChip
 import dev.cao.finch.ui.design.FinchCollapsibleGroup
 import dev.cao.finch.ui.design.FinchHeader
+import dev.cao.finch.ui.design.FinchInsetDivider
 import dev.cao.finch.ui.design.FinchListRow
 import dev.cao.finch.ui.design.FinchSpace
 import dev.cao.finch.ui.design.FinchSwitch
@@ -75,6 +76,9 @@ fun ImportScreen(
     var keyField by remember { mutableStateOf(steamKey) }
     var idField by remember { mutableStateOf(steamId) }
     var baseField by remember { mutableStateOf(steamBase) }
+
+    // v0.27：白金庆祝开关。SettingsStore 不是 State，所以本地留一份用于即时刷新
+    var trophyCelebration by remember { mutableStateOf(viewModel.settings.trophyCelebrationEnabled) }
 
     var manualGameId by remember { mutableStateOf<Long?>(null) }
     var manualGameQuery by remember { mutableStateOf("") }
@@ -339,7 +343,7 @@ fun ImportScreen(
         FinchCollapsibleGroup(
             title = "实验性功能",
             subtitle = "可能更耗电、可能不稳定，随时可以关掉",
-            summary = if (glassState?.enabled == true) "已启用" else "关闭",
+            summary = if (glassState?.enabled == true || trophyCelebration) "已启用" else "关闭",
             icon = Icons.Filled.AutoAwesome,
             enterOrder = 4,
         ) {
@@ -370,6 +374,31 @@ fun ImportScreen(
                     style = MaterialTheme.typography.labelSmall,
                     color = scheme.onSurfaceVariant.copy(alpha = 0.8f),
                 )
+                Spacer(Modifier.height(FinchSpace.md))
+                FinchInsetDivider()
+                Spacer(Modifier.height(FinchSpace.md))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("白金奖杯庆祝", style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            "整库同步后第一次摸到白金时，弹一个全屏奖杯动画（纯手绘，不走网络）。" +
+                                "每个游戏只弹一次，关掉后不再弹。",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = scheme.onSurfaceVariant,
+                        )
+                    }
+                    Spacer(Modifier.width(FinchSpace.sm))
+                    FinchSwitch(
+                        checked = trophyCelebration,
+                        onCheckedChange = {
+                            trophyCelebration = it
+                            viewModel.setTrophyCelebration(it)
+                        },
+                    )
+                }
             }
         }
         Spacer(Modifier.height(FinchSpace.md))

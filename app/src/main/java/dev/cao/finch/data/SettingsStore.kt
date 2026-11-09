@@ -105,6 +105,20 @@ class SettingsStore(context: Context) {
         set(value) = sp.edit().putString(KEY_BACKGROUND_IMAGE, value).apply()
 
     /**
+     * 获得白金奖杯时弹一次庆祝动画（v0.27，默认开）：
+     * 只在「同步前后白金数从 0 变 1」那一刻触发，同一次获得只播一次
+     * （播完后把 gameId 记进 [platinumCelebratedGameIds]，重新安装/清数据不会重播）。
+     */
+    var trophyCelebrationEnabled: Boolean
+        get() = sp.getBoolean(KEY_TROPHY_CELEBRATION, true)
+        set(value) = sp.edit().putBoolean(KEY_TROPHY_CELEBRATION, value).apply()
+
+    /** 已经播过白金庆祝的游戏 id 集合（逗号分隔；同步时判定「是否首次获得」用） */
+    var platinumCelebratedGameIds: Set<String>
+        get() = sp.getStringSet(KEY_PLATINUM_CELEBRATED, emptySet()).orEmpty()
+        set(value) = sp.edit().putStringSet(KEY_PLATINUM_CELEBRATED, value).apply()
+
+    /**
      * WebDAV 云端备份（v0.25，默认关）：
      * 目录地址留空即未配置；账号明文、应用密码走 Keystore 加密（Basic 认证要还原明文）。
      * 只上传一份最新 zip，不删远端文件、不做双向合并。
@@ -195,6 +209,8 @@ class SettingsStore(context: Context) {
         private const val KEY_EXPERIMENTAL_GLASS = "experimental_glass_enabled"
         private const val KEY_BACKGROUND_STYLE = "background_style"
         private const val KEY_BACKGROUND_IMAGE = "background_image_path"
+        private const val KEY_TROPHY_CELEBRATION = "trophy_celebration_enabled"
+        private const val KEY_PLATINUM_CELEBRATED = "platinum_celebrated_game_ids"
         private const val KEY_WEBDAV_URL = "webdav_url"
         private const val KEY_WEBDAV_USER = "webdav_user"
         private const val KEY_WEBDAV_PASSWORD = "webdav_password"

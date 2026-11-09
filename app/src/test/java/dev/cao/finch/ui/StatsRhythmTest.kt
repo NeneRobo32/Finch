@@ -101,4 +101,29 @@ class StatsRhythmTest {
         assertEquals(emptyList<dev.cao.finch.data.BucketTotal>(), r.weekday)
         assertEquals(emptyList<dev.cao.finch.data.BucketTotal>(), r.hours)
     }
+
+    // ---- 每周独立视图的边界（v0.27） ----
+
+    @Test
+    fun `周起点落在周一`() {
+        // 2026-11-04 是周三，它那一周的周一是 11-02
+        assertEquals(LocalDate.parse("2026-11-02"), weekStartOf(LocalDate.parse("2026-11-04")))
+    }
+
+    @Test
+    fun `周日本身也算上周一起的那一周`() {
+        // 2026-11-01 是周日，属于 10-26 那一周
+        assertEquals(LocalDate.parse("2026-10-26"), weekStartOf(LocalDate.parse("2026-11-01")))
+    }
+
+    @Test
+    fun `周一求周起点不变`() {
+        assertEquals(LocalDate.parse("2026-11-02"), weekStartOf(LocalDate.parse("2026-11-02")))
+    }
+
+    @Test
+    fun `跨年边界也按周一算`() {
+        // 2027-01-01 是周五，那一周从 2026-12-28 开始
+        assertEquals(LocalDate.parse("2026-12-28"), weekStartOf(LocalDate.parse("2027-01-01")))
+    }
 }

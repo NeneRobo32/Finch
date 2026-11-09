@@ -25,6 +25,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.TrendingDown
 import androidx.compose.material.icons.automirrored.filled.TrendingUp
 import androidx.compose.material.icons.filled.GridView
@@ -51,6 +53,7 @@ import dev.cao.finch.data.DailyTotal
 import dev.cao.finch.data.PlatformTotal
 import dev.cao.finch.data.TopGameRow
 import dev.cao.finch.ui.design.FinchCard
+import dev.cao.finch.ui.design.FinchIconButton
 import dev.cao.finch.ui.design.FinchInsetDivider
 import dev.cao.finch.ui.design.FinchSpace
 import dev.cao.finch.ui.design.GlassStyle
@@ -511,12 +514,13 @@ private fun heatColor(frac: Float, blank: Boolean): Color {
 
 /**
  * 作息：
- * - 月视图 → 按周几（一…日）
+ * - 月视图 → 单独一周，周一…周日（可前后翻周）
  * - 年视图 → 按月（1…12）
  * - 两者都带「高峰时段」（按小时）
  *
- * v0.26 起周几/小时一律取最近 90 天，不再跟当期月/年走；时长按小时摊分，
- * 跨时段的会话不会整条算进开始那一格（口径见 [partitionRhythm]）。
+ * v0.27 起月视图按周独立看：窗口就是选中的那一周（周一到周日），
+ * 不再滚动聚合最近 90 天——那样本周五/六/日还没到，柱子上却已经有过去几周的时间了。
+ * 时长按小时摊分，跨时段的会话不会整条算进开始那一格（口径见 [partitionRhythm]）。
  */
 @Composable
 internal fun RhythmCard(
@@ -524,16 +528,27 @@ internal fun RhythmCard(
     months: List<dev.cao.finch.data.BucketTotal>,
     hours: List<dev.cao.finch.data.BucketTotal>,
     mode: StatsMode,
+    weekStart: LocalDate? = null,
+    thisWeekStart: LocalDate? = null,
+    onWeekChange: ((LocalDate) -> Unit)? = null,
 ) {
     val byMonth = mode == StatsMode.YEAR
     FinchCard(
         title = if (byMonth) "每月分布" else "作息",
-        subtitle = if (byMonth) "按月 · 高峰时段取最近 $RHYTHM_DAYS 天" else "最近 $RHYTHM_DAYS 天",
+        subtitle = if (byMonth) "按月 · 高峰时段按整年计" else "按周看 · 周一至周日",
         icon = Icons.Filled.Schedule,
     ) {
         if (byMonth) {
             if (months.isNotEmpty()) MonthlyBars(months)
-        } else if (weekday.isNotEmpty()) {
+        } else {
+            if (weekStart != null && thisWeekStart != null && onWeekChange != null) {
+                WeekSwitcher(
+                    weekStart = weekStart,
+                    thisWeekStart = thisWeekStart,
+                    onWeekChange = onWeekChange,
+                )
+                Spacer(Modifier.height(FinchSpace.sm))
+            }
             val byBucket = weekday.associate { it.bucket to (it.totalMs ?: 0L) }
             val maxMs = max(1L, byBucket.values.maxOrNull() ?: 1L)
             val order = listOf(1, 2, 3, 4, 5, 6, 0)
@@ -629,6 +644,48 @@ internal fun RhythmCard(
                 }
             }
         }
+    }
+}
+
+/** 周切换：← 本周日期范围 →；已经在当前周时右箭头禁用（未来没有意义） */
+@Composable
+private fun WeekSwitcher(
+    weekStart: LocalDate,
+    thisWeekStart: LocalDate,
+    onWeekChange: (LocalDate) -> Unit,
+) {
+    val weekEnd = weekStart.plusDays(6)
+    val atCurrent = !weekStart.isBefore(thisWeekStart)
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        FinchIconButton(
+            icon = Icons.AutoMirrored.Filled.ArrowBack,
+            contentDescription = "上一周",
+            ghost = true,
+            onClick = { onWeekChange(weekStart.minusWeeks(1)) },
+        )
+        val label = if (weekStart == thisWeekStart) {
+            "本周"
+        } else {
+            "${weekStart.monthValue}/${weekStart.dayOfMonth} – ${weekEnd.monthValue}/${weekEnd.dayOfMonth}"
+        }
+        Text(
+            label,
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.Medium,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.weight(1f),
+        )
+        FinchIconButton(
+            icon = Icons.AutoMirrored.Filled.ArrowForward,
+            contentDescription = "下一周",
+            ghost = true,
+            enabled = !atCurrent,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            onClick = { onWeekChange(weekStart.plusWeeks(1)) },
+        )
     }
 }
 

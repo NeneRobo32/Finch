@@ -8,6 +8,7 @@ import dev.cao.finch.FinchApp
 import dev.cao.finch.data.BackupManager
 import dev.cao.finch.data.Game
 import dev.cao.finch.data.PlaySession
+import dev.cao.finch.data.PlatinumWatch
 import dev.cao.finch.data.PsnClient
 import dev.cao.finch.data.SessionSource
 import dev.cao.finch.data.SettingsStore
@@ -231,6 +232,8 @@ class ImportViewModel(app: Application) : AndroidViewModel(app) {
         _psnState.value = SyncState.Running
         viewModelScope.launch {
             try {
+                // v0.27：两条 PSN 同步入口（这里 + 主页下拉刷新）都要能触发白金庆祝
+                val before = PlatinumWatch.snapshot(db.gameDao())
                 val r = SyncEngine.runPSN(db, token) { t ->
                     // 轮换后的 token 立即落盘：后续拉取失败也不掉登录（PSN 旧 refresh_token 即刻失效）
                     settings.psnRefreshToken = t.refreshToken.ifBlank { settings.psnRefreshToken }
@@ -243,6 +246,7 @@ class ImportViewModel(app: Application) : AndroidViewModel(app) {
                 _psnState.value = SyncState.Done(
                     "同步完成：新增 ${r.created} 款，匹配更新 ${r.matched} 款，跳过 ${r.skipped} 款，写入 ${r.sessionsAdded} 条游玩记录"
                 )
+                PlatinumWatch.scan(db.gameDao(), settings, before)
             } catch (e: Exception) {
                 _psnState.value = SyncState.Failed(
                     when (e.networkErrorKind()) {

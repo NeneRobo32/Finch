@@ -119,10 +119,41 @@ internal fun HltbProgressCard(
                 "（${(frac * 100).toInt()}%）",
             style = MaterialTheme.typography.bodyMedium,
         )
+        // v0.27：进度条到 100% 就封顶了，看不出「玩过头多少」或者「还差多少」。
+        // HLTB 的参考时长是玩家众数不是上限，玩得比它久很常见，所以把差值单独说清楚。
+        if (!done) {
+            val overrun = dev.cao.finch.data.mainOverrunMin(playedMin, hltbMin)
+            val remaining = dev.cao.finch.data.mainRemainingMin(playedMin, hltbMin)
+            Spacer(Modifier.height(FinchSpace.xxs))
+            Text(
+                if (overrun > 0) {
+                    "已超出主线参考 ${TimeFormatter.hoursMinutes(Duration.ofMinutes(overrun))}"
+                } else {
+                    "还差 ${TimeFormatter.hoursMinutes(Duration.ofMinutes(remaining))} 到主线参考"
+                },
+                style = MaterialTheme.typography.labelSmall,
+                color = if (overrun > 0) MaterialTheme.colorScheme.tertiary
+                else MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            // 超出时顺带给个「按支线/全收集还要多久」的锚点，避免只有一个「超了」的坏消息
+            val next = listOfNotNull(
+                hltbExtraMin?.takeIf { it > 0 },
+                hltb100Min?.takeIf { it > 0 },
+            ).firstOrNull { it > playedMin }
+            if (overrun > 0 && next != null) {
+                Spacer(Modifier.height(FinchSpace.xxs))
+                Text(
+                    "离${if (next == hltbExtraMin) "支线" else "全收集"}参考还有 " +
+                        TimeFormatter.hoursMinutes(Duration.ofMinutes(next - playedMin)),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
         if (!done && reached) {
             Spacer(Modifier.height(FinchSpace.xxs))
             Text(
-                "已达主线参考时长，是否通关以你的勾选为准",
+                "是否通关以你的勾选为准",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

@@ -144,10 +144,18 @@ fun StatsScreen(viewModel: FinchViewModel) {
     val distinctGames by remember(fromMillis, toMillis) { viewModel.distinctGamesInRange(fromMillis, toMillis) }
         .collectAsState(initial = 0)
     // v0.19.2：月视图按周几看作息，年视图按月看（一年里周几分布没有意义）
-    // v0.26：周几/高峰时段不再跟「当期」走，统一看最近 90 天——只选一个月时
-    // 上一周的数据还占着位置，那不是「作息」，是「这个月的作息」，读起来是错的。
-    val rhythmFrom = remember { LocalDate.now().minusDays(RHYTHM_DAYS.toLong()).atStartOfDay(zone).toInstant().toEpochMilli() }
-    val rhythmTo = remember { LocalDate.now().plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli() }
+    // v0.26：周几/高峰时段不再跟「当期」走，统一看最近 90 天。
+    // v0.27：改成「单独一周」——90 天滚动窗口会把过去几周的五六日也累加进来，
+    // 本周五还没到，柱子上却已经有时间了，读起来是错的。这里只取选中的那一周。
+    val today = remember { LocalDate.now() }
+    val thisWeekStart = remember(today) { weekStartOf(today) }
+    var weekStart by remember { mutableStateOf(thisWeekStart) }
+    val rhythmFrom = remember(weekStart, zone) {
+        weekStart.atStartOfDay(zone).toInstant().toEpochMilli()
+    }
+    val rhythmTo = remember(weekStart, zone) {
+        weekStart.plusWeeks(1).atStartOfDay(zone).toInstant().toEpochMilli()
+    }
     val spans by remember(rhythmFrom, rhythmTo) { viewModel.sessionSpans(rhythmFrom, rhythmTo) }
         .collectAsState(initial = emptyList())
     val rhythm = remember(spans, rhythmFrom, rhythmTo) { partitionRhythm(spans, rhythmFrom, rhythmTo, zone) }
@@ -272,8 +280,19 @@ fun StatsScreen(viewModel: FinchViewModel) {
             item { HeatmapCard(daily = daily, mode = mode, anchorMonth = anchorMonth) }
         }
         if (platforms.isNotEmpty()) item { PlatformCard(platforms, total) }
-        if (weekday.isNotEmpty() || months.isNotEmpty() || hours.isNotEmpty()) {
-            item { RhythmCard(weekday, months, hours, mode) }
+        // 月视图恒显示：这一周没记录时也要能翻回上一周，否则卡片整个消失就再也进不去
+        if (mode == StatsMode.MONTH || weekday.isNotEmpty() || months.isNotEmpty() || hours.isNotEmpty()) {
+            item {
+                RhythmCard(
+                    weekday = weekday,
+                    months = months,
+                    hours = hours,
+                    mode = mode,
+                    weekStart = weekStart,
+                    thisWeekStart = thisWeekStart,
+                    onWeekChange = { weekStart = it },
+                )
+            }
         }
         if (topGames.isNotEmpty()) item { TopGamesCard(topGames) }
     }
