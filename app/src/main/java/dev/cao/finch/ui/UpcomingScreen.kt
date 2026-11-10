@@ -37,6 +37,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -89,7 +90,7 @@ fun UpcomingScreen(
         Spacer(Modifier.height(FinchSpace.sm))
         FinchHeader(
             title = "发售日程",
-            subtitle = "游民星空 / eShop / Steam / Bangumi 多源聚合",
+            subtitle = "游民星空 / eShop / Steam / Bangumi / PSN 港服 多源聚合",
             actions = {
                 FinchIconButton(
                     icon = Icons.Filled.Refresh,
@@ -218,7 +219,7 @@ fun UpcomingScreen(
                             FinchEmptyState(
                                 icon = Icons.Filled.Event,
                                 title = "没有符合条件的大作发售信息",
-                                message = "数据来自游民星空 / eShop / Steam / Bangumi，点右上角刷新重试。",
+                                message = "数据来自游民星空 / eShop / Steam / Bangumi / PSN 港服，点右上角刷新重试。",
                                 actionLabel = "刷新",
                                 onAction = { upcomingViewModel.refresh() },
                             )
@@ -228,6 +229,8 @@ fun UpcomingScreen(
                     val buckets = filtered.groupBy { e ->
                         val d = e.date
                         when {
+                            // 折扣条目没有发售日，独占一组（否则会掉进「更远期」，语义不对）
+                            e.deal -> "deal"
                             d != null && d <= now -> "recent"
                             d != null && d.year == now.year -> "coming"
                             else -> "later"
@@ -236,12 +239,20 @@ fun UpcomingScreen(
                     listOf(
                         "recent" to "本年度已发售",
                         "coming" to "本年度待发售",
+                        "deal" to "正在打折",
                         "later" to "更远期",
                     ).forEach { (key, label) ->
                         val items = buckets[key].orEmpty()
                         if (items.isNotEmpty()) {
+                            val trailing = if (key == "deal") {
+                                val end = items.firstNotNullOfOrNull { it.saleEndsAt }
+                                if (end != null) "至${end.format(DateTimeFormatter.ofPattern("M月d日"))}"
+                                else "${items.size} 款"
+                            } else {
+                                "${items.size} 款"
+                            }
                             item(key = "header_$key") {
-                                FinchSectionTitle(label, trailing = "${items.size} 款")
+                                FinchSectionTitle(label, trailing = trailing)
                             }
                             items.forEach { entry ->
                                 item(
@@ -380,6 +391,25 @@ private fun UpcomingRow(
                             maxLines = 1,
                         )
                     }
+                    entry.priceText?.let { price ->
+                        Spacer(Modifier.width(FinchSpace.sm))
+                        PriceTag(
+                            priceText = price,
+                            basePriceText = entry.basePriceText,
+                            discountText = entry.discountText,
+                        )
+                    }
+                }
+                // 折扣截止日单独一行（角标里塞不下「还剩 N 天」和「-70%」两段信息）
+                if (entry.deal && entry.saleEndsAt != null) {
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        saleEndText(entry.saleEndsAt),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
                 }
             }
             Spacer(Modifier.width(FinchSpace.xs))
@@ -442,5 +472,53 @@ private fun PlatformPickerSheet(
             )
         }
         Spacer(Modifier.height(FinchSpace.sm))
+    }
+}
+
+/**
+ * PSN 港服价格标签：现价 +（可选）划线原价 +（可选）折扣角标。
+ * 预购只给现价；打折时三件套齐全，与商店页面观感一致。
+ */
+@Composable
+private fun PriceTag(
+    priceText: String,
+    basePriceText: String?,
+    discountText: String?,
+) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            priceText,
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = if (discountText != null) MaterialTheme.colorScheme.primary
+            else MaterialTheme.colorScheme.onSurface,
+            maxLines = 1,
+        )
+        basePriceText?.let { base ->
+            Spacer(Modifier.width(FinchSpace.xs))
+            Text(
+                base,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textDecoration = TextDecoration.LineThrough,
+                maxLines = 1,
+            )
+        }
+        discountText?.let { tag ->
+            Spacer(Modifier.width(FinchSpace.xs))
+            FinchBadge(tag, tint = MaterialTheme.colorScheme.primary)
+        }
+    }
+}
+
+/** 折扣截止提示：这是港服促销的统一结束日（PSN campaign endTime） */
+private fun saleEndText(end: LocalDate): String {
+    val days = ChronoUnit.DAYS.between(LocalDate.now(), end)
+    val dateText = end.format(DateTimeFormatter.ofPattern("M月d日"))
+    return when {
+        days < 0L -> "优惠已结束"
+        days == 0L -> "优惠今天结束"
+        days == 1L -> "优惠明天结束（$dateText）"
+        else -> "优惠至$dateText（还剩${days}天）"
     }
 }

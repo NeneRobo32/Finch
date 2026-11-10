@@ -12,6 +12,7 @@ import dev.cao.finch.data.GameRepository
 import dev.cao.finch.data.GameSearchClient
 import dev.cao.finch.data.GamerskyClient
 import dev.cao.finch.data.Platform
+import dev.cao.finch.data.PsnStoreClient
 import dev.cao.finch.data.SteamStoreClient
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -80,9 +81,17 @@ class UpcomingViewModel(app: Application) : AndroidViewModel(app) {
         val platforms: Set<Platform>,
         val bangumiId: Long? = null,
         val steamAppId: Long? = null,
-        val source: String, // "gamersky" / "bangumi" / "steam" / "eshop"
+        val source: String, // "gamersky" / "bangumi" / "steam" / "eshop" / "psn"
         val expectation: Int = 0,  // 游民期待值/评分（热度信号）
         val added: Boolean = false,
+        // PSN 港服价格（其他源全为 null）：现价 / 原价（仅打折时非空，UI 划线）/ 折扣文案 "-70%"
+        val priceText: String? = null,
+        val basePriceText: String? = null,
+        val discountText: String? = null,
+        /** 该条目来自「正在打折」栏目（而非预购），日程页分组用 */
+        val deal: Boolean = false,
+        /** 本档折扣统一截止日（仅 deal 条目有，来源为 PSN campaign endTime） */
+        val saleEndsAt: LocalDate? = null,
     )
 
     sealed class LoadState {
@@ -100,7 +109,7 @@ class UpcomingViewModel(app: Application) : AndroidViewModel(app) {
     val state: StateFlow<LoadState> = _state
 
     enum class Source(val label: String) {
-        GAMERSKY("游民星空"), ESHOP("eShop"), STEAM("Steam"), BANGUMI("Bangumi"),
+        GAMERSKY("游民星空"), ESHOP("eShop"), STEAM("Steam"), BANGUMI("Bangumi"), PSN("PSN 港服"),
     }
 
     private val _source = MutableStateFlow(Source.GAMERSKY)
@@ -155,6 +164,24 @@ class UpcomingViewModel(app: Application) : AndroidViewModel(app) {
                                 }
                             }
                             out
+                        }
+                        Source.PSN -> {
+                            // 港服商店：预购新作 + 正在打折。成功写缓存；失败回落上次缓存（离线也能看）
+                            try {
+                                val feed = PsnStoreClient.fetchFeed()
+                                cacheSp.edit().putString("psn_json", PsnStoreClient.toJson(feed)).apply()
+                                fromPsn(feed)
+                            } catch (e: Exception) {
+                                if (e is kotlinx.coroutines.CancellationException) throw e
+                                val cached = cacheSp.getString("psn_json", null)
+                                    ?.let { PsnStoreClient.fromJson(it) }
+                                if (cached != null && !cached.isEmpty) {
+                                    Log.w("Upcoming", "PSN 港服取数失败，用缓存（${friendMsg(e)}）")
+                                    fromPsn(cached)
+                                } else {
+                                    throw e
+                                }
+                            }
                         }
                     }
                 } catch (e: Exception) {
@@ -212,6 +239,9 @@ class UpcomingViewModel(app: Application) : AndroidViewModel(app) {
             { dayBucket(it) },                      // 0 近期 → 1 未来 → 2 远期
             { if (it.date == null) 1 else 0 },      // 有日期的优先
             { it.date ?: LocalDate.MAX },           // 日期升序
+            // 折扣条目（都在同一桶、都没有日期）按力度降序：PSN 端 pickDeals 已排好，
+            // 这里若再按名字排会把 -90% 混到 -30% 后面
+            { if (it.deal) -PsnStoreClient.discountPercent(it.discountText) else 0 },
             { -major(it) },                         // 大作分降序
             { it.name.lowercase() },
         ))
@@ -243,6 +273,9 @@ class UpcomingViewModel(app: Application) : AndroidViewModel(app) {
     private fun isKeep(e: UpcomingEntry): Boolean {
         // 游民星空条目已在拉取时按期待值>=300过滤（小作/边缘已丢），此处不再重复滤
         if (e.source == "gamersky") return true
+        // PSN 港服：预购前沿一页仅 ~33 个标题、打折页已按 discountText 筛过，
+        // 是商店自己给的「新品/在促」清单，再按大作分滤会把冷门独立游戏全砍掉，故不过滤
+        if (e.source == "psn") return true
         val lower = e.name.lowercase()
         if (lower.contains("demo") || lower.contains("trailer") || lower.contains("promo") || lower.contains("display")) return false
         if (lower.contains("bundle") || lower.contains("pack") || lower.contains("dlc") || lower.contains("ost")) return false
@@ -309,6 +342,46 @@ class UpcomingViewModel(app: Application) : AndroidViewModel(app) {
                 expectation = e.expectation,
             )
         }
+
+    /**
+     * PSN 港服 → 条目：预购新作（带发售日、原价）+ 正在打折（带原价划线、折扣角标、截止日）。
+     * 折扣条目的 date 置空 —— 它们不是「即将发售」，日程分组会落到「更远期」桶，
+     * 但 deal=true 会在 UI 上单独标题，不靠日期表达。
+     */
+    private fun fromPsn(feed: PsnStoreClient.Feed): List<UpcomingEntry> {
+        val pre = feed.preorders.map { i ->
+            UpcomingEntry(
+                name = i.name,
+                nameCn = null,
+                coverUrl = i.coverUrl,
+                date = i.releaseDate,
+                releaseText = if (i.releaseDate == null) "发售日待定" else null,
+                platforms = i.platforms,
+                source = "psn",
+                priceText = i.priceText,
+                basePriceText = null,       // 预购不打折：只显示售价
+                discountText = null,
+                saleEndsAt = null,
+            )
+        }
+        val deal = feed.deals.map { i ->
+            UpcomingEntry(
+                name = i.name,
+                nameCn = null,
+                coverUrl = i.coverUrl,
+                date = null,
+                releaseText = null,
+                platforms = i.platforms,
+                source = "psn",
+                priceText = i.priceText,
+                basePriceText = i.basePriceText,
+                discountText = i.discountText,
+                deal = true,
+                saleEndsAt = feed.saleEndsAt,
+            )
+        }
+        return pre + deal
+    }
 
     private suspend fun publish(entries: List<UpcomingEntry>, note: String?) {
         // 标记哪些已入库（bangumiId 或 steamAppId 命中）

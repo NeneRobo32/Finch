@@ -1,8 +1,8 @@
 # Finch 路线图
 
-基线：`v0.27.0`（DB v22，versionCode 96）。
+基线：`v0.28.0`（DB v22，versionCode 97）。
 IGDB 已整体移除（国内直连不通）；HLTB 改走 Crashdummy 中转 API（Steam 直查+Nlib 英文名+按名搜，默认开、可一键关）；非英文库名走英文名解析链换英文线索再搜（Steam 中文反查/Bangumi 原名/eShop 英文段/游民星空/机翻已移除，v0.15.15–0.15.18）。
-下阶段主题：**待定**。v0.26 系列只做减法与纠错、不加功能——v0.26 修总结页三处显示口径（作息／高峰时段改看最近 90 天并按时长摊分、删与热力图重复的「活动」卡、总时长 hero 改玻璃），v0.26.1 把标签功能整体删掉（连同 `play_sessions.tag` 列，DB 21→22）。v0.27 修掉「90 天窗口把上周末算进本周」的读法问题（作息改按自然周独立、可翻页），并把通关进度写出超出／剩余、PSN 拿到白金时弹手绘庆祝。到此已经没有待办的技术债。
+下阶段主题：**待定**。v0.26 系列只做减法与纠错、不加功能——v0.26 修总结页三处显示口径（作息／高峰时段改看最近 90 天并按时长摊分、删与热力图重复的「活动」卡、总时长 hero 改玻璃），v0.26.1 把标签功能整体删掉（连同 `play_sessions.tag` 列，DB 21→22）。v0.27 修掉「90 天窗口把上周末算进本周」的读法问题（作息改按自然周独立、可翻页），并把通关进度写出超出／剩余、PSN 拿到白金时弹手绘庆祝。v0.28 给日程页新增第五个源「PSN 港服」：预购新作 + 正在打折，行内出原价划线／折扣角标／截止日。到此已经没有待办的技术债。
 
 ## 规划原则
 
@@ -51,6 +51,7 @@ IGDB 已整体移除（国内直连不通）；HLTB 改走 Crashdummy 中转 API
 | v0.26 ✅已交付 | 总结页口径修复 | 作息/高峰时段固定看最近 90 天（不再跟当期月/年走）且按时长摊分到各小时（`ui/StatsRhythm.kt`，`observeSessionSpans`）；删掉与热力图重复的「活动」卡；本月总时长 hero 从主题色渐变改为 `GlassSurface(Hero)` | 21（不变） | 无 |
 | v0.26.1 ✅已交付 | 删标签功能 | 会话标签整个拆掉：记录页胶囊筛选、编辑弹窗打标、总结页「标签分布」卡、战报「主打标签」格全部移除；`play_sessions.tag` 列真删（重建表）；备注功能保留 | 21→22 | 无 |
 | v0.27.0 ✅已交付 | 作息按周＋通关超出＋白金庆祝 | 作息改按自然周独立（`weekStartOf`，卡片内可翻周，右箭头卡在本周不越未来）；高峰时段跟着这一周；年度报告的作息改看整年。通关进度写出「已超出主线参考 X」／「还差 X」，超出时补一句离支线／全收集还差多少（`mainOverrunMin` / `mainRemainingMin`）。PSN 同步首次拿到白金弹全屏手绘奖杯动画（`PlatinumWatch` 比对 0→≥1，每游戏只播一次，实验性开关） | 22（不变） | 无 |
+| v0.28.0 ✅已交付 | PSN 港服日程 | 日程页新增第五个源「PSN 港服」：预购新作按发售日、正在打折按力度；行内现价＋原价划线＋折扣角标＋截止日。`data/PsnStoreClient.kt` 直接打商店 GraphQL 持久化查询（照抄 mrt1m 的 3 个 sha256，无依赖、无 token，`x-psn-store-locale-override: zh-hans-hk` 锁港服）；四条线并发 9 秒，成功写 JSON 缓存、失败回落 | 22（不变） | 无 |
 | 远期 / 明确不做 | — | 前台自动识别、账号云同步、国际化明确不做 | — | — |
 
 ```mermaid
@@ -449,6 +450,44 @@ gantt
 
 ---
 
+## v0.28.0 ✅ 已交付 —— PSN 港服日程与价格折扣（DB 不变）
+
+**为什么做**：用户问「日程能对接港服 PSN 商店吗，加个显示价格和折扣的功能，先找找 git 上有没有现成的」。
+先按「给现有日程补价格」验证可行性，结论是补不动：游民 2027 年那批 45 个候选里，商店目录 + 名字相似度
+只命中 7 个（15%），旧 chihiro 搜索只命中 1 个（2.2%）。原因两层——写法不同（游民「：」「重制版」「4」，
+港服「～」「Revival」「４」），以及**2027 年的游戏港服根本还没上架**，没上架就没有价格。
+所以改成让商店自己当数据源：用户选定「PSN 单独做一个日程数据源」，不依赖跨源匹配。
+
+- **接口**：`web.np.playstation.com/api/graphql/v1/` 的 Apollo persisted query。照抄
+  mrt1m/playstation-store-api（MIT）的请求形状与 sha256 白名单，**不引入任何依赖**（PHP/TS/Python
+  的库都不能用于 Android）。用到的三个 op：`categoryGridRetrieve`（目录）、`metGetProductById`
+  （补发售日，单条 14KB/1.2s）、`metGetConceptByProductIdQuery`（取 campaign `endTime`）
+- **只认三个 header**：浏览器 UA + `x-psn-store-locale-override: zh-hans-hk` +
+  `apollo-require-preflight: true`。少了 locale 头会静默返回英区价格；少了 preflight 头直接 400
+  「blocked as a potential Cross-Site Request Forgery」。**商店接口不需要任何 token**，与
+  `data/PsnClient.kt` 那条 npsso→Bearer 链无关
+- **预购**：PS5 类目按 `productReleaseDate` 降序首 250 条 → 70 个 `PREORDER` SKU → 按 `npTitleId`
+  收成 33 个标题 → 8 并发补发售日（33/33 成功）。同日多档优先 `FULL_GAME` 本体
+- **折扣**：`AllDeals` 类目 235 条 → 55 个带 `discountText` 的 SKU → 45 个标题。截止日抽 3 条查
+  campaign，实测三条 `endTime` 完全一致（同一促销期），故整组共用一个截止日，不做 N+1
+- **9 秒**：目录 / 折扣 / 补日期 / 抽截止日四条线 `async` 并发；`PsnStoreClient` 用专用
+  `OkHttpClient`（`maxRequestsPerHost = 8`，默认 5 会把 33 个同域请求卡住）。实测 9.0s
+- **缓存**：成功把 `Feed` 手写成 JSON 存 SharedPreferences（`psn_json`），失败回落上次缓存，
+  离线也能看上次的价格；缓存也空才向上抛
+- **UI**：`UpcomingScreen` 行内 `PriceTag`（现价、划线原价、`-70%` 角标），折扣条目下再加一行
+  `saleEndText`（「优惠至11月20日（还剩10天）」）；分组 `buckets` 新增 `"deal"` 桶，
+  组标题 trailing 显示「至11月20日」
+- **改动范围**：新增 `data/PsnStoreClient.kt`、`test/.../PsnStoreClientTest.kt`；
+  `ui/{UpcomingViewModel,UpcomingScreen}.kt` 接入枚举、取数分支、`fromPsn`、价格字段与分组
+- **三个实测才暴露的坑**：① `JSONObject.optString` 对 JSON null 返回字面量 `"null"`，
+  导致所有原价游戏都被判成打折 → 新增 `strOrNull()`；② PS4/PS5 是两套 `npTitleId`，
+  同款在折扣榜出现两次 → 按 id 去重后再按清洗名去重；③「全部折扣」混着 PS+ 库内免费
+  （`discountedPrice` 是「包含」）与 DLC → 按「价格可解析出数字」+ 排除「(追加内容)」滤掉
+- **验收**：编译 0 warning；测试 192 → 210 全过（`PsnStoreClientTest` 18 条）；DB 仍 22，无迁移。
+  **本机无连接设备、无 AVD，未做真机验证**——用 Robolectric + 真实港服响应跑通生产解析链路代替
+
+---
+
 ## DB 演进一览
 
 | DB | 版本 | 变更 |
@@ -497,3 +536,4 @@ gantt
 14. **v0.26 ✅**：总结页口径修复——作息/高峰时段改 90 天窗口并按时长摊分、删「活动」卡、hero 改玻璃。纯修显示，无新功能。
 15. **v0.26.1 ✅**：删标签功能——会话标签、记录页筛选、总结页标签分布、战报主打标签全部移除，`tag` 列真删（DB 21→22）。减法版，备注功能保留。
 16. **v0.27.0 ✅**：作息按自然周独立（可翻页）＋ 通关进度写出超出/剩余 ＋ 白金奖杯手绘庆祝。修读法问题 + 两处手感，DB 不变。
+17. **v0.28.0 ✅**：日程页第五个源「PSN 港服」——预购新作 + 正在打折，行内出原价划线／折扣角标／截止日；照抄商店 persisted query，无依赖无 token，9 秒出结果并落本地缓存。
