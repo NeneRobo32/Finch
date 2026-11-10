@@ -20,7 +20,7 @@ class Converters {
 }
 
 /** Room schema 版本（迁移与备份校验共用） */
-const val FINCH_DB_VERSION = 22
+const val FINCH_DB_VERSION = 23
 
 @Database(
     entities = [Game::class, PlaySession::class, PlaytimeSnapshot::class, ReleaseFollow::class],
@@ -316,6 +316,19 @@ abstract class FinchDatabase : RoomDatabase() {
             }
         }
 
+        // v0.29（DB 23）：关注表加价格快照 5 列，愿望单页离线也能看到价格/折扣/截止日。
+        // 纯附加列不重建表；老关注记录保持 null = 「还没同步到价格」，
+        // 愿望单页据此显示「待同步」，下次拉到港服数据时自动补齐。
+        val MIGRATION_22_23 = object : Migration(22, 23) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE release_follows ADD COLUMN priceText TEXT")
+                db.execSQL("ALTER TABLE release_follows ADD COLUMN basePriceText TEXT")
+                db.execSQL("ALTER TABLE release_follows ADD COLUMN discountText TEXT")
+                db.execSQL("ALTER TABLE release_follows ADD COLUMN saleEndIso TEXT")
+                db.execSQL("ALTER TABLE release_follows ADD COLUMN productId TEXT")
+            }
+        }
+
         // v0.26.1（DB 22）：删掉会话标签列。标签只用于「记录」页筛选与「总结」页的标签分布，
         // 两者都已移除，留着列只会让每次写入多带一个永远没人读的字段。
         // 重建表按 Room 生成的 schema 顺序排（tag 在 note 之前），数据原样搬过去。
@@ -350,7 +363,7 @@ abstract class FinchDatabase : RoomDatabase() {
             MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9,
             MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13,
             MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17, MIGRATION_17_18,
-            MIGRATION_18_19, MIGRATION_19_20, MIGRATION_20_21, MIGRATION_21_22,
+            MIGRATION_18_19, MIGRATION_19_20, MIGRATION_20_21, MIGRATION_21_22, MIGRATION_22_23,
         )
 
         fun build(context: Context): FinchDatabase =

@@ -33,4 +33,6 @@
     <string name="a11y_unfollow">取消关注</string>
     <string name="a11y_star_on">评分 %1$d 星，已选</string>
     <string name="a11y_star_off">评分 %1$d 星，未选</string>
+    <!-- 愿望单（v0.29） -->
+    <string name="a11y_wishlist_refresh">刷新愿望单价格</string>
 </resources>

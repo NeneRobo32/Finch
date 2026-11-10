@@ -1,5 +1,43 @@
 # Changelog
 
+## 0.29.0 (2026-11-10)
+
+日程页收敛到**三个源**（PSN 港服 / 游民星空 / eShop），PSN 港服提到最前并成为默认；
+新增「愿望单」tab，把关注过的游戏连同价格、折扣、发售日一起攒下来。
+
+### 删掉 Steam 与 Bangumi 两个源
+
+日程页原来五个源，Steam 与 Bangumi 的关注度和信息密度都最低：Steam「即将推出」只有英文名 +
+模糊发售档期，Bangumi 日历主要覆盖日本动画改编作品。删的是**日程源分支**，
+`SteamStoreClient` 与 `BangumiClient` 仍然保留——HltbFetch 按名搜索、GameSearchClient 全库搜索、
+SwitchTitleClient 都在用它们，删客户端会连带炸掉别处。
+
+顺带删掉的还有状态里的 `note` 字段（原本只用来标「缓存（Bangumi）」）和 `calendar_json` 缓存：
+现在默认源是 PSN，第一次打开不该先闪一屏上一次的 Bangumi 数据再换掉。
+
+### 新的「愿望单」tab（日程页 → 愿望单）
+
+- **价格快照跟着关注走**：`release_follows` 加 5 列（priceText / basePriceText / discountText /
+  saleEndIso / productId），点 ☆ 时把当前条目上的价格一起写进去
+- **每次拉到港服数据顺手回写**：`syncFollowPrices` 用 `followKey(bangumiId, steamAppId, name)` 对齐，
+  预购条目优先于折扣条目（避免同名的折扣行把预购的日期信息覆盖成空），字段全等才跳过写库
+- **页面内容**：顶部三格汇总（关注数 / 打折中 / 最大折扣），每张卡是大封面 + 标题 + 发售倒计时 +
+  现价/划线原价/折扣角标 + 折扣截止日；有 productId 时可以一键跳港服商店页
+- **筛选**：全部 / 打折中 / 待打折三段
+- **离线可用**：价格是本地快照，没网也能看上次同步到的价
+
+### 日程卡片改大
+
+旧卡是 52dp 封面 + 三件套价格挤在标题右侧一行，港服长中文名一多就把折扣角标挤没了——
+这就是"太小、折扣被挡住"的根因。新卡：92×124dp 封面 + 标题/中文名/发售徽章/平台，
+**价格独占整行**且用 `FlowRow` 允许换行，折扣截止日单独一行，最后才是关注与入库操作行。
+
+### 数据层
+
+- `FINCH_DB_VERSION` 22 → 23，`MIGRATION_22_23` 是 5 条 `ALTER TABLE release_follows ADD COLUMN`
+- 迁移测试补 `checkFrom(22)` 与 22→23 专项（断言 5 个新列存在、旧行价格字段为 null）
+- 底栏从 5 tab 变 6 tab，`LiquidBottomTabs` 的 `tabsCount` 本就是动态参数，底栏代码未改
+
 ## 0.28.0 (2026-11-10)
 
 日程页多一个源：**PSN 港服**。不补价格到别的源，而是把港服商店本身当成一个日程源——

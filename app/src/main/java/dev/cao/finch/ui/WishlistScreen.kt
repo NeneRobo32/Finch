@@ -1,0 +1,385 @@
+package dev.cao.finch.ui
+
+import android.content.Intent
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.StarBorder
+import androidx.compose.material.icons.outlined.ShoppingBag
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.core.net.toUri
+import dev.cao.finch.R
+import dev.cao.finch.data.ReleaseFollow
+import dev.cao.finch.ui.design.FinchBadge
+import dev.cao.finch.ui.design.FinchButton
+import dev.cao.finch.ui.design.FinchButtonVariant
+import dev.cao.finch.ui.design.FinchEmptyState
+import dev.cao.finch.ui.design.FinchHeader
+import dev.cao.finch.ui.design.FinchIconButton
+import dev.cao.finch.ui.design.FinchLoading
+import dev.cao.finch.ui.design.FinchSegmented
+import dev.cao.finch.ui.design.FinchSpace
+import dev.cao.finch.ui.design.GlassStyle
+import dev.cao.finch.ui.design.GlassSurface
+import dev.cao.finch.ui.design.finchEnter
+import dev.cao.finch.ui.theme.FinchShapes
+import java.time.LocalDate
+import java.time.format.DateTimeParseException
+
+/**
+ * 愿望单页（v0.29）：把日程页 ☆ 关注的游戏集中管理，主要回答三个问题 ——
+ * 现在多少钱、打了多少折、什么时候发售/折扣什么时候结束。
+ *
+ * 数据全部来自 release_follows 的价格快照（离线可看）；
+ * 点右上角刷新会单独拉一次港服数据回写快照，不受当前日程页选中的数据源影响。
+ */
+@Composable
+fun WishlistScreen(
+    upcomingViewModel: UpcomingViewModel = viewModel(),
+) {
+    val follows by upcomingViewModel.follows.collectAsState()
+    val refreshing by upcomingViewModel.wishlistRefreshing.collectAsState()
+    val context = LocalContext.current
+    var filter by remember { mutableStateOf(WishFilter.ALL) }
+
+    val shown = remember(follows, filter) {
+        when (filter) {
+            WishFilter.ALL -> follows
+            WishFilter.DEAL -> follows.filter { it.discountText != null }
+            WishFilter.UPCOMING -> follows.filter { it.discountText == null }
+        }
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .statusBarsPadding()
+            .padding(horizontal = FinchSpace.screen),
+    ) {
+        Spacer(Modifier.height(FinchSpace.sm))
+        FinchHeader(
+            title = "我的愿望单",
+            subtitle = "PSN 港服价格 / 折扣 / 发售日",
+            actions = {
+                FinchIconButton(
+                    icon = Icons.Filled.Refresh,
+                    contentDescription = stringResource(R.string.a11y_wishlist_refresh),
+                    onClick = { upcomingViewModel.refreshWishlist() },
+                )
+            },
+        )
+        Spacer(Modifier.height(FinchSpace.md))
+        FinchSegmented(
+            options = WishFilter.entries.toList(),
+            selected = filter,
+            onSelect = { filter = it },
+            label = { it.label },
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Spacer(Modifier.height(FinchSpace.md))
+
+        if (refreshing) {
+            FinchLoading(modifier = Modifier.fillMaxWidth().padding(vertical = FinchSpace.sm))
+        }
+
+        when {
+            follows.isEmpty() && !refreshing -> {
+                FinchEmptyState(
+                    icon = Icons.Filled.StarBorder,
+                    title = "愿望单还是空的",
+                    message = "去「日程」页点 ☆ 关注想买的游戏，价格、折扣和发售日会汇总到这里。",
+                    modifier = Modifier.padding(top = FinchSpace.sm),
+                )
+            }
+
+            shown.isEmpty() -> {
+                FinchEmptyState(
+                    icon = Icons.Outlined.ShoppingBag,
+                    title = "这个分类下没有游戏",
+                    message = when (filter) {
+                        WishFilter.DEAL -> "关注的游戏现在都没在打折，换个分类看看。"
+                        else -> "关注的游戏都在打折，换个分类看看。"
+                    },
+                    modifier = Modifier.padding(top = FinchSpace.sm),
+                )
+            }
+
+            else -> {
+                val now = LocalDate.now()
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    verticalArrangement = Arrangement.spacedBy(FinchSpace.md),
+                    contentPadding = PaddingValues(
+                        top = FinchSpace.xs,
+                        bottom = FinchSpace.bottomBarClearance,
+                    ),
+                ) {
+                    item(key = "summary") {
+                        WishSummary(follows)
+                    }
+                    items(
+                        count = shown.size,
+                        key = { i -> "wish_" + shown[i].key },
+                    ) { i ->
+                        WishCard(
+                            follow = shown[i],
+                            now = now,
+                            onUnfollow = { upcomingViewModel.toggleFollowByKey(shown[i].key) },
+                            onOpenStore = {
+                                val url = "https://store.playstation.com/zh-hans-hk/product/" + shown[i].productId
+                                runCatching {
+                                    context.startActivity(
+                                        Intent(Intent.ACTION_VIEW, url.toUri())
+                                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                                    )
+                                }
+                            },
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** 愿望单分类：全部 / 打折中 / 待发售（原价或未打折） */
+private enum class WishFilter(val label: String) {
+    ALL("全部"), DEAL("打折中"), UPCOMING("待打折"),
+}
+
+/** 顶部汇总：关注数 / 打折数 / 最大折扣 */
+@Composable
+private fun WishSummary(follows: List<ReleaseFollow>) {
+    val scheme = MaterialTheme.colorScheme
+    val deals = follows.count { it.discountText != null }
+    val best = follows.mapNotNull { it.discountText }.maxByOrNull { discountValue(it) }
+    GlassSurface(
+        modifier = Modifier.fillMaxWidth().finchEnter(),
+        style = GlassStyle.Tile,
+        shape = FinchShapes.card,
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(FinchSpace.md),
+            horizontalArrangement = Arrangement.spacedBy(FinchSpace.md),
+        ) {
+            SummaryCell("关注", "${follows.size}", Modifier.weight(1f))
+            SummaryCell("打折中", "$deals", Modifier.weight(1f))
+            SummaryCell("最大折扣", best ?: "—", Modifier.weight(1f), highlight = best != null)
+        }
+    }
+    Spacer(Modifier.height(FinchSpace.xs))
+    Text(
+        "价格每天随日程刷新更新，离线也能看上次同步到的价",
+        style = MaterialTheme.typography.labelSmall,
+        color = scheme.onSurfaceVariant,
+    )
+}
+
+@Composable
+private fun SummaryCell(label: String, value: String, modifier: Modifier, highlight: Boolean = false) {
+    val scheme = MaterialTheme.colorScheme
+    Column(modifier = modifier) {
+        Text(label, style = MaterialTheme.typography.labelSmall, color = scheme.onSurfaceVariant)
+        Spacer(Modifier.height(2.dp))
+        Text(
+            value,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = if (highlight) scheme.primary else scheme.onSurface,
+            maxLines = 1,
+        )
+    }
+}
+
+/**
+ * 愿望单卡片：大封面 + 名字 + 发售倒计时 + 价格区 + 折扣截止日 + 操作。
+ * 结构与日程页大卡一致，保证两处心算一致（同一个游戏在两页看到的价是同一个快照）。
+ */
+@Composable
+private fun WishCard(
+    follow: ReleaseFollow,
+    now: LocalDate,
+    onUnfollow: () -> Unit,
+    onOpenStore: () -> Unit,
+) {
+    val scheme = MaterialTheme.colorScheme
+    val date = parseIso(follow.dateIso)
+    val saleEnd = parseIso(follow.saleEndIso)
+    GlassSurface(
+        modifier = Modifier.fillMaxWidth().finchEnter(),
+        style = GlassStyle.Tile,
+        shape = FinchShapes.card,
+    ) {
+        Column(modifier = Modifier.fillMaxWidth().padding(FinchSpace.md)) {
+            Row(Modifier.fillMaxWidth()) {
+                GameCover(
+                    url = follow.coverUrl,
+                    contentDescription = stringResource(R.string.a11y_cover, follow.name),
+                    modifier = Modifier
+                        .size(width = 92.dp, height = 124.dp)
+                        .clip(FinchShapes.thumb),
+                    requestSize = 320,
+                    placeholder = {
+                        Box(
+                            modifier = Modifier.fillMaxSize().background(scheme.surfaceVariant),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(
+                                Icons.Filled.StarBorder,
+                                null,
+                                tint = scheme.onSurfaceVariant,
+                                modifier = Modifier.size(24.dp),
+                            )
+                        }
+                    },
+                )
+                Spacer(Modifier.width(FinchSpace.md))
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        follow.name,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Spacer(Modifier.height(FinchSpace.sm))
+                    if (date != null) {
+                        FinchBadge(
+                            releaseCountdownText(date, now),
+                            tint = if (isUrgent(date, now)) scheme.primary else scheme.onSurfaceVariant,
+                        )
+                    } else {
+                        Text(
+                            "发售日待定",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = scheme.onSurfaceVariant,
+                        )
+                    }
+                    if (follow.priceText == null) {
+                        Spacer(Modifier.height(FinchSpace.xs))
+                        Text(
+                            "价格待同步",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = scheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+            if (follow.priceText != null) {
+                Spacer(Modifier.height(FinchSpace.md))
+                PriceLine(
+                    priceText = follow.priceText,
+                    basePriceText = follow.basePriceText,
+                    discountText = follow.discountText,
+                )
+            }
+            if (saleEnd != null) {
+                Spacer(Modifier.height(FinchSpace.xs))
+                Text(
+                    saleEndText(saleEnd),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = scheme.onSurfaceVariant,
+                )
+            }
+            Spacer(Modifier.height(FinchSpace.md))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                FinchIconButton(
+                    icon = Icons.Filled.Star,
+                    contentDescription = stringResource(R.string.a11y_unfollow),
+                    onClick = onUnfollow,
+                    ghost = true,
+                    tint = scheme.primary,
+                )
+                if (follow.productId != null) {
+                    Spacer(Modifier.width(FinchSpace.xs))
+                    FinchButton(
+                        text = "商店",
+                        icon = Icons.Outlined.ShoppingBag,
+                        variant = FinchButtonVariant.Glass,
+                        compact = true,
+                        onClick = onOpenStore,
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** 价格三件套（与日程页同一套视觉：主题色现价 + 划线原价 + 折扣角标） */
+@Composable
+private fun PriceLine(priceText: String, basePriceText: String?, discountText: String?) {
+    val scheme = MaterialTheme.colorScheme
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(FinchSpace.sm),
+    ) {
+        Text(
+            priceText,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = if (discountText != null) scheme.primary else scheme.onSurface,
+            maxLines = 1,
+        )
+        if (basePriceText != null) {
+            Text(
+                basePriceText,
+                style = MaterialTheme.typography.bodySmall,
+                color = scheme.onSurfaceVariant,
+                textDecoration = androidx.compose.ui.text.style.TextDecoration.LineThrough,
+                maxLines = 1,
+            )
+        }
+        if (discountText != null) {
+            FinchBadge(discountText, tint = scheme.primary)
+        }
+    }
+}
+
+/** "-70%" → 70（排序用，解析失败按 0） */
+private fun discountValue(text: String): Int =
+    text.filter { it.isDigit() }.toIntOrNull() ?: 0
+
+private fun parseIso(iso: String?): LocalDate? {
+    if (iso.isNullOrBlank()) return null
+    return try {
+        LocalDate.parse(iso)
+    } catch (e: DateTimeParseException) {
+        null
+    }
+}

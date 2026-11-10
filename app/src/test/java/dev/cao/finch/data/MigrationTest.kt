@@ -26,7 +26,7 @@ import org.robolectric.annotation.SQLiteMode
  * Room 挂全量 MIGRATION_* 打开（Room 自带 schema 校验，迁移 SQL 与实体不一致会抛
  * IllegalStateException —— v0.15.0 的启动闪退就是这么炸的）→ 断言样例数据保留、列值正确。
  *
- * 覆盖起始版本 7..21 逐版升到 FINCH_DB_VERSION=22。
+ * 覆盖起始版本 7..22 逐版升到 FINCH_DB_VERSION=23。
  * 1..6 无 schema JSON（schemas 从 7 起入库），无法起测，已在报告注明。
  */
 @RunWith(RobolectricTestRunner::class)
@@ -96,6 +96,38 @@ class MigrationTest {
 
     @Test
     fun `v21升级到当前_数据保留`() = checkFrom(21)
+
+    @Test
+    fun `v22升级到当前_数据保留`() = checkFrom(22)
+
+    // ---- 专项：22→23 关注表补价格快照列 ----
+
+    @Test
+    fun `v22到23_关注表新增价格快照列_旧数据保留`() {
+        createOldDb(22)
+        val room = openWithMigrations()
+        try {
+            val db = room.openHelper.writableDatabase
+            val cols = mutableSetOf<String>()
+            db.query("PRAGMA table_info(`release_follows`)").use { c ->
+                val nameIdx = c.getColumnIndex("name")
+                while (c.moveToNext()) cols += c.getString(nameIdx)
+            }
+            // v0.29 愿望单页要显示价格/折扣，5 列全部必须加上
+            listOf("priceText", "basePriceText", "discountText", "saleEndIso", "productId").forEach {
+                assertTrue("release_follows 缺列 $it", cols.contains(it))
+            }
+            runBlocking {
+                val f = room.releaseFollowDao().byKey("k1")!!
+                assertEquals("Sample Follow", f.name)
+                // 旧行没有价格快照，升级后应为 null 而不是崩溃
+                assertEquals(null, f.priceText)
+                assertEquals(null, f.discountText)
+            }
+        } finally {
+            room.close()
+        }
+    }
 
     // ---- 专项：21→22 删掉会话标签列 ----
 
