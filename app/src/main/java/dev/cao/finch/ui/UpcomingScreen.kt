@@ -1,5 +1,6 @@
 package dev.cao.finch.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -9,6 +10,7 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -35,6 +37,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -70,17 +73,25 @@ import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
 
 /**
- * 发售日程页（v0.29 UI 重构）：
+ * 发售日程页（v0.29.1 卡片重排）：
  * 页头 → 数据源胶囊 → 搜索 → 愿望单入口 → 分组大卡片。
  *
- * 卡片的尺寸按「价格信息完整展示」倒推：52dp 封面横条塞不下现价+原价+折扣三件套，
- * 折扣角标会被挤掉，所以改成 92×124 封面 + 独立整行价格区，折扣角标永远有位置。
+ * 愿望单不再是底部 tab，而是本页的子视图：点入口条进去，左上角箭头或系统返回键回到列表。
  */
 @Composable
-fun UpcomingScreen(
-    upcomingViewModel: UpcomingViewModel = viewModel(),
-    onOpenWishlist: () -> Unit = {},
-) {
+fun UpcomingScreen(upcomingViewModel: UpcomingViewModel = viewModel()) {
+    // 愿望单子视图开关。用 rememberSaveable 保存，旋转屏幕后还停在愿望单里
+    var showWishlist by rememberSaveable { mutableStateOf(false) }
+
+    if (showWishlist) {
+        BackHandler { showWishlist = false }
+        WishlistPane(
+            upcomingViewModel = upcomingViewModel,
+            onBack = { showWishlist = false },
+        )
+        return
+    }
+
     val state by upcomingViewModel.state.collectAsState()
     var platformPickerFor by remember { mutableStateOf<UpcomingViewModel.UpcomingEntry?>(null) }
     var query by remember { mutableStateOf("") }
@@ -180,11 +191,9 @@ fun UpcomingScreen(
                         bottom = FinchSpace.bottomBarClearance,
                     ),
                 ) {
-                    // 愿望单入口：关注的游戏在独立页面管理，这里只留一个入口条
-                    if (follows.isNotEmpty()) {
-                        item(key = "wishlist_entry") {
-                            WishlistEntry(follows.size, onOpenWishlist)
-                        }
+                    // 愿望单入口：常驻一条窄条，点进去是本页的子视图（不占底栏 tab）
+                    item(key = "wishlist_entry") {
+                        WishlistBar(count = follows.size, onClick = { showWishlist = true })
                     }
                     if (filtered.isEmpty() && q.isNotEmpty()) {
                         item(key = "no_match") {
@@ -255,62 +264,75 @@ fun UpcomingScreen(
     }
 }
 
-/** 愿望单入口条：关注的游戏数 + 去独立页面管理 */
+/** 愿望单入口条：一行搞定，不再像卡片那样占掉一整屏的高度 */
 @Composable
-private fun WishlistEntry(count: Int, onClick: () -> Unit) {
+private fun WishlistBar(count: Int, onClick: () -> Unit) {
     val scheme = MaterialTheme.colorScheme
     InsetSurface(
         modifier = Modifier.fillMaxWidth(),
-        shape = FinchShapes.card,
+        shape = FinchShapes.pill,
         onClick = onClick,
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = FinchSpace.md, vertical = FinchSpace.md),
+                .padding(horizontal = FinchSpace.md, vertical = FinchSpace.sm),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Box(
-                modifier = Modifier
-                    .size(34.dp)
-                    .clip(FinchShapes.pill)
-                    .background(scheme.primary.copy(alpha = 0.14f)),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(Icons.Filled.Star, null, tint = scheme.primary, modifier = Modifier.size(18.dp))
-            }
-            Spacer(Modifier.width(FinchSpace.md))
-            Column(Modifier.weight(1f)) {
-                Text("我的愿望单", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
-                Text(
-                    "$count 款在关注 · 查看价格与折扣",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = scheme.onSurfaceVariant,
-                )
-            }
+            Icon(
+                Icons.Filled.Star,
+                null,
+                tint = scheme.primary,
+                modifier = Modifier.size(16.dp),
+            )
+            Spacer(Modifier.width(FinchSpace.sm))
+            Text(
+                "愿望单",
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium,
+            )
+            Spacer(Modifier.width(FinchSpace.sm))
+            Text(
+                if (count == 0) "还没有关注" else "$count 款在关注",
+                style = MaterialTheme.typography.labelSmall,
+                color = scheme.onSurfaceVariant,
+                modifier = Modifier.weight(1f),
+            )
             Icon(
                 Icons.AutoMirrored.Filled.KeyboardArrowRight,
                 null,
                 tint = scheme.onSurfaceVariant,
-                modifier = Modifier.size(20.dp),
+                modifier = Modifier.size(18.dp),
             )
         }
     }
 }
 
 /**
- * 发售/折扣大卡片。
+ * 商店条目卡（日程页与愿望单共用同一套版式）。
  *
- * 布局：封面（92×124）+ 右侧标题/日期/平台 → 独立整行价格区 → 折扣截止日 → 操作行。
- * 价格区独占一行是这个卡片存在的理由：旧版把现价/原价/折扣塞进标题右侧的一行，
- * 长名字（港服中文全名）+ 三个价格元素抢宽度，折扣角标经常被挤没。
+ * 布局：左侧封面（88×118）＋右侧标题/别名/日期与平台；底部一条信息带，左价格、右操作。
+ *
+ * v0.29.0 的版本把「价格」单独占一整行、操作再占一行，两行之间夹着大片空白，
+ * 视觉上像两级台阶；这里合成一条带后，价格和按钮同基线，卡片高度也回到紧凑比例。
+ * 星标从底部操作带挪到标题右侧，既是「收藏」语义的常规位置，也不再和入库按钮抢横向空间。
  */
 @Composable
-private fun UpcomingCard(
-    entry: UpcomingViewModel.UpcomingEntry,
-    followed: Boolean,
-    onToggleFollow: () -> Unit,
-    onAdd: () -> Unit,
+internal fun StoreEntryCard(
+    name: String,
+    nameCn: String?,
+    coverUrl: String?,
+    date: LocalDate?,
+    releaseText: String?,
+    platforms: Set<Platform>,
+    priceText: String?,
+    basePriceText: String?,
+    discountText: String?,
+    saleEnd: LocalDate?,
+    pricePlaceholder: String? = null,
+    followed: Boolean? = null,
+    onToggleFollow: (() -> Unit)? = null,
+    action: @Composable RowScope.() -> Unit = {},
 ) {
     val scheme = MaterialTheme.colorScheme
     val now = LocalDate.now()
@@ -326,12 +348,16 @@ private fun UpcomingCard(
                 .fillMaxWidth()
                 .padding(FinchSpace.md),
         ) {
-            Row(Modifier.fillMaxWidth()) {
+            // 标题块对着封面垂直居中，避免右侧内容比封面矮时在底部留一条空
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 GameCover(
-                    url = entry.coverUrl,
-                    contentDescription = stringResource(R.string.a11y_cover, entry.name),
+                    url = coverUrl,
+                    contentDescription = stringResource(R.string.a11y_cover, name),
                     modifier = Modifier
-                        .size(width = 92.dp, height = 124.dp)
+                        .size(width = 88.dp, height = 118.dp)
                         .clip(FinchShapes.thumb),
                     requestSize = 320,
                     placeholder = {
@@ -350,16 +376,33 @@ private fun UpcomingCard(
                 )
                 Spacer(Modifier.width(FinchSpace.md))
                 Column(Modifier.weight(1f)) {
-                    Text(
-                        entry.name,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    entry.nameCn?.let {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.Top,
+                    ) {
                         Text(
-                            it,
+                            name,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f),
+                        )
+                        if (onToggleFollow != null) {
+                            FinchIconButton(
+                                icon = if (followed == true) Icons.Filled.Star else Icons.Filled.StarBorder,
+                                contentDescription = stringResource(
+                                    if (followed == true) R.string.a11y_unfollow else R.string.a11y_follow,
+                                ),
+                                onClick = onToggleFollow,
+                                ghost = true,
+                                tint = if (followed == true) scheme.primary else scheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                    if (!nameCn.isNullOrBlank() && nameCn != name) {
+                        Text(
+                            nameCn,
                             style = MaterialTheme.typography.labelMedium,
                             color = scheme.onSurfaceVariant,
                             maxLines = 1,
@@ -367,82 +410,121 @@ private fun UpcomingCard(
                         )
                     }
                     Spacer(Modifier.height(FinchSpace.sm))
-                    ReleaseLine(entry = entry, now = now)
-                    val plats = entry.platforms - Platform.Multi
-                    if (plats.isNotEmpty()) {
-                        Spacer(Modifier.height(FinchSpace.xs))
-                        Text(
-                            GameRepository.labelFor(plats),
+                    StoreMetaLine(date = date, releaseText = releaseText, platforms = platforms)
+                }
+            }
+
+            // 信息带：左侧价格（含折扣），右侧操作，两者同一基线
+            Spacer(Modifier.height(FinchSpace.sm))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    when {
+                        priceText != null -> PriceRow(priceText, basePriceText, discountText)
+                        pricePlaceholder != null -> Text(
+                            pricePlaceholder,
                             style = MaterialTheme.typography.labelSmall,
                             color = scheme.onSurfaceVariant,
                         )
                     }
+                    if (saleEnd != null) {
+                        Spacer(Modifier.height(FinchSpace.xxs))
+                        Text(
+                            saleEndText(saleEnd),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = scheme.onSurfaceVariant,
+                            maxLines = 1,
+                        )
+                    }
                 }
-            }
-            // 价格区：独占整行，现价 / 原价 / 折扣角标都不再和别的信息抢宽度
-            if (entry.priceText != null) {
-                Spacer(Modifier.height(FinchSpace.md))
-                PriceRow(
-                    priceText = entry.priceText,
-                    basePriceText = entry.basePriceText,
-                    discountText = entry.discountText,
-                )
-            }
-            if (entry.deal && entry.saleEndsAt != null) {
-                Spacer(Modifier.height(FinchSpace.xs))
-                Text(
-                    saleEndText(entry.saleEndsAt),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = scheme.onSurfaceVariant,
-                )
-            }
-            Spacer(Modifier.height(FinchSpace.md))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.End,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                if (entry.added) {
-                    FinchBadge("已在库")
-                } else {
-                    FinchIconButton(
-                        icon = if (followed) Icons.Filled.Star else Icons.Filled.StarBorder,
-                        contentDescription = stringResource(
-                            if (followed) R.string.a11y_unfollow else R.string.a11y_follow,
-                        ),
-                        onClick = onToggleFollow,
-                        ghost = true,
-                        tint = if (followed) scheme.primary else scheme.onSurfaceVariant,
-                    )
-                    Spacer(Modifier.width(FinchSpace.xs))
-                    FinchButton(
-                        text = "入库",
-                        icon = Icons.Filled.Add,
-                        variant = FinchButtonVariant.Glass,
-                        compact = true,
-                        onClick = onAdd,
-                    )
-                }
+                Spacer(Modifier.width(FinchSpace.sm))
+                action()
             }
         }
     }
 }
 
-/** 发售日一行：有具体日期给倒计时徽章，否则给原始文案 */
+/** 日期徽章 / 发售文案 + 平台，一行内用「·」分隔，比竖着堆两行省一张卡的高度 */
 @Composable
-private fun ReleaseLine(entry: UpcomingViewModel.UpcomingEntry, now: LocalDate) {
+private fun StoreMetaLine(date: LocalDate?, releaseText: String?, platforms: Set<Platform>) {
     val scheme = MaterialTheme.colorScheme
-    val date = entry.date
-    if (date != null) {
-        FinchBadge(
-            releaseCountdownText(date, now),
-            tint = if (isUrgent(date, now)) scheme.primary else scheme.onSurfaceVariant,
-        )
-    } else {
-        entry.releaseText?.let {
-            Text(it, style = MaterialTheme.typography.labelSmall, color = scheme.onSurfaceVariant)
+    val now = LocalDate.now()
+    val plats = platforms - Platform.Multi
+    val platText = if (plats.isEmpty()) null else GameRepository.labelFor(plats)
+    val hasDatePart = date != null || !releaseText.isNullOrBlank()
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(FinchSpace.xs),
+    ) {
+        when {
+            date != null -> FinchBadge(
+                releaseCountdownText(date, now),
+                tint = if (isUrgent(date, now)) scheme.primary else scheme.onSurfaceVariant,
+            )
+
+            !releaseText.isNullOrBlank() -> Text(
+                releaseText,
+                style = MaterialTheme.typography.labelSmall,
+                color = scheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        if (platText != null) {
+            if (hasDatePart) {
+                Text(
+                    "·",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = scheme.onSurfaceVariant.copy(alpha = 0.6f),
+                )
+            }
+            Text(
+                platText,
+                style = MaterialTheme.typography.labelSmall,
+                color = scheme.onSurfaceVariant,
+                maxLines = 1,
+            )
         }
     }
+}
+
+@Composable
+private fun UpcomingCard(
+    entry: UpcomingViewModel.UpcomingEntry,
+    followed: Boolean,
+    onToggleFollow: () -> Unit,
+    onAdd: () -> Unit,
+) {
+    StoreEntryCard(
+        name = entry.name,
+        nameCn = entry.nameCn,
+        coverUrl = entry.coverUrl,
+        date = entry.date,
+        releaseText = entry.releaseText,
+        platforms = entry.platforms,
+        priceText = entry.priceText,
+        basePriceText = entry.basePriceText,
+        discountText = entry.discountText,
+        saleEnd = if (entry.deal) entry.saleEndsAt else null,
+        followed = followed,
+        onToggleFollow = onToggleFollow,
+        action = {
+            if (entry.added) {
+                FinchBadge("已在库")
+            } else {
+                FinchButton(
+                    text = "入库",
+                    icon = Icons.Filled.Add,
+                    variant = FinchButtonVariant.Glass,
+                    compact = true,
+                    onClick = onAdd,
+                )
+            }
+        },
+    )
 }
 
 /** 发售倒计时文案（日程卡与愿望单卡共用） */

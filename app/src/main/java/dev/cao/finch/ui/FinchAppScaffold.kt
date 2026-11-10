@@ -18,13 +18,11 @@ import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.ShoppingBag
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.outlined.BarChart
 import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Home
-import androidx.compose.material.icons.outlined.ShoppingBag
 import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -55,13 +53,12 @@ import dev.cao.finch.ui.theme.GlassState
 import dev.cao.finch.ui.theme.ThemeState
 
 /**
- * 底部六个 tab。图标选中态用实心、未选中用描边，和底栏的玻璃胶囊一起形成层级。
- * v0.29：日程页后面插入「愿望单」（PSN 港服关注的价格/折扣汇总）。
+ * 底部五个 tab。图标选中态用实心、未选中用描边，和底栏的玻璃胶囊一起形成层级。
+ * v0.29.1：愿望单不再是独立 tab，改成日程页里的子视图（点「愿望单」条进入）。
  */
 enum class Tab(val label: String, val icon: androidx.compose.ui.graphics.vector.ImageVector, val selectedIcon: androidx.compose.ui.graphics.vector.ImageVector) {
     Home("主页", Icons.Outlined.Home, Icons.Filled.Home),
     Upcoming("日程", Icons.Outlined.CalendarMonth, Icons.Filled.CalendarMonth),
-    Wishlist("愿望单", Icons.Outlined.ShoppingBag, Icons.Filled.ShoppingBag),
     History("记录", Icons.Outlined.History, Icons.Filled.History),
     Stats("总结", Icons.Outlined.BarChart, Icons.Filled.BarChart),
     Import("设置", Icons.Outlined.Tune, Icons.Filled.Tune),
@@ -132,8 +129,7 @@ fun FinchAppScaffold(
                     Box(Modifier.fillMaxSize()) {
                         when (t) {
                             Tab.Home -> HomeScreen(viewModel, addViewModel, initialGameId)
-                            Tab.Upcoming -> UpcomingScreen(onOpenWishlist = { tab = Tab.Wishlist })
-                            Tab.Wishlist -> WishlistScreen()
+                            Tab.Upcoming -> UpcomingScreen()
                             Tab.History -> HistoryScreen(viewModel)
                             Tab.Stats -> StatsScreen(viewModel)
                             Tab.Import -> ImportScreen(
