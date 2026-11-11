@@ -6,8 +6,6 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
@@ -19,8 +17,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.TextAutoSize
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Add
@@ -44,9 +44,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.cao.finch.R
 import dev.cao.finch.data.GameRepository
@@ -311,11 +313,12 @@ private fun WishlistBar(count: Int, onClick: () -> Unit) {
 /**
  * 商店条目卡（日程页与愿望单共用同一套版式）。
  *
- * 布局：左侧封面（88×118）＋右侧标题/别名/日期与平台；底部一条信息带，左价格、右操作。
+ * 布局照搬港服商店的条目卡：左边封面，中间标题/别名/发售日，**右边一列价格**
+ * （折扣角标在上、现价最大最显眼、划线原价在下），底部留给操作。
  *
- * v0.29.0 的版本把「价格」单独占一整行、操作再占一行，两行之间夹着大片空白，
- * 视觉上像两级台阶；这里合成一条带后，价格和按钮同基线，卡片高度也回到紧凑比例。
- * 星标从底部操作带挪到标题右侧，既是「收藏」语义的常规位置，也不再和入库按钮抢横向空间。
+ * 价格单独成列而不是塞进信息带，是因为「多少钱」是这张卡最该被一眼看到的信息：
+ * 放在右侧整列后现价可以用标题级字号，折扣角标也不再和别的元素挤同一行被截断。
+ * 卡片高度仍由 88×118 的封面决定，与上一版一致，只是把原来铺在底部的价格挪到了右边。
  */
 @Composable
 internal fun StoreEntryCard(
@@ -335,7 +338,6 @@ internal fun StoreEntryCard(
     action: @Composable RowScope.() -> Unit = {},
 ) {
     val scheme = MaterialTheme.colorScheme
-    val now = LocalDate.now()
     GlassSurface(
         modifier = Modifier
             .fillMaxWidth()
@@ -348,10 +350,10 @@ internal fun StoreEntryCard(
                 .fillMaxWidth()
                 .padding(FinchSpace.md),
         ) {
-            // 标题块对着封面垂直居中，避免右侧内容比封面矮时在底部留一条空
+            // 中间列固定与封面同高，发售日才会压在封面下沿而不是浮在半空
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
+                verticalAlignment = Alignment.Top,
             ) {
                 GameCover(
                     url = coverUrl,
@@ -375,31 +377,18 @@ internal fun StoreEntryCard(
                     },
                 )
                 Spacer(Modifier.width(FinchSpace.md))
-                Column(Modifier.weight(1f)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.Top,
-                    ) {
-                        Text(
-                            name,
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.SemiBold,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f),
-                        )
-                        if (onToggleFollow != null) {
-                            FinchIconButton(
-                                icon = if (followed == true) Icons.Filled.Star else Icons.Filled.StarBorder,
-                                contentDescription = stringResource(
-                                    if (followed == true) R.string.a11y_unfollow else R.string.a11y_follow,
-                                ),
-                                onClick = onToggleFollow,
-                                ghost = true,
-                                tint = if (followed == true) scheme.primary else scheme.onSurfaceVariant,
-                            )
-                        }
-                    }
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(118.dp),
+                ) {
+                    Text(
+                        name,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
                     if (!nameCn.isNullOrBlank() && nameCn != name) {
                         Text(
                             nameCn,
@@ -409,37 +398,46 @@ internal fun StoreEntryCard(
                             overflow = TextOverflow.Ellipsis,
                         )
                     }
-                    Spacer(Modifier.height(FinchSpace.sm))
+                    Spacer(Modifier.weight(1f))
                     StoreMetaLine(date = date, releaseText = releaseText, platforms = platforms)
                 }
+                Spacer(Modifier.width(FinchSpace.sm))
+                PriceColumn(
+                    priceText = priceText,
+                    basePriceText = basePriceText,
+                    discountText = discountText,
+                    placeholder = pricePlaceholder,
+                )
             }
 
-            // 信息带：左侧价格（含折扣），右侧操作，两者同一基线
             Spacer(Modifier.height(FinchSpace.sm))
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Column(Modifier.weight(1f)) {
-                    when {
-                        priceText != null -> PriceRow(priceText, basePriceText, discountText)
-                        pricePlaceholder != null -> Text(
-                            pricePlaceholder,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = scheme.onSurfaceVariant,
-                        )
-                    }
-                    if (saleEnd != null) {
-                        Spacer(Modifier.height(FinchSpace.xxs))
-                        Text(
-                            saleEndText(saleEnd),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = scheme.onSurfaceVariant,
-                            maxLines = 1,
-                        )
-                    }
+                if (saleEnd != null) {
+                    Text(
+                        saleEndText(saleEnd),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = scheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                } else {
+                    Spacer(Modifier.weight(1f))
                 }
-                Spacer(Modifier.width(FinchSpace.sm))
+                if (onToggleFollow != null) {
+                    FinchIconButton(
+                        icon = if (followed == true) Icons.Filled.Star else Icons.Filled.StarBorder,
+                        contentDescription = stringResource(
+                            if (followed == true) R.string.a11y_unfollow else R.string.a11y_follow,
+                        ),
+                        onClick = onToggleFollow,
+                        ghost = true,
+                        tint = if (followed == true) scheme.primary else scheme.onSurfaceVariant,
+                    )
+                }
                 action()
             }
         }
@@ -543,34 +541,63 @@ internal fun releaseCountdownText(date: LocalDate, now: LocalDate): String {
 internal fun isUrgent(date: LocalDate, now: LocalDate): Boolean =
     ChronoUnit.DAYS.between(now, date) in 0L..7L
 
-/** 价格三件套：现价（打折时用主题色）+ 划线原价 + 折扣角标；空间不足时换行，不截断角标 */
-@OptIn(ExperimentalLayoutApi::class)
+/**
+ * 右侧价格列：折扣角标在上、现价最大、划线原价垫底，全部右对齐。
+ *
+ * 现价用 headlineSmall（22sp）而不是标题字号，是因为「多少钱」是这张卡最该被一眼扫到的信息，
+ * 比标题小一号就淹没在文字里了。宽度上限 96dp 是按港服条目卡的比例定的（价格约占卡片 1/4），
+ * 更宽会把中间标题挤成一条缝；「HK$1,388.00」这种超长价格靠 autoSize 缩到放得下为止。
+ */
 @Composable
-private fun PriceRow(priceText: String, basePriceText: String?, discountText: String?) {
+private fun PriceColumn(
+    priceText: String?,
+    basePriceText: String?,
+    discountText: String?,
+    placeholder: String?,
+) {
     val scheme = MaterialTheme.colorScheme
-    FlowRow(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(FinchSpace.sm),
-        verticalArrangement = Arrangement.spacedBy(FinchSpace.xxs),
+    Column(
+        modifier = Modifier.widthIn(min = 56.dp, max = 96.dp),
+        horizontalAlignment = Alignment.End,
     ) {
+        if (priceText == null) {
+            placeholder?.let {
+                Text(
+                    it,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = scheme.onSurfaceVariant,
+                    maxLines = 2,
+                    textAlign = TextAlign.End,
+                )
+            }
+            return@Column
+        }
+        if (discountText != null) {
+            FinchBadge(discountText, tint = scheme.primary)
+            Spacer(Modifier.height(FinchSpace.xxs))
+        }
         Text(
             priceText,
-            style = MaterialTheme.typography.titleMedium,
+            style = MaterialTheme.typography.headlineSmall,
             fontWeight = FontWeight.SemiBold,
             color = if (discountText != null) scheme.primary else scheme.onSurface,
             maxLines = 1,
+            textAlign = TextAlign.End,
+            autoSize = TextAutoSize.StepBased(
+                minFontSize = 13.sp,
+                maxFontSize = 22.sp,
+                stepSize = 1.sp,
+            ),
         )
         if (basePriceText != null) {
             Text(
                 basePriceText,
-                style = MaterialTheme.typography.bodySmall,
+                style = MaterialTheme.typography.labelSmall,
                 color = scheme.onSurfaceVariant,
                 textDecoration = TextDecoration.LineThrough,
                 maxLines = 1,
+                textAlign = TextAlign.End,
             )
-        }
-        if (discountText != null) {
-            FinchBadge(discountText, tint = scheme.primary)
         }
     }
 }
