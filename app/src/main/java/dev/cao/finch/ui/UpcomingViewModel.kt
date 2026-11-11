@@ -364,7 +364,10 @@ class UpcomingViewModel(app: Application) : AndroidViewModel(app) {
         .map { e ->
             UpcomingEntry(
                 name = e.name,
-                nameCn = e.publisher?.takeIf { it.isNotBlank() },
+                // 别把发行商当成中文别名塞进 nameCn：卡片会在标题下面多出一行
+                // 「SQUARE ENIX」这类厂牌，看起来像游戏名的第二半，观感很脏。
+                // 游民星空自己的条目名本来就是中文，单行标题就够。
+                nameCn = null,
                 coverUrl = e.coverUrl,
                 date = e.releaseDate,
                 releaseText = e.releaseRaw,

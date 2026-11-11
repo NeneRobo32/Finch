@@ -262,9 +262,9 @@ private fun WishCard(
         onToggleFollow = onUnfollow,
         action = {
             if (follow.productId != null) {
+                // 不带图标：卡片右列只有 100dp 出头，图标会把按钮顶到折行
                 FinchButton(
                     text = "商店",
-                    icon = Icons.Outlined.ShoppingBag,
                     variant = FinchButtonVariant.Glass,
                     compact = true,
                     onClick = onOpenStore,

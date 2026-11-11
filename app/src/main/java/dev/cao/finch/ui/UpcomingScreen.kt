@@ -23,7 +23,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.TextAutoSize
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Event
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
@@ -313,12 +312,12 @@ private fun WishlistBar(count: Int, onClick: () -> Unit) {
 /**
  * 商店条目卡（日程页与愿望单共用同一套版式）。
  *
- * 布局照搬港服商店的条目卡：左边封面，中间标题/别名/发售日，**右边一列价格**
- * （折扣角标在上、现价最大最显眼、划线原价在下），底部留给操作。
+ * 紧凑版（v0.29.3）：左封面 62×82，中间标题/别名/元信息，右边一列价格 + 操作。
  *
- * 价格单独成列而不是塞进信息带，是因为「多少钱」是这张卡最该被一眼看到的信息：
- * 放在右侧整列后现价可以用标题级字号，折扣角标也不再和别的元素挤同一行被截断。
- * 卡片高度仍由 88×118 的封面决定，与上一版一致，只是把原来铺在底部的价格挪到了右边。
+ * 上一版把中间列写成与封面等高的固定高度、再单开一行放按钮，短标题时中间就空掉一大块，
+ * 整张卡像三级台阶 —— 这才是「太空」的根源，不是配色问题。这一版整条链路都交给内容决定高度：
+ * 封面缩小、中间列不再写死高度、操作并进右侧价格列、关注星标挪到按钮左边，
+ * 卡片从 ~186dp 收到 ~120dp，一屏能多看到一款。
  */
 @Composable
 internal fun StoreEntryCard(
@@ -345,76 +344,57 @@ internal fun StoreEntryCard(
         style = GlassStyle.Tile,
         shape = FinchShapes.card,
     ) {
-        Column(
+        Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(FinchSpace.md),
+                .padding(horizontal = FinchSpace.md, vertical = FinchSpace.sm),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            // 中间列固定与封面同高，发售日才会压在封面下沿而不是浮在半空
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.Top,
-            ) {
-                GameCover(
-                    url = coverUrl,
-                    contentDescription = stringResource(R.string.a11y_cover, name),
-                    modifier = Modifier
-                        .size(width = 88.dp, height = 118.dp)
-                        .clip(FinchShapes.thumb),
-                    requestSize = 320,
-                    placeholder = {
-                        Box(
-                            modifier = Modifier.fillMaxSize().background(scheme.surfaceVariant),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Icon(
-                                Icons.Filled.Event,
-                                null,
-                                tint = scheme.onSurfaceVariant,
-                                modifier = Modifier.size(24.dp),
-                            )
-                        }
-                    },
-                )
-                Spacer(Modifier.width(FinchSpace.md))
-                Column(
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(118.dp),
-                ) {
-                    Text(
-                        name,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    if (!nameCn.isNullOrBlank() && nameCn != name) {
-                        Text(
-                            nameCn,
-                            style = MaterialTheme.typography.labelMedium,
-                            color = scheme.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
+            GameCover(
+                url = coverUrl,
+                contentDescription = stringResource(R.string.a11y_cover, name),
+                // 62×82 是「还看得出封面」的最小尺寸：再小 Titles 就成一团色块
+                modifier = Modifier
+                    .size(width = 62.dp, height = 82.dp)
+                    .clip(FinchShapes.thumb),
+                requestSize = 240,
+                placeholder = {
+                    Box(
+                        modifier = Modifier.fillMaxSize().background(scheme.surfaceVariant),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            Icons.Filled.Event,
+                            null,
+                            tint = scheme.onSurfaceVariant,
+                            modifier = Modifier.size(20.dp),
                         )
                     }
-                    Spacer(Modifier.weight(1f))
-                    StoreMetaLine(date = date, releaseText = releaseText, platforms = platforms)
-                }
-                Spacer(Modifier.width(FinchSpace.sm))
-                PriceColumn(
-                    priceText = priceText,
-                    basePriceText = basePriceText,
-                    discountText = discountText,
-                    placeholder = pricePlaceholder,
+                },
+            )
+            Spacer(Modifier.width(FinchSpace.md))
+            // 中间列不给固定高度：标题一行就占一行，长名最多两行，卡片随内容收缩
+            Column(modifier = Modifier.weight(1f)) {
+                // 用 titleMedium 而不是 bodyLarge：同为 16sp SemiBold，但行高 22 比 24 紧，
+                // 两行标题正好少占 4dp；半粗标题在玻璃底上比正文看着更「立得住」
+                Text(
+                    name,
+                    style = MaterialTheme.typography.titleMedium,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
                 )
-            }
-
-            Spacer(Modifier.height(FinchSpace.sm))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
+                if (!nameCn.isNullOrBlank() && nameCn != name) {
+                    Text(
+                        nameCn,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = scheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                Spacer(Modifier.height(FinchSpace.xs))
+                StoreMetaLine(date = date, releaseText = releaseText, platforms = platforms)
+                // 折扣截止日原来是独立一整行，现在挂在元信息下面，作为第二行小字
                 if (saleEnd != null) {
                     Text(
                         saleEndText(saleEnd),
@@ -422,23 +402,39 @@ internal fun StoreEntryCard(
                         color = scheme.onSurfaceVariant,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f),
-                    )
-                } else {
-                    Spacer(Modifier.weight(1f))
-                }
-                if (onToggleFollow != null) {
-                    FinchIconButton(
-                        icon = if (followed == true) Icons.Filled.Star else Icons.Filled.StarBorder,
-                        contentDescription = stringResource(
-                            if (followed == true) R.string.a11y_unfollow else R.string.a11y_follow,
-                        ),
-                        onClick = onToggleFollow,
-                        ghost = true,
-                        tint = if (followed == true) scheme.primary else scheme.onSurfaceVariant,
                     )
                 }
-                action()
+            }
+            Spacer(Modifier.width(FinchSpace.xs))
+            // 右侧宽度按「星标 40 + 文字按钮 52」算：操作并排放在价格下面时，
+            // 按钮再带图标就会顶破 100dp 把中间的标题挤成一条缝，所以这两个动作只用文字
+            Column(
+                modifier = Modifier.widthIn(min = 92.dp, max = 108.dp),
+                horizontalAlignment = Alignment.End,
+                verticalArrangement = Arrangement.Center,
+            ) {
+                PriceColumn(
+                    priceText = priceText,
+                    basePriceText = basePriceText,
+                    discountText = discountText,
+                    placeholder = pricePlaceholder,
+                )
+                Spacer(Modifier.height(FinchSpace.xs))
+                // 操作并进右列，不再单开一行：星标是次要动作给图标，主操作给按钮
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (onToggleFollow != null) {
+                        FinchIconButton(
+                            icon = if (followed == true) Icons.Filled.Star else Icons.Filled.StarBorder,
+                            contentDescription = stringResource(
+                                if (followed == true) R.string.a11y_unfollow else R.string.a11y_follow,
+                            ),
+                            onClick = onToggleFollow,
+                            ghost = true,
+                            tint = if (followed == true) scheme.primary else scheme.onSurfaceVariant,
+                        )
+                    }
+                    action()
+                }
             }
         }
     }
@@ -513,9 +509,9 @@ private fun UpcomingCard(
             if (entry.added) {
                 FinchBadge("已在库")
             } else {
+                // 不带图标：右列只有 100dp 出头，图标 + 文字会把按钮顶到折行
                 FinchButton(
                     text = "入库",
-                    icon = Icons.Filled.Add,
                     variant = FinchButtonVariant.Glass,
                     compact = true,
                     onClick = onAdd,
