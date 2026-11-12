@@ -20,9 +20,17 @@ class SettingsStore(context: Context) {
         get() = sp.getString(KEY_STEAM_ID, "") ?: ""
         set(value) = sp.edit().putString(KEY_STEAM_ID, value.trim()).apply()
 
+    /**
+     * Steam API 基址。
+     * 审查 S2：这个字段的语义是「反代地址」，用户会从网上抄第三方地址填进来，
+     * 而 Steam Key 是长期凭据、以 query 明文出网 —— 所以读写两侧都只认 https。
+     * 读取侧顺手兜底历史脏值，避免老库里存着的 http 地址继续生效。
+     */
     var steamBaseUrl: String
-        get() = sp.getString(KEY_STEAM_BASE, DEFAULT_BASE) ?: DEFAULT_BASE
-        set(value) = sp.edit().putString(KEY_STEAM_BASE, value.trim()).apply()
+        get() = sp.getString(KEY_STEAM_BASE, DEFAULT_BASE)
+            ?.takeIf { it.startsWith("https://", ignoreCase = true) }
+            ?: DEFAULT_BASE
+        set(value) = sp.edit().putString(KEY_STEAM_BASE, normalizeSteamBase(value)).apply()
 
     /** Switch 家长监护 token（session_token，用于免登录换 access_token；加密落盘） */
     var switchSessionToken: String
@@ -160,6 +168,16 @@ class SettingsStore(context: Context) {
 
     // ---- 凭据加解密（F.1，对调用方透明）----
 
+    /**
+     * 把排队中的 [android.content.SharedPreferences.Editor.apply] 异步写强制落盘。
+     * 审查 C1：恢复备份前要重启进程，`apply()` 的写入队列可能还没刷到磁盘就被杀。
+     * 写一个哨兵值并用 `commit()` 阻塞等待 —— SP 的写队列是单线程有序的，
+     * 这一次同步写完成时，之前排队的 apply 也都已经落地。
+     */
+    fun flush() {
+        sp.edit().putLong(KEY_FLUSH_MARK, System.currentTimeMillis()).commit()
+    }
+
     /** 读凭据：密文解密；旧版明文原样返回并顺手加密回写（惰性迁移）。
      *  解密失败（换机恢复出的密文、Keystore 密钥丢失）删坏值返回空串：
      *  宁可让用户重填 token，不让启动崩溃；PSN 空串上层已有「尚未授权」分支，行为安全。 */
@@ -192,6 +210,18 @@ class SettingsStore(context: Context) {
     }
 
     companion object {
+        /** 校验 Steam API 基址：必须是 https 且主机名非空；空串回落默认值。审查 S2 */
+        fun normalizeSteamBase(raw: String): String {
+            val trimmed = raw.trim().ifBlank { DEFAULT_BASE }.trimEnd('/')
+            val uri = runCatching { java.net.URI(trimmed) }.getOrNull()
+                ?: throw IllegalArgumentException("API 地址格式不对，示例：https://api.steampowered.com")
+            if (!uri.scheme.equals("https", ignoreCase = true) || uri.host.isNullOrBlank()) {
+                throw IllegalArgumentException("API 地址必须是 https（http 会让 Steam Key 明文出网）")
+            }
+            return trimmed
+        }
+
+        private const val KEY_FLUSH_MARK = "flush_mark"
         private const val KEY_STEAM_KEY = "steam_api_key"
         private const val KEY_STEAM_ID = "steam_id"
         private const val KEY_STEAM_BASE = "steam_base_url"

@@ -7,6 +7,7 @@ import androidx.lifecycle.viewModelScope
 import dev.cao.finch.FinchApp
 import dev.cao.finch.data.EshopClient
 import dev.cao.finch.data.Game
+import dev.cao.finch.data.GameNameIndex
 import dev.cao.finch.data.GameRepository
 import dev.cao.finch.data.GamerskyClient
 import dev.cao.finch.data.Platform
@@ -16,6 +17,7 @@ import dev.cao.finch.data.networkErrorKind
 import dev.cao.finch.notify.ReleaseCheckWorker
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -129,6 +131,16 @@ class UpcomingViewModel(app: Application) : AndroidViewModel(app) {
     private val _state = MutableStateFlow<LoadState>(LoadState.Idle)
     val state: StateFlow<LoadState> = _state
 
+    /** 当前这次刷新的 Job：切源时先取消上一次，避免旧结果盖新结果（审查 P3） */
+    private var refreshJob: Job? = null
+
+    /** 刷新序号：被取消的旧请求在 finally 里不能把新请求的转圈标记关掉 */
+    private var refreshSeq = 0
+
+    /** 下拉刷新的转圈标记：与首载的整页 Loading 区分开，列表可以留在原地 */
+    private val _refreshing = MutableStateFlow(false)
+    val refreshing: StateFlow<Boolean> = _refreshing
+
     /** 数据源：港服放最前并作为默认（有价格的那个源最常用） */
     enum class Source(val label: String) {
         PSN("PSN 港服"), GAMERSKY("游民星空"), ESHOP("eShop"),
@@ -153,34 +165,51 @@ class UpcomingViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun refresh() {
-        _state.value = LoadState.Loading
+        // 审查 P3：只保留最近一次刷新。切源时旧请求会被取消，
+        // 否则慢的旧源晚到就会盖掉新源的结果（本地缓存回落更容易踩到）。
+        refreshJob?.cancel()
+        // 审查 C3：已经有内容时不再退回整页转圈，让旧列表留在原地，
+        // 只在顶部显示下拉刷新的转圈；首载（Idle/Failed）才铺整页 Loading。
+        if (_state.value is LoadState.Ready) {
+            _refreshing.value = true
+        } else {
+            _state.value = LoadState.Loading
+        }
         // 只拉当前选中的源
         val sel = _source.value
-        viewModelScope.launch {
-            val r = withContext(Dispatchers.IO) {
-                try {
-                    when (sel) {
-                        Source.PSN -> fetchPsnEntries()
-                        Source.GAMERSKY -> fromGamersky(GamerskyClient.fetchRestOfYear())
-                        Source.ESHOP -> fromEshop(EshopClient.fetchRecent())
+        val seq = ++refreshSeq
+        refreshJob = viewModelScope.launch {
+            try {
+                val r = withContext(Dispatchers.IO) {
+                    try {
+                        when (sel) {
+                            Source.PSN -> fetchPsnEntries()
+                            Source.GAMERSKY -> fromGamersky(GamerskyClient.fetchRestOfYear())
+                            Source.ESHOP -> fromEshop(EshopClient.fetchRecent())
+                        }
+                    } catch (e: Exception) {
+                        if (e is CancellationException) throw e // 取消不是失败
+                        Log.w("Upcoming", "${sel.label} ✗ ${friendMsg(e)}")
+                        emptyList()
                     }
-                } catch (e: Exception) {
-                    if (e is CancellationException) throw e // 取消不是失败
-                    Log.w("Upcoming", "${sel.label} ✗ ${friendMsg(e)}")
-                    emptyList()
                 }
-            }
-            if (r.isNotEmpty()) {
-                // 港服数据到手就顺手刷新愿望单里的价格快照
-                if (sel == Source.PSN) {
-                    withContext(Dispatchers.IO) { syncFollowPrices(r) }
+                // 期间已经切到别的源，就丢弃这份结果
+                if (_source.value != sel) return@launch
+                if (r.isNotEmpty()) {
+                    // 港服数据到手就顺手刷新愿望单里的价格快照
+                    if (sel == Source.PSN) {
+                        withContext(Dispatchers.IO) { syncFollowPrices(r) }
+                    }
+                    mergeAndPublish(r)
+                } else {
+                    _state.value = LoadState.Failed(
+                        "${sel.label} 没有返回数据（网络或源问题）",
+                        cacheSp.contains("psn_json"),
+                    )
                 }
-                mergeAndPublish(r)
-            } else {
-                _state.value = LoadState.Failed(
-                    "${sel.label} 没有返回数据（网络或源问题）",
-                    cacheSp.contains("psn_json"),
-                )
+            } finally {
+                // 被取消的旧请求也会走到这里，只有最新一次才把转圈标记关掉
+                if (seq == refreshSeq) _refreshing.value = false
             }
         }
     }
@@ -422,11 +451,13 @@ class UpcomingViewModel(app: Application) : AndroidViewModel(app) {
     private suspend fun publish(entries: List<UpcomingEntry>) {
         // 标记哪些已入库：优先按平台 ID，港服条目没有 ID 就按名字（与 upsertGame 的合并口径一致）
         val marked = withContext(Dispatchers.IO) {
+            // 审查 P1：几百条日程逐条 allByName 会全表扫几百遍，先读一次全表建内存名字索引
+            val nameIndex = GameNameIndex(gameDao.all())
             entries.map { e ->
                 val added = when {
                     e.bangumiId != null -> gameDao.byBangumiId(e.bangumiId) != null
                     e.steamAppId != null -> gameDao.bySteamAppId(e.steamAppId) != null
-                    else -> gameDao.allByName(e.name).isNotEmpty()
+                    else -> nameIndex.contains(e.name)
                 }
                 e.copy(added = added)
             }

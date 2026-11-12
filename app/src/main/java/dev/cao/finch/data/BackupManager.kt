@@ -3,6 +3,7 @@ package dev.cao.finch.data
 import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.net.Uri
+import dev.cao.finch.FinchApp
 import org.json.JSONObject
 import java.io.File
 import java.io.IOException
@@ -32,6 +33,9 @@ object BackupManager {
     /** 自动备份目录（filesDir 下，随应用私有；换机/卸载前请手动导出）与保留份数 */
     private const val AUTO_BACKUP_DIR = "auto_backups"
     private const val AUTO_BACKUP_KEEP = 4
+
+    /** 单份备份解压上限：正常库 < 50MB，留 4 倍余量。审查 S3 */
+    private const val MAX_DB_BYTES = 200L * 1024 * 1024
 
     /** 备份必备核心表全集（release_follows 自 DB 12 起才有） */
     private val CORE_TABLES = listOf("games", "play_sessions", "playtime_snapshots", "release_follows")
@@ -261,7 +265,11 @@ object BackupManager {
         rawQuery("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", arrayOf(name))
             .use { it.moveToFirst() }
 
-    /** 从 zip 里解出 finch.db 到 dir，找不到该条目或 zip 损坏则抛异常 */
+    /**
+     * 从 zip 里解出 finch.db 到 dir，找不到该条目或 zip 损坏则抛异常。
+     * 审查 S3：边读边累计字节数，超过 [MAX_DB_BYTES] 立刻中止 —— 手工构造的 zip 可以声明
+     * 几十 GB 的解压尺寸，无上限的 `copyTo` 会把 cacheDir 写爆。
+     */
     private fun unzipDb(zipFile: File, dir: File): File {
         val out = File(dir, "restored-$DB_NAME")
         out.delete()
@@ -271,26 +279,52 @@ object BackupManager {
                 while (true) {
                     val entry = zip.nextEntry ?: break
                     if (entry.name == DB_ENTRY) {
-                        out.outputStream().use { zip.copyTo(it) }
+                        out.outputStream().use { os ->
+                            val buf = ByteArray(64 * 1024)
+                            var total = 0L
+                            while (true) {
+                                val n = zip.read(buf)
+                                if (n < 0) break
+                                total += n
+                                if (total > MAX_DB_BYTES) {
+                                    throw IOException("备份文件异常（解压后超过 200MB），已中止")
+                                }
+                                os.write(buf, 0, n)
+                            }
+                        }
                         found = true
                     }
                     zip.closeEntry()
                     if (found) break
                 }
             }
+        } catch (e: IOException) {
+            out.delete() // 审查 S3：中止时别在 cache 里留半截文件
+            throw e
         } catch (e: Exception) {
+            out.delete()
             throw IOException("备份文件读取失败（不是有效的 zip）", e)
         }
-        if (!found) throw IOException("备份里没有 $DB_ENTRY，不是 Finch 备份")
+        if (!found) {
+            out.delete()
+            throw IOException("备份里没有 $DB_ENTRY，不是 Finch 备份")
+        }
         return out
     }
 
+    /**
+     * 重启应用。
+     * 审查 C1：原来直接 `Runtime.exit(0)`，跳过所有生命周期回调，而且 SharedPreferences 的
+     * `apply()` 是异步写 —— 恢复流程前后刚写进去的时间戳可能还没落盘就被杀掉。
+     * 现在先 flush 一次 SP，再走 `Process.killProcess` 的正常死亡路径（不弹「应用已停止」）。
+     */
     private fun restartApp(context: Context) {
+        (context.applicationContext as? FinchApp)?.settings?.flush()
         val intent = context.packageManager.getLaunchIntentForPackage(context.packageName)
         intent?.let {
             it.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_CLEAR_TASK)
             context.startActivity(it)
         }
-        Runtime.getRuntime().exit(0)
+        android.os.Process.killProcess(android.os.Process.myPid())
     }
 }

@@ -49,6 +49,7 @@ import dev.cao.finch.ui.design.GlassStyle
 import dev.cao.finch.ui.design.GlassSurface
 import dev.cao.finch.ui.design.finchEnter
 import dev.cao.finch.ui.theme.FinchShapes
+import dev.cao.finch.ui.theme.finchBundle
 import java.time.LocalDate
 import java.time.format.DateTimeParseException
 
@@ -84,31 +85,26 @@ internal fun WishlistPane(
             .padding(horizontal = FinchSpace.screen),
     ) {
         Spacer(Modifier.height(FinchSpace.sm))
-        // 子视图的返回键放在标题左侧（Android 常规位置），刷新仍在右侧
-        Row(
+        // 审查 C1：返回键单独一行。之前它与标题挤在同一 Row 里，40dp 的图标按钮
+        // 会把「愿望单」这个标题右推 44dp，和别的页面标题对不齐。
+        // 副标题也去掉了 —— 内容和下面 WishSummary 的说明重复，白占一行。
+        FinchIconButton(
+            icon = Icons.AutoMirrored.Filled.ArrowBack,
+            contentDescription = "返回日程",
+            onClick = onBack,
+            ghost = true,
+        )
+        FinchHeader(
+            title = "愿望单",
             modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            FinchIconButton(
-                icon = Icons.AutoMirrored.Filled.ArrowBack,
-                contentDescription = "返回日程",
-                onClick = onBack,
-                ghost = true,
-            )
-            Spacer(Modifier.width(FinchSpace.xs))
-            FinchHeader(
-                title = "愿望单",
-                subtitle = "PSN 港服价格 / 折扣 / 发售日",
-                modifier = Modifier.weight(1f),
-                actions = {
-                    FinchIconButton(
-                        icon = Icons.Filled.Refresh,
-                        contentDescription = stringResource(R.string.a11y_wishlist_refresh),
-                        onClick = { upcomingViewModel.refreshWishlist() },
-                    )
-                },
-            )
-        }
+            actions = {
+                FinchIconButton(
+                    icon = Icons.Filled.Refresh,
+                    contentDescription = stringResource(R.string.a11y_wishlist_refresh),
+                    onClick = { upcomingViewModel.refreshWishlist() },
+                )
+            },
+        )
         Spacer(Modifier.height(FinchSpace.md))
         FinchSegmented(
             options = WishFilter.entries.toList(),
@@ -181,9 +177,9 @@ internal fun WishlistPane(
     }
 }
 
-/** 愿望单分类：全部 / 打折中 / 待打折（原价或未打折） */
+/** 愿望单分类：全部 / 打折中 / 未打折（原价或未打折，审查：原「待打折」读起来像还没开始卖） */
 private enum class WishFilter(val label: String) {
-    ALL("全部"), DEAL("打折中"), UPCOMING("待打折"),
+    ALL("全部"), DEAL("打折中"), UPCOMING("未打折"),
 }
 
 /** 顶部汇总：关注数 / 打折数 / 最大折扣，压成一条窄带，不抢列表首屏 */
@@ -226,7 +222,8 @@ private fun SummaryCell(label: String, value: String, modifier: Modifier, highli
             value,
             style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.SemiBold,
-            color = if (highlight) scheme.primary else scheme.onSurface,
+            // 审查 A2：titleMedium（约 16sp）不是大字，浅色主题用 accentText 才够对比度
+            color = if (highlight) finchBundle().accentText else scheme.onSurface,
             maxLines = 1,
         )
     }

@@ -67,14 +67,25 @@ class ImportViewModel(app: Application) : AndroidViewModel(app) {
         data class Failed(val message: String) : SyncState()
     }
 
-    fun saveSteamConfig(key: String, id: String, base: String) {
+    /**
+     * 保存 Steam 配置。
+     * 审查 S2：API 基址必须 https，非法值直接驳回并把原因写进同步面板，不落盘。
+     */
+    fun saveSteamConfig(key: String, id: String, base: String): Boolean {
+        val normalizedBase = try {
+            SettingsStore.normalizeSteamBase(base)
+        } catch (e: IllegalArgumentException) {
+            _steamState.value = SyncState.Failed(e.message ?: "API 地址不合法")
+            return false
+        }
         settings.steamApiKey = key
         settings.steamId = id
-        settings.steamBaseUrl = base.ifBlank { SettingsStore.DEFAULT_BASE }
+        settings.steamBaseUrl = normalizedBase
         // 同步回 StateFlow，保持内存态一致
         _steamKey.value = key.trim()
         _steamId.value = id.trim()
-        _steamBase.value = base.ifBlank { SettingsStore.DEFAULT_BASE }
+        _steamBase.value = normalizedBase
+        return true
     }
 
     /** 拉取 Steam 库，按名字匹配/新建游戏并写入总时长。值以点击瞬间界面输入为准。 */
@@ -361,15 +372,25 @@ class ImportViewModel(app: Application) : AndroidViewModel(app) {
     private val _lastWebDavBackupAt = MutableStateFlow(settings.lastWebDavBackupAt)
     val lastWebDavBackupAt: StateFlow<Long> = _lastWebDavBackupAt
 
-    /** 保存 WebDAV 配置；地址会被归一化成「带协议、以 / 结尾」的目录形式 */
-    fun saveWebDavConfig(url: String, user: String, password: String) {
-        val normalized = WebDavClient.normalizeBase(url)
+    /**
+     * 保存 WebDAV 配置；地址会被归一化成「带协议、以 / 结尾」的目录形式。
+     * 审查 S1：公网 http 地址会被 [WebDavClient.normalizeBase] 拒绝，
+     * 这里转成云同步面板上的错误提示，而不是让异常冒到 UI 线程崩掉。
+     */
+    fun saveWebDavConfig(url: String, user: String, password: String): Boolean {
+        val normalized = try {
+            WebDavClient.normalizeBase(url)
+        } catch (e: IllegalArgumentException) {
+            _cloudState.value = SyncState.Failed(e.message ?: "目录地址不合法")
+            return false
+        }
         settings.webDavUrl = normalized
         settings.webDavUser = user
         settings.webDavPassword = password
         _webDavUrl.value = normalized
         _webDavUser.value = user
         _webDavPassword.value = password
+        return true
     }
 
     /** 云备份开关唯一入口（UI 不直写状态） */

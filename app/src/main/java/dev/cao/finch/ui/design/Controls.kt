@@ -35,6 +35,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -60,6 +61,7 @@ import dev.cao.finch.ui.liquid.LiquidSlider
 import dev.cao.finch.ui.liquid.LiquidToggle
 import dev.cao.finch.ui.theme.FinchShapes
 import dev.cao.finch.ui.theme.LocalGlassEnabled
+import dev.cao.finch.ui.theme.finchBundle
 import dev.cao.finch.ui.theme.glassPalette
 
 /**
@@ -224,7 +226,7 @@ private fun buttonContentColor(variant: FinchButtonVariant): Color = when (varia
 
 /**
  * 图标按钮：默认玻璃圆底，[ghost] 时只有点击涟漪。
- * 尺寸固定 40dp，保证顶栏左右一致。
+ * 视觉尺寸固定 40dp，保证顶栏左右一致；命中区仍按 48dp 给（[minimumInteractiveComponentSize] 只扩触摸范围，不放大圆底）。
  */
 @Composable
 fun FinchIconButton(
@@ -238,13 +240,15 @@ fun FinchIconButton(
     flat: Boolean = false,
     enabled: Boolean = true,
 ) {
+    // 40dp 的圆底在手指上偏小（审查 A3）：外挂一层 48dp 最小命中区，视觉不变
+    val base = modifier.minimumInteractiveComponentSize()
     if (ghost) {
-        IconButton(onClick = onClick, modifier = modifier.size(40.dp), enabled = enabled) {
+        IconButton(onClick = onClick, modifier = base.size(40.dp), enabled = enabled) {
             Icon(icon, contentDescription = contentDescription, tint = tint, modifier = Modifier.size(22.dp))
         }
     } else if (flat) {
         InsetSurface(
-            modifier = modifier.size(40.dp),
+            modifier = base.size(40.dp),
             shape = FinchShapes.pill,
             enabled = enabled,
             onClick = onClick,
@@ -255,7 +259,7 @@ fun FinchIconButton(
         }
     } else {
         GlassSurface(
-            modifier = modifier.size(40.dp),
+            modifier = base.size(40.dp),
             style = GlassStyle.Tile,
             shape = FinchShapes.pill,
             enabled = enabled,
@@ -271,6 +275,7 @@ fun FinchIconButton(
 /**
  * 筛选胶囊：选中 = 主题色实心，未选中 = 玻璃底 + 细描边。
  * 主页筛选、日程数据源、平台选择统一用它。
+ * 垂直内边距 12dp（原 8dp，审查 A3）：胶囊高约 44dp，接近 48dp 命中区，手指不用瞄准。
  */
 @Composable
 fun FinchChip(
@@ -304,7 +309,7 @@ fun FinchChip(
                 .finchClickable(onClick = onClick)
                 .clip(FinchShapes.pill)
                 .background(scheme.primary)
-                .padding(horizontal = 14.dp, vertical = 8.dp),
+                .padding(horizontal = 14.dp, vertical = 12.dp),
             contentAlignment = Alignment.Center,
         ) { content() }
     } else {
@@ -313,7 +318,7 @@ fun FinchChip(
             shape = FinchShapes.pill,
             onClick = onClick,
         ) {
-            Box(Modifier.padding(horizontal = 14.dp, vertical = 8.dp)) { content() }
+            Box(Modifier.padding(horizontal = 14.dp, vertical = 12.dp)) { content() }
         }
     }
 }
@@ -547,12 +552,16 @@ fun FinchProgressBar(
     }
 }
 
-/** 小徽章：倒计时、已在库、平台等元信息 */
+/**
+ * 小徽章：倒计时、已在库、平台等元信息。
+ * 文字用 [dev.cao.finch.ui.theme.FinchColorScheme.accentText]（11sp 上 primary 对比度不够，审查 A2），
+ * 底色仍是 primary 的淡色，观感不变。
+ */
 @Composable
 fun FinchBadge(
     text: String,
     modifier: Modifier = Modifier,
-    tint: Color = MaterialTheme.colorScheme.primary,
+    tint: Color = finchBundle().accentText,
 ) {
     Box(
         modifier
@@ -592,6 +601,8 @@ fun FinchStars(
             val desc = starDescription?.invoke(star, on)
             Box(
                 Modifier
+                    // 星星 30dp + 8dp 内衬 = 38dp，仍差一点到 48dp 命中区（审查 A3）
+                    .minimumInteractiveComponentSize()
                     .size(starSize + 8.dp)
                     .clip(CircleShape)
                     .finchClickable(onClick = { onRate(if (rating == star) null else star) }),
@@ -638,12 +649,13 @@ fun FinchFab(
             .background(Brush.linearGradient(listOf(base, end))),
     ) {
         Row(
-            Modifier.height(56.dp).padding(horizontal = if (label == null) 0.dp else 20.dp),
+            // 直径走 FinchSpace.fabSize（审查 C4：这里原来写死 56.dp）
+            Modifier.height(FinchSpace.fabSize).padding(horizontal = if (label == null) 0.dp else 20.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.Center,
         ) {
             if (label == null) {
-                Box(Modifier.width(56.dp), contentAlignment = Alignment.Center) {
+                Box(Modifier.width(FinchSpace.fabSize), contentAlignment = Alignment.Center) {
                     Icon(icon, contentDescription = contentDescription, tint = scheme.onPrimary, modifier = Modifier.size(26.dp))
                 }
             } else {

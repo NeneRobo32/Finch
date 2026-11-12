@@ -166,7 +166,8 @@ fun FinchHeader(
                 Spacer(Modifier.height(2.dp))
                 Text(
                     subtitle,
-                    style = MaterialTheme.typography.labelSmall,
+                    // 2026-11 UI 审查：页头副标题 11sp 在玻璃底上偏虚，升到 labelMedium
+                    style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
@@ -175,7 +176,12 @@ fun FinchHeader(
     }
 }
 
-/** 分组标题：列表内的段落标题（如「正在玩」「本月已发售」） */
+/**
+ * 分组标题：列表内的段落标题（如「正在玩」「本月已发售」）。
+ *
+ * 2026-11 UI 审查 D1：原来 14sp + onSurfaceVariant + trailing 再降 alpha，在玻璃上跟卡片正文同级，
+ * 分段感被削弱。现在标题用 onSurface + SemiBold（字号不变），右侧计数改成 [FinchBadge] 小胶囊。
+ */
 @Composable
 fun FinchSectionTitle(
     text: String,
@@ -191,15 +197,12 @@ fun FinchSectionTitle(
         Text(
             text,
             style = MaterialTheme.typography.titleSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurface,
             modifier = Modifier.weight(1f),
         )
         if (trailing != null) {
-            Text(
-                trailing,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
-            )
+            FinchBadge(trailing)
         }
     }
 }

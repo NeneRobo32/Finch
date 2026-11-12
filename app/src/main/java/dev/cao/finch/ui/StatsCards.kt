@@ -43,6 +43,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -88,10 +89,13 @@ internal fun HeroTotalCard(totalMs: Long, prevMs: Long, steamMin: Long, mode: St
     // 像从另一个 App 贴过来的。改用 GlassSurface 的 Hero 档（底色最淡、折射最轻），
     // 让氛围背景直接透上来；文字也随之从固定的 Color.White 换成主题 onSurface 系。
     // 关掉「全面玻璃化」时由 SolidPanel 接管，不会退回一块刺眼的纯色。
+    // 审查 A1：定高 188dp + SpaceBetween，1.3x 字号下 56sp 的数字和底部目标条会互相挤压。
+    // 跟着字号放大（1.0x 仍是 188dp，上限 1.45x）。
+    val heroHeight = 188.dp * LocalDensity.current.fontScale.coerceIn(1f, 1.45f)
     GlassSurface(
         modifier = Modifier
             .fillMaxWidth()
-            .height(188.dp)
+            .height(heroHeight)
             .finchEnter(),
         style = GlassStyle.Hero,
         shape = FinchShapes.hero,

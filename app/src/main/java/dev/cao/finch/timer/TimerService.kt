@@ -307,9 +307,10 @@ class TimerService : Service() {
             var lastMinute = -1L
             while (isActive && runningSessionId > 0) {
                 val currentPause = if (pauseStartedAtMillis > 0) System.currentTimeMillis() - pauseStartedAtMillis else 0L
-                val elapsedSeconds = if (startedAtMillis > 0) {
-                    (System.currentTimeMillis() - startedAtMillis - pauseAccumMs - currentPause).coerceAtLeast(0L) / 1000
+                val elapsedMs = if (startedAtMillis > 0) {
+                    (System.currentTimeMillis() - startedAtMillis - pauseAccumMs - currentPause).coerceAtLeast(0L)
                 } else 0L
+                val elapsedSeconds = elapsedMs / 1000
                 val minute = elapsedSeconds / 60
                 if (minute != lastMinute) {
                     lastMinute = minute
@@ -324,13 +325,20 @@ class TimerService : Service() {
                         Log.w("TimerService", "notify denied", se)
                     }
                 }
-                delay(1000) // 每秒检查一次分钟变化（离散步进，通知本身不刷新）
+                // 审查 P4：只在下一个整分附近醒来一次，不再每秒空转；
+                // 暂停时不推进也不刷新，保持 1 秒轮询等 resume 把时长推回正轨。
+                val waitMs = if (pauseStartedAtMillis > 0) 1_000L else 60_000L - elapsedMs % 60_000L
+                delay(waitMs.coerceIn(250L, 60_000L))
             }
         }
     }
 
     override fun onDestroy() {
         scope.cancel()
+        // 审查 C2：服务被销毁（划掉通知/系统回收）时清空状态桥，
+        // 否则首页会一直显示"正在玩"且计时停在旧值。
+        // START_STICKY 重建后 restoreOrStop() 会重新写入真实状态。
+        TimerServiceBridge.reset()
         super.onDestroy()
     }
 }
@@ -354,4 +362,13 @@ object TimerServiceBridge {
     /** 当前有效游玩毫秒（扣掉全部暂停） */
     fun effectiveMillis(now: Long = System.currentTimeMillis()): Long =
         if (startedAtMillis > 0) (now - startedAtMillis - pauseAccumMs - currentPauseMs()).coerceAtLeast(0L) else 0L
+
+    /** 清空桥状态（服务 onDestroy 时调用，审查 C2） */
+    fun reset() {
+        runningGameId.value = -1L
+        startedAtMillis = 0L
+        pauseAccumMs = 0L
+        pauseStartedAtMillis = 0L
+        isPaused.value = false
+    }
 }

@@ -3,4 +3,6 @@
 <full-backup-content>
     <!-- Steam Key / Switch/PSN token 等敏感信息，禁止进备份 -->
     <exclude domain="sharedpref" path="finch_settings.xml" />
+    <!-- 审查 S4：自动备份 zip 里是全量游玩历史，和凭据一样不该被上传到系统云备份 -->
+    <exclude domain="file" path="auto_backups/" />
 </full-backup-content>

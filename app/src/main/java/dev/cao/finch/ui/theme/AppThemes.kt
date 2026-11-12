@@ -7,6 +7,7 @@ import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
 
 /**
  * Finch 主题体系（2026-09）：三套可切换主题，全部保留 Liquid Glass 玻璃拟态效果。
@@ -386,7 +387,19 @@ data class FinchColorScheme(
     val scene: ScenePalette,
     val ambient: AmbientPalette,
     val isDark: Boolean,
-)
+) {
+    /**
+     * 「小号主题色文字」专用色（2026-11 UI 审查 A2）。
+     *
+     * 浅色主题的 primary（#3D7FFF / #0066CC）在 11~13sp 上对比度只有 3.4~3.7:1，达不到 AA 4.5:1。
+     * 小字、徽章、卡片里的「已通关」等强调文字改用这个：向 onSurface 混 28%，
+     * #3D7FFF → 约 #31416E，对比度约 8:1，看起来仍是主题色。
+     * 深色主题的 primary 本来就够亮，直接用原色。
+     * 大面积底色（按钮、分段高亮）继续用 primary，不要换成这个。
+     */
+    val accentText: Color
+        get() = if (isDark) scheme.primary else lerp(scheme.primary, scheme.onSurface, 0.28f)
+}
 
 private val IridescentLight = FinchColorScheme(Iridescent.light, Iridescent.glassLight, Iridescent.sceneLight, Iridescent.ambientLight, false)
 private val IridescentDark = FinchColorScheme(Iridescent.dark, Iridescent.glassDark, Iridescent.sceneDark, Iridescent.ambientDark, true)

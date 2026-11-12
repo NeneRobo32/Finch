@@ -145,10 +145,12 @@ object SyncEngine {
         var sessionAdded = 0
         val now = LocalDateTime.now()
         val zone = ZoneId.systemDefault()
+        // 审查 P1：事务前读一次全表建内存索引，循环内不再逐条 allByName 全表扫
+        val nameIndex = GameNameIndex(gameDao.all())
         db.withTransaction {
             for (g in games) {
                 // 同名多行时只认领 PC 行（PC + Switch/PS 同名常见，旧版 LIMIT 1 命中另一平台就永远跳过）
-                val candidates = gameDao.allByName(g.name)
+                val candidates = nameIndex.candidates(g.name)
                 val existing = candidates.firstOrNull { it.platform == Platform.PC }
                 if (existing == null) {
                     if (candidates.isNotEmpty()) {
@@ -159,30 +161,30 @@ object SyncEngine {
                     // Steam 改名兜底（v0.15.9）：Steam 侧改名（如去副标题）后按 appid 认领回同一行，
                     // 避免改名即建新游戏导致统计分裂。name 跟随 Steam 官方名，只动 name/cover。
                     val rename = shouldRenameSteam(existing.steamAppId, existing.name, g.name)
-                    gameDao.update(
-                        existing.copy(
-                            name = if (rename) g.name.trim() else existing.name,
-                            steamAppId = g.appid,
-                            steamPlaytimeMin = g.playtimeMinutes,
-                            steamSyncedAt = now,
-                            coverUrl = existing.coverUrl
-                                ?: "https://cdn.cloudflare.steamstatic.com/steam/apps/${g.appid}/header.jpg",
-                        )
+                    val updated = existing.copy(
+                        name = if (rename) g.name.trim() else existing.name,
+                        steamAppId = g.appid,
+                        steamPlaytimeMin = g.playtimeMinutes,
+                        steamSyncedAt = now,
+                        coverUrl = existing.coverUrl
+                            ?: "https://cdn.cloudflare.steamstatic.com/steam/apps/${g.appid}/header.jpg",
                     )
+                    gameDao.update(updated)
+                    nameIndex.replace(updated) // 审查 P1：改名/补 appId 后同步索引
                     matched++
                 }
                 if (existing == null) {
                     val cover = "https://cdn.cloudflare.steamstatic.com/steam/apps/${g.appid}/header.jpg"
-                    val newId = gameDao.insert(
-                        Game(
-                            name = g.name,
-                            platform = Platform.PC,
-                            coverUrl = cover,
-                            steamAppId = g.appid,
-                            steamPlaytimeMin = g.playtimeMinutes,
-                            steamSyncedAt = now,
-                        )
+                    val newGame = Game(
+                        name = g.name,
+                        platform = Platform.PC,
+                        coverUrl = cover,
+                        steamAppId = g.appid,
+                        steamPlaytimeMin = g.playtimeMinutes,
+                        steamSyncedAt = now,
                     )
+                    val newId = gameDao.insert(newGame)
+                    nameIndex.add(newGame.copy(id = newId)) // 审查 P1：同批次同名不会重复建档
                     created++
                     // 新建的游戏：差分基线为空，但官方累计要按对账补成历史会话（v0.18.4：
                     // 旧版这里只建档不写记录，导致「官方有累计、游玩记录空白」）
@@ -248,12 +250,14 @@ object SyncEngine {
         var sessions = 0
         val seenSession = mutableSetOf<String>()
         val zone = ZoneId.systemDefault()
+        // 审查 P1：事务前读一次全表建内存索引
+        val nameIndex = GameNameIndex(gameDao.all())
         db.withTransaction {
             for (r in records) {
                 // 找既有游戏（switchAppId 或 同名；同名多行优先 SWITCH 行，其次未绑定 appId 的行）
                 var g = gameDao.bySwitchAppId(r.applicationId)
                 if (g == null) {
-                    val candidates = gameDao.allByName(r.title)
+                    val candidates = nameIndex.candidates(r.title)
                     g = candidates.firstOrNull { it.platform == Platform.SWITCH }
                         ?: candidates.firstOrNull { it.switchAppId.isNullOrBlank() }
                         ?: candidates.firstOrNull()
@@ -263,29 +267,32 @@ object SyncEngine {
                 // 否则 HLTB（纯英文库）按名搜永远匹配不上。只动 name/cover，不碰会话与统计。
                 // 判断条件：同 appId 且标题不同（忽略大小写）→ 视为同一游戏的语言差异，直接改名。
                 if (g != null && shouldRenameSwitch(g.switchAppId, g.name, r.title)) {
-                    gameDao.update(
-                        g.copy(
-                            name = r.title.trim(),
-                            coverUrl = g.coverUrl ?: r.coverUrl,
-                        )
+                    val renamed = g.copy(
+                        name = r.title.trim(),
+                        coverUrl = g.coverUrl ?: r.coverUrl,
                     )
-                    g = gameDao.byId(g.id) ?: g
+                    gameDao.update(renamed)
+                    g = gameDao.byId(g.id) ?: renamed
+                    nameIndex.replace(g) // 审查 P1：改名后同步索引
                 }
                 if (g == null) {
-                    val createdId = gameDao.insert(
-                        Game(
-                            name = r.title,
-                            platform = Platform.SWITCH,
-                            coverUrl = r.coverUrl,
-                            switchAppId = r.applicationId,
-                        )
+                    val newGame = Game(
+                        name = r.title,
+                        platform = Platform.SWITCH,
+                        coverUrl = r.coverUrl,
+                        switchAppId = r.applicationId,
                     )
+                    val createdId = gameDao.insert(newGame)
                     g = gameDao.byId(createdId)
                     if (g == null) { skipped++; continue } // 极端：回读失败则跳过本款
+                    nameIndex.add(g) // 审查 P1
                     created++
                 } else if (g.switchAppId.isNullOrBlank()) {
                     // 同名游戏补上 Switch appId 和封面
-                    gameDao.update(g.copy(switchAppId = r.applicationId, coverUrl = g.coverUrl ?: r.coverUrl))
+                    val bound = g.copy(switchAppId = r.applicationId, coverUrl = g.coverUrl ?: r.coverUrl)
+                    gameDao.update(bound)
+                    g = bound
+                    nameIndex.replace(bound) // 审查 P1
                     matched++
                 } else if (g.platform != Platform.SWITCH && !g.name.equals(r.title, ignoreCase = true)) {
                     skipped++
@@ -355,17 +362,13 @@ object SyncEngine {
         val zone = ZoneId.systemDefault()
         // v0.25 真机联调：PSN 官方名普遍带商标符号（`Uncharted™: ...`、`Rise of the Ronin™`），
         // 而库里手输/Steam 导入的多半没有，等值 `allByName` 永远落空 → 每次都新建一条重复的 PS 游戏。
-        // 这里额外挂一份「归一化名字 → 候选行」索引做二次认领；库名本身不改写。
-        val normalizedIndex = HashMap<String, MutableList<Game>>()
-        for (g in gameDao.all()) {
-            normalizedIndex.getOrPut(matchKey(g.name)) { mutableListOf() }.add(g)
-        }
+        // 归一化兜底口径已收进 GameNameIndex（审查 P1），这里不再单独挂一份索引；库名本身不改写。
+        val nameIndex = GameNameIndex(gameDao.all())
         db.withTransaction {
             for (t in titles) {
                 if (t.totalMinutes <= 0) { skipped++; continue } // 0 时长（未玩/仅入库）不建条目
                 // 同名多行时只认领 PS 行（PC + PS 同名常见，旧版 LIMIT 1 命中另一平台就永远跳过）
-                val candidates = gameDao.allByName(t.name)
-                    .ifEmpty { normalizedIndex[matchKey(t.name)].orEmpty() }
+                val candidates = nameIndex.candidates(t.name)
                 val existing = candidates.firstOrNull { it.platform == Platform.PS }
                 if (existing == null) {
                     if (candidates.isNotEmpty()) {
@@ -373,27 +376,27 @@ object SyncEngine {
                         continue
                     }
                 } else {
-                    gameDao.update(
-                        existing.copy(
-                            psnTitleId = t.titleId ?: existing.psnTitleId,
-                            psnPlaytimeMin = t.totalMinutes,
-                            psnSyncedAt = now,
-                            coverUrl = existing.coverUrl ?: t.imageUrl,
-                        )
+                    val updated = existing.copy(
+                        psnTitleId = t.titleId ?: existing.psnTitleId,
+                        psnPlaytimeMin = t.totalMinutes,
+                        psnSyncedAt = now,
+                        coverUrl = existing.coverUrl ?: t.imageUrl,
                     )
+                    gameDao.update(updated)
+                    nameIndex.replace(updated) // 审查 P1
                     matched++
                 }
                 if (existing == null) {
-                    val newId = gameDao.insert(
-                        Game(
-                            name = t.name,
-                            platform = Platform.PS,
-                            coverUrl = t.imageUrl,
-                            psnTitleId = t.titleId,
-                            psnPlaytimeMin = t.totalMinutes,
-                            psnSyncedAt = now,
-                        )
+                    val newGame = Game(
+                        name = t.name,
+                        platform = Platform.PS,
+                        coverUrl = t.imageUrl,
+                        psnTitleId = t.titleId,
+                        psnPlaytimeMin = t.totalMinutes,
+                        psnSyncedAt = now,
                     )
+                    val newId = gameDao.insert(newGame)
+                    nameIndex.add(newGame.copy(id = newId)) // 审查 P1
                     created++
                     // 新建的游戏：差分基线为空 → 本次只落快照基线，不写任何记录
                     // （v0.18.8：官方历史累计不再摊成假会话，差额在详情页如实说明）

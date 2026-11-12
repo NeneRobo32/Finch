@@ -12,10 +12,11 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -23,7 +24,6 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
@@ -71,12 +71,14 @@ import dev.cao.finch.data.DailyTotal
 import dev.cao.finch.data.PlatformTotal
 import dev.cao.finch.data.TopGameRow
 import dev.cao.finch.ui.design.FinchCard
+import dev.cao.finch.ui.design.FinchChip
 import dev.cao.finch.ui.design.FinchHeader
 import dev.cao.finch.ui.design.FinchIconButton
 import dev.cao.finch.ui.design.FinchInsetDivider
 import dev.cao.finch.ui.design.FinchSegmented
-import dev.cao.finch.ui.design.FinchSlider
+import dev.cao.finch.ui.design.FinchSheet
 import dev.cao.finch.ui.design.FinchSpace
+import dev.cao.finch.ui.design.finchClickable
 import dev.cao.finch.ui.report.YearReportScreen
 import dev.cao.finch.ui.share.PosterPreviewDialog
 import dev.cao.finch.ui.share.PosterShare
@@ -88,7 +90,6 @@ import java.time.LocalDate
 import java.time.YearMonth
 import java.time.ZoneId
 import kotlin.math.max
-import kotlin.math.roundToInt
 enum class StatsMode { MONTH, YEAR }
 private data class Quint<A, B, C, D, E>(val first: A, val second: B, val third: C, val fourth: D, val fifth: E)
 
@@ -105,6 +106,8 @@ fun StatsScreen(viewModel: FinchViewModel) {
     var anchorMonth by remember { mutableStateOf(YearMonth.now()) }
     // v0.24：年度报告是独立的一整页（纵向叙事），从总结页进入，返回时回到原来的月/年视图
     var showYearReport by remember { mutableStateOf(false) }
+    // 审查 B4：期数选择弹层（点标题打开），替代原来那条一直占着三行高的滑杆
+    var pickerOpen by remember { mutableStateOf(false) }
     val allGames by viewModel.games.collectAsState()
     if (showYearReport) {
         YearReportScreen(
@@ -206,7 +209,7 @@ fun StatsScreen(viewModel: FinchViewModel) {
             )
         }
 
-        // 期数控制：月/年 + 前后翻页
+        // 期数控制：月/年 + 前后翻页；标题点开直接选月份/年份（审查 B4）
         item {
             FinchCard(contentPadding = PaddingValues(FinchSpace.md)) {
                 FinchSegmented(
@@ -229,13 +232,28 @@ fun StatsScreen(viewModel: FinchViewModel) {
                             else anchorMonth.minusYears(1)
                         },
                     )
-                    Text(
-                        title,
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.SemiBold,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier.weight(1f),
-                    )
+                    // 审查 B4：标题可点开期数选择，省掉下面那条占三行的滑杆
+                    Row(
+                        modifier = Modifier
+                            .weight(1f)
+                            .finchClickable(onClickLabel = "选择期数", onClick = { pickerOpen = true }),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            title,
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.SemiBold,
+                            textAlign = TextAlign.Center,
+                        )
+                        Spacer(Modifier.width(FinchSpace.xs))
+                        Icon(
+                            Icons.Filled.GridView,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(18.dp),
+                        )
+                    }
                     FinchIconButton(
                         icon = Icons.AutoMirrored.Filled.ArrowForward,
                         contentDescription = "下一期",
@@ -246,30 +264,6 @@ fun StatsScreen(viewModel: FinchViewModel) {
                         },
                     )
                 }
-                // 快速切换：官方 LiquidSlider。月模式拖 1~12 月，年模式拖 2015~未来几年。
-                val sliderEnd = if (mode == StatsMode.MONTH) 11f
-                else (YearMonth.now().year + 5 - 2015).toFloat()
-                FinchSlider(
-                    value = if (mode == StatsMode.MONTH) {
-                        (anchorMonth.monthValue - 1).toFloat()
-                    } else {
-                        (anchorMonth.year - 2015).coerceIn(0, sliderEnd.toInt()).toFloat()
-                    },
-                    onValueChange = { v ->
-                        anchorMonth = if (mode == StatsMode.MONTH) {
-                            YearMonth.of(anchorMonth.year, v.roundToInt().coerceIn(0, 11) + 1)
-                        } else {
-                            YearMonth.of(2015 + v.roundToInt().coerceIn(0, sliderEnd.toInt()), 1)
-                        }
-                    },
-                    valueRange = 0f..sliderEnd,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Text(
-                    "拖动滑杆快速切换",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
             }
         }
 
@@ -295,6 +289,19 @@ fun StatsScreen(viewModel: FinchViewModel) {
             }
         }
         if (topGames.isNotEmpty()) item { TopGamesCard(topGames) }
+    }
+
+    // 审查 B4：点标题打开的期数选择；选完立即生效并关闭
+    if (pickerOpen) {
+        StatsPeriodSheet(
+            mode = mode,
+            anchorMonth = anchorMonth,
+            onPick = {
+                anchorMonth = it
+                pickerOpen = false
+            },
+            onDismiss = { pickerOpen = false },
+        )
     }
 
     // 战报分享（v0.22）：不再拼文本，直接出手绘海报图。
@@ -323,5 +330,60 @@ fun StatsScreen(viewModel: FinchViewModel) {
             chooserTitle = shareChooserTitle,
             onDismiss = { shareRequest = false },
         )
+    }
+}
+
+/**
+ * 期数选择弹层（审查 B4）：月模式选「年 + 月」，年模式只选年。
+ * 原来是卡片里一条横贯的滑杆，占三行高还只能一格一格拖；改成点标题一次选到位。
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun StatsPeriodSheet(
+    mode: StatsMode,
+    anchorMonth: YearMonth,
+    onPick: (YearMonth) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val thisYear = remember { YearMonth.now().year }
+    val years = remember(thisYear) { (2015..thisYear).toList().reversed() }
+    // 选月时先定年再定月，避免跨年时来回翻
+    var pickedYear by remember { mutableStateOf(anchorMonth.year) }
+    FinchSheet(
+        title = "选择期数",
+        subtitle = if (mode == StatsMode.MONTH) "先选年，再选月" else "选一年看全年回顾",
+        onDismiss = onDismiss,
+    ) {
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(FinchSpace.sm),
+            verticalArrangement = Arrangement.spacedBy(FinchSpace.sm),
+        ) {
+            years.forEach { y ->
+                FinchChip(
+                    label = "$y",
+                    selected = y == pickedYear,
+                    onClick = {
+                        pickedYear = y
+                        if (mode == StatsMode.YEAR) onPick(YearMonth.of(y, 1))
+                    },
+                )
+            }
+        }
+        if (mode == StatsMode.MONTH) {
+            Spacer(Modifier.height(FinchSpace.lg))
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(FinchSpace.sm),
+                verticalArrangement = Arrangement.spacedBy(FinchSpace.sm),
+            ) {
+                (1..12).forEach { m ->
+                    FinchChip(
+                        label = "${m}月",
+                        selected = pickedYear == anchorMonth.year && m == anchorMonth.monthValue,
+                        onClick = { onPick(YearMonth.of(pickedYear, m)) },
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.height(FinchSpace.xl))
     }
 }

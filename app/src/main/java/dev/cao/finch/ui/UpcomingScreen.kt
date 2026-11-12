@@ -20,9 +20,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.TextAutoSize
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Event
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
@@ -41,6 +41,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -66,7 +67,6 @@ import dev.cao.finch.ui.design.FinchSpace
 import dev.cao.finch.ui.design.FinchTextField
 import dev.cao.finch.ui.design.GlassStyle
 import dev.cao.finch.ui.design.GlassSurface
-import dev.cao.finch.ui.design.InsetSurface
 import dev.cao.finch.ui.design.finchEnter
 import dev.cao.finch.ui.theme.FinchShapes
 import java.time.LocalDate
@@ -75,9 +75,11 @@ import java.time.temporal.ChronoUnit
 
 /**
  * 发售日程页（v0.29.1 卡片重排）：
- * 页头 → 数据源胶囊 → 搜索 → 愿望单入口 → 分组大卡片。
+ * 页头（愿望单 / 搜索 / 刷新）→ 数据源胶囊 → 搜索框（点放大镜才展开）→ 分组大卡片。
  *
- * 愿望单不再是底部 tab，而是本页的子视图：点入口条进去，左上角箭头或系统返回键回到列表。
+ * 愿望单不再是底部 tab，而是本页的子视图：点页头的星标进列表，左上角箭头或系统返回键回到日程。
+ * 审查 B5：原来的「愿望单」入口条是列表第 0 项，一滚动就跟着走掉；改成页头按钮后常驻，
+ * 顺带省掉一行约 44dp 的高度。
  */
 @Composable
 fun UpcomingScreen(upcomingViewModel: UpcomingViewModel = viewModel()) {
@@ -94,11 +96,14 @@ fun UpcomingScreen(upcomingViewModel: UpcomingViewModel = viewModel()) {
     }
 
     val state by upcomingViewModel.state.collectAsState()
+    val scheme = MaterialTheme.colorScheme
     var platformPickerFor by remember { mutableStateOf<UpcomingViewModel.UpcomingEntry?>(null) }
     var query by remember { mutableStateOf("") }
     val source by upcomingViewModel.source.collectAsState()
     val followKeys by upcomingViewModel.followKeys.collectAsState()
     val follows by upcomingViewModel.follows.collectAsState()
+    // 审查 B2：搜索框默认收起（占 56dp 却大多数时候空着），点页头放大镜才展开
+    var searchOpen by rememberSaveable { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
@@ -111,6 +116,38 @@ fun UpcomingScreen(upcomingViewModel: UpcomingViewModel = viewModel()) {
             title = "发售日程",
             subtitle = "PSN 港服价格 / 游民星空 / eShop 三源聚合",
             actions = {
+                // 审查 B5：愿望单入口从列表第 0 项挪到页头，不再随列表滚走；
+                // 它原先占掉一整行卡片高度，现在只是一个图标 + 计数角标。
+                Box {
+                    FinchIconButton(
+                        icon = if (follows.isEmpty()) Icons.Filled.StarBorder else Icons.Filled.Star,
+                        contentDescription = if (follows.isEmpty()) "愿望单" else "愿望单（${follows.size} 款在关注）",
+                        onClick = { showWishlist = true },
+                        tint = if (follows.isEmpty()) scheme.onSurface else scheme.primary,
+                    )
+                    if (follows.isNotEmpty()) {
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .padding(top = 2.dp, end = 2.dp)
+                                .size(15.dp)
+                                .clip(CircleShape)
+                                .background(scheme.primary),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(
+                                if (follows.size > 9) "9+" else "${follows.size}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = scheme.onPrimary,
+                            )
+                        }
+                    }
+                }
+                FinchIconButton(
+                    icon = Icons.Filled.Search,
+                    contentDescription = if (searchOpen) "收起搜索" else "搜索日程",
+                    onClick = { searchOpen = !searchOpen },
+                )
                 FinchIconButton(
                     icon = Icons.Filled.Refresh,
                     contentDescription = "刷新日程",
@@ -134,117 +171,126 @@ fun UpcomingScreen(upcomingViewModel: UpcomingViewModel = viewModel()) {
             }
         }
         Spacer(Modifier.height(FinchSpace.sm))
-        FinchTextField(
-            value = query,
-            onValueChange = { query = it },
-            placeholder = "搜索发售日程…",
-            leadingIcon = Icons.Filled.Search,
-            modifier = Modifier.fillMaxWidth(),
-        )
+        // 有搜索词时强制显示输入框，免得清空后条件还在却看不到输入框
+        if (searchOpen || query.isNotBlank()) {
+            FinchTextField(
+                value = query,
+                onValueChange = { query = it },
+                placeholder = "搜索发售日程…",
+                leadingIcon = Icons.Filled.Search,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
         Spacer(Modifier.height(FinchSpace.md))
 
-        when (val s = state) {
-            is UpcomingViewModel.LoadState.Idle,
-            is UpcomingViewModel.LoadState.Loading -> {
-                FinchLoading(modifier = Modifier.fillMaxWidth().padding(top = FinchSpace.xxl))
-            }
-
-            is UpcomingViewModel.LoadState.Failed -> {
-                FinchEmptyState(
-                    icon = Icons.Filled.Event,
-                    title = "日程加载失败",
-                    message = s.message,
-                    actionLabel = "重试",
-                    onAction = { upcomingViewModel.refresh() },
-                    modifier = Modifier.padding(top = FinchSpace.sm),
-                )
-            }
-
-            is UpcomingViewModel.LoadState.Ready -> {
-                val q = query.trim().lowercase()
-                // 搜索时用全量（不过滤大作），否则在当前源的展示列表里找
-                val searchPool = if (q.isEmpty()) s.entries else s.allEntries
-                val filtered = if (q.isEmpty()) {
-                    s.entries
-                } else {
-                    searchPool.filter { e ->
-                        e.name.lowercase().contains(q) || (e.nameCn?.lowercase()?.contains(q) == true)
-                    }
-                }
-                val now = LocalDate.now()
-                val buckets = remember(filtered) {
-                    filtered.groupBy { e ->
-                        val d = e.date
-                        when {
-                            e.deal -> "deal"
-                            d != null && !d.isAfter(now) -> "recent"
-                            d != null && d.year == now.year -> "coming"
-                            else -> "later"
-                        }
-                    }
+        // 审查 C2：日程页也支持下拉刷新（和主页一致），不必再伸到右上角找刷新按钮
+        val refreshing by upcomingViewModel.refreshing.collectAsState()
+        androidx.compose.material3.pulltorefresh.PullToRefreshBox(
+            isRefreshing = refreshing,
+            onRefresh = { upcomingViewModel.refresh() },
+            modifier = Modifier.fillMaxSize(),
+        ) {
+            when (val s = state) {
+                is UpcomingViewModel.LoadState.Idle,
+                is UpcomingViewModel.LoadState.Loading -> {
+                    FinchLoading(modifier = Modifier.fillMaxWidth().padding(top = FinchSpace.xxl))
                 }
 
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    verticalArrangement = Arrangement.spacedBy(FinchSpace.md),
-                    contentPadding = PaddingValues(
-                        top = FinchSpace.xs,
-                        bottom = FinchSpace.bottomBarClearance,
-                    ),
-                ) {
-                    // 愿望单入口：常驻一条窄条，点进去是本页的子视图（不占底栏 tab）
-                    item(key = "wishlist_entry") {
-                        WishlistBar(count = follows.size, onClick = { showWishlist = true })
-                    }
-                    if (filtered.isEmpty() && q.isNotEmpty()) {
-                        item(key = "no_match") {
-                            FinchEmptyState(
-                                icon = Icons.Filled.Search,
-                                title = "没有匹配「$query」",
-                                message = "试试游戏名的英文原名，或换一个数据源。",
-                            )
-                        }
-                    } else if (filtered.isEmpty() && s.entries.isEmpty()) {
-                        item(key = "no_data") {
-                            FinchEmptyState(
-                                icon = Icons.Filled.Event,
-                                title = "没有符合条件的发售信息",
-                                message = "数据来自 PSN 港服 / 游民星空 / eShop，点右上角刷新重试。",
-                                actionLabel = "刷新",
-                                onAction = { upcomingViewModel.refresh() },
-                            )
-                        }
-                    }
-                    val groups = listOf(
-                        "recent" to "本年度已发售",
-                        "coming" to "本年度待发售",
-                        "deal" to "正在打折",
-                        "later" to "更远期",
+                is UpcomingViewModel.LoadState.Failed -> {
+                    FinchEmptyState(
+                        icon = Icons.Filled.Event,
+                        title = "日程加载失败",
+                        message = s.message,
+                        actionLabel = "重试",
+                        onAction = { upcomingViewModel.refresh() },
+                        modifier = Modifier.padding(top = FinchSpace.sm),
                     )
-                    for ((key, label) in groups) {
-                        val items = buckets[key] ?: continue
-                        item(key = "header_$key") {
-                            val trailing = if (key == "deal") {
-                                items.firstNotNullOfOrNull { it.saleEndsAt }?.let { "至" + it.format(DATE_MD) }
-                            } else {
-                                "${items.size} 款"
-                            }
-                            FinchSectionTitle(label, trailing = trailing)
+                }
+
+                is UpcomingViewModel.LoadState.Ready -> {
+                    val q = query.trim().lowercase()
+                    // 搜索时用全量（不过滤大作），否则在当前源的展示列表里找
+                    val searchPool = if (q.isEmpty()) s.entries else s.allEntries
+                    val filtered = if (q.isEmpty()) {
+                        s.entries
+                    } else {
+                        searchPool.filter { e ->
+                            e.name.lowercase().contains(q) || (e.nameCn?.lowercase()?.contains(q) == true)
                         }
-                        items.forEach { entry ->
-                            item(key = "entry_" + entry.source + ":" + (entry.bangumiId ?: entry.steamAppId ?: entry.productId ?: entry.name)) {
-                                UpcomingCard(
-                                    entry = entry,
-                                    followed = upcomingViewModel.followKeyOf(entry) in followKeys,
-                                    onToggleFollow = { upcomingViewModel.toggleFollow(entry) },
-                                    onAdd = {
-                                        if (entry.platforms.isEmpty()) {
-                                            platformPickerFor = entry
-                                        } else {
-                                            upcomingViewModel.addToLibrary(entry, emptySet()) {}
-                                        }
-                                    },
+                    }
+                    val now = LocalDate.now()
+                    val buckets = remember(filtered) {
+                        filtered.groupBy { e ->
+                            val d = e.date
+                            when {
+                                e.deal -> "deal"
+                                d != null && !d.isAfter(now) -> "recent"
+                                d != null && d.year == now.year -> "coming"
+                                else -> "later"
+                            }
+                        }
+                    }
+
+                    LazyColumn(
+                        modifier = Modifier.fillMaxSize(),
+                        verticalArrangement = Arrangement.spacedBy(FinchSpace.md),
+                        contentPadding = PaddingValues(
+                            top = FinchSpace.xs,
+                            bottom = FinchSpace.bottomBarClearance,
+                        ),
+                    ) {
+                        if (filtered.isEmpty() && q.isNotEmpty()) {
+                            item(key = "no_match") {
+                                FinchEmptyState(
+                                    icon = Icons.Filled.Search,
+                                    title = "没有匹配「$query」",
+                                    message = "试试游戏名的英文原名，或换一个数据源。",
                                 )
+                            }
+                        } else if (filtered.isEmpty() && s.entries.isEmpty()) {
+                            item(key = "no_data") {
+                                FinchEmptyState(
+                                    icon = Icons.Filled.Event,
+                                    title = "没有符合条件的发售信息",
+                                    message = "数据来自 PSN 港服 / 游民星空 / eShop，点右上角刷新重试。",
+                                    actionLabel = "刷新",
+                                    onAction = { upcomingViewModel.refresh() },
+                                )
+                            }
+                        }
+                        // 审查 B3：已发售的排在最后 —— 用户开这一页是看「接下来要出什么」，
+                        // 已经过期的信息不该占住首屏。
+                        val groups = listOf(
+                            "coming" to "本年度待发售",
+                            "deal" to "正在打折",
+                            "later" to "更远期",
+                            "recent" to "本年度已发售",
+                        )
+                        for ((key, label) in groups) {
+                            val items = buckets[key] ?: continue
+                            item(key = "header_$key") {
+                                val trailing = if (key == "deal") {
+                                    items.firstNotNullOfOrNull { it.saleEndsAt }?.let { "至" + it.format(DATE_MD) }
+                                } else {
+                                    "${items.size} 款"
+                                }
+                                FinchSectionTitle(label, trailing = trailing)
+                            }
+                            items.forEach { entry ->
+                                item(key = "entry_" + entry.source + ":" + (entry.bangumiId ?: entry.steamAppId ?: entry.productId ?: entry.name)) {
+                                    UpcomingCard(
+                                        entry = entry,
+                                        followed = upcomingViewModel.followKeyOf(entry) in followKeys,
+                                        onToggleFollow = { upcomingViewModel.toggleFollow(entry) },
+                                        onAdd = {
+                                            if (entry.platforms.isEmpty()) {
+                                                platformPickerFor = entry
+                                            } else {
+                                                upcomingViewModel.addToLibrary(entry, emptySet()) {}
+                                            }
+                                        },
+                                    )
+                                }
                             }
                         }
                     }
@@ -262,50 +308,6 @@ fun UpcomingScreen(upcomingViewModel: UpcomingViewModel = viewModel()) {
             },
             onDismiss = { platformPickerFor = null },
         )
-    }
-}
-
-/** 愿望单入口条：一行搞定，不再像卡片那样占掉一整屏的高度 */
-@Composable
-private fun WishlistBar(count: Int, onClick: () -> Unit) {
-    val scheme = MaterialTheme.colorScheme
-    InsetSurface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = FinchShapes.pill,
-        onClick = onClick,
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = FinchSpace.md, vertical = FinchSpace.sm),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(
-                Icons.Filled.Star,
-                null,
-                tint = scheme.primary,
-                modifier = Modifier.size(16.dp),
-            )
-            Spacer(Modifier.width(FinchSpace.sm))
-            Text(
-                "愿望单",
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.Medium,
-            )
-            Spacer(Modifier.width(FinchSpace.sm))
-            Text(
-                if (count == 0) "还没有关注" else "$count 款在关注",
-                style = MaterialTheme.typography.labelSmall,
-                color = scheme.onSurfaceVariant,
-                modifier = Modifier.weight(1f),
-            )
-            Icon(
-                Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                null,
-                tint = scheme.onSurfaceVariant,
-                modifier = Modifier.size(18.dp),
-            )
-        }
     }
 }
 
@@ -408,8 +410,10 @@ internal fun StoreEntryCard(
             Spacer(Modifier.width(FinchSpace.xs))
             // 右侧宽度按「星标 40 + 文字按钮 52」算：操作并排放在价格下面时，
             // 按钮再带图标就会顶破 100dp 把中间的标题挤成一条缝，所以这两个动作只用文字
+            // 审查 A1：宽度跟着字号缩放（封顶 1.45x），否则大字号下价格和按钮会被裁掉
+            val rightScale = LocalDensity.current.fontScale.coerceIn(1f, 1.45f)
             Column(
-                modifier = Modifier.widthIn(min = 92.dp, max = 108.dp),
+                modifier = Modifier.widthIn(min = 92.dp * rightScale, max = 108.dp * rightScale),
                 horizontalAlignment = Alignment.End,
                 verticalArrangement = Arrangement.Center,
             ) {
@@ -569,13 +573,15 @@ private fun PriceColumn(
             return@Column
         }
         if (discountText != null) {
-            FinchBadge(discountText, tint = scheme.primary)
+            // 审查 A2：折扣徽章是 11sp 小字，浅色主题下 primary 对比度不足，用 accentText
+            FinchBadge(discountText)
             Spacer(Modifier.height(FinchSpace.xxs))
         }
         Text(
             priceText,
             style = MaterialTheme.typography.headlineSmall,
             fontWeight = FontWeight.SemiBold,
+            // 价格是大字（>=22sp），primary 的 3.4:1 已满足 AA 大字标准，保持原来的醒目度
             color = if (discountText != null) scheme.primary else scheme.onSurface,
             maxLines = 1,
             textAlign = TextAlign.End,

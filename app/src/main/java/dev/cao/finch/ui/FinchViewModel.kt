@@ -246,6 +246,13 @@ class FinchViewModel(app: Application) : AndroidViewModel(app) {
                 val hasSteam = settings.steamApiKey.isNotBlank() && settings.steamId.isNotBlank()
                 val hasSwitch = settings.switchSessionToken.isNotBlank()
                 val hasPsn = settings.psnRefreshToken.isNotBlank()
+                if (!hasSteam && !hasSwitch && !hasPsn) {
+                    _syncMessage.emit("未配置 Steam/Switch/PSN 同步，去导入页填写")
+                    return@launch
+                }
+                // 审查 P2 评估结论：三源不并行。它们都靠「同名认领」合并到同一行，
+                // 并行时后到的源可能看到对方刚建的行而走 skipped 分支（见 SyncEngine 各 run*），
+                // 会把本该建档的条目丢掉。要并行必须先拆 fetch/apply，改动面远大于收益，暂不做。
                 if (hasSteam) {
                     try {
                         val r = SyncEngine.runSteam(db, settings.steamApiKey, settings.steamId, settings.steamBaseUrl)
@@ -279,11 +286,7 @@ class FinchViewModel(app: Application) : AndroidViewModel(app) {
                         parts += "PSN ✗(${e.message?.take(60)})"
                     }
                 }
-                if (!hasSteam && !hasSwitch && !hasPsn) {
-                    _syncMessage.emit("未配置 Steam/Switch/PSN 同步，去导入页填写")
-                } else {
-                    _syncMessage.emit(parts.joinToString("  "))
-                }
+                _syncMessage.emit(parts.joinToString("  "))
             } finally {
                 _syncing.value = false
             }

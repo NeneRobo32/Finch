@@ -13,26 +13,33 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SwapVert
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.VideogameAsset
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -57,6 +64,8 @@ import dev.cao.finch.data.TopGameRow
 import dev.cao.finch.timer.TimerNotifications
 import dev.cao.finch.timer.TimerService
 import dev.cao.finch.ui.design.FinchChip
+import dev.cao.finch.ui.design.FinchButton
+import dev.cao.finch.ui.design.FinchButtonVariant
 import dev.cao.finch.ui.design.FinchDropdownItem
 import dev.cao.finch.ui.design.FinchDropdownMenu
 import dev.cao.finch.ui.design.FinchEmptyState
@@ -64,6 +73,7 @@ import dev.cao.finch.ui.design.FinchFab
 import dev.cao.finch.ui.design.FinchHeader
 import dev.cao.finch.ui.design.FinchIconButton
 import dev.cao.finch.ui.design.FinchSegmented
+import dev.cao.finch.ui.design.FinchSheet
 import dev.cao.finch.ui.design.FinchSnackbarHost
 import dev.cao.finch.ui.design.FinchSpace
 import dev.cao.finch.ui.design.FinchTextField
@@ -143,6 +153,9 @@ fun HomeScreen(
     var platformFilter by rememberSaveable { mutableStateOf<dev.cao.finch.data.Platform?>(null) }
     var sortMode by rememberSaveable { mutableStateOf(HomeSort.RECENT) }
     var sortMenuOpen by remember { mutableStateOf(false) }
+    // 审查 B1-a：搜索框和状态胶囊从常驻改成按需展开，主页控件区省下约 160dp
+    var searchOpen by rememberSaveable { mutableStateOf(false) }
+    var filterSheetOpen by rememberSaveable { mutableStateOf(false) }
     // widget 直达：带 initialGameId 进来时一次性打开对应游戏详情
     LaunchedEffect(initialGameId) {
         if (initialGameId != null && selectedGameId == null) {
@@ -224,6 +237,10 @@ fun HomeScreen(
                 topMonth = topMonth,
                 query = query,
                 onQueryChange = { query = it },
+                searchOpen = searchOpen,
+                onSearchOpen = { searchOpen = it },
+                filterSheetOpen = filterSheetOpen,
+                onFilterSheetOpen = { filterSheetOpen = it },
                 statusFilter = statusFilter,
                 onStatusFilter = { statusFilter = it },
                 favOnly = favOnly,
@@ -235,7 +252,7 @@ fun HomeScreen(
                 onSortMenuOpen = { sortMenuOpen = it },
                 onSort = { sortMode = it },
                 listState = listState,
-                snackbar = { FinchSnackbarHost(snackbarHostState, Modifier.align(Alignment.BottomCenter).padding(bottom = 172.dp)) },
+                snackbar = { FinchSnackbarHost(snackbarHostState, Modifier.align(Alignment.BottomCenter).padding(bottom = FinchSpace.snackbarClearance)) },
                 onRefresh = { viewModel.syncNow() },
                 onAdd = { showAddDialog = true },
                 onOpen = { selectedGameId = it },
@@ -268,6 +285,10 @@ private fun HomeLibrary(
     topMonth: List<TopGameRow>,
     query: String,
     onQueryChange: (String) -> Unit,
+    searchOpen: Boolean,
+    onSearchOpen: (Boolean) -> Unit,
+    filterSheetOpen: Boolean,
+    onFilterSheetOpen: (Boolean) -> Unit,
     statusFilter: dev.cao.finch.data.GameStatus?,
     onStatusFilter: (dev.cao.finch.data.GameStatus?) -> Unit,
     favOnly: Boolean,
@@ -336,7 +357,7 @@ private fun HomeLibrary(
                         start = FinchSpace.screen,
                         end = FinchSpace.screen,
                         top = FinchSpace.sm,
-                        bottom = FinchSpace.bottomBarClearance + 56.dp,
+                        bottom = FinchSpace.snackbarClearance,
                     ),
                     verticalArrangement = Arrangement.spacedBy(FinchSpace.md),
                 ) {
@@ -351,7 +372,8 @@ private fun HomeLibrary(
                     }
                     item(key = "filters") {
                         Column(verticalArrangement = Arrangement.spacedBy(FinchSpace.sm)) {
-                            // 标题行挂排序：状态筛选全部可见（FlowRow 自动换行），不再横向裁掉半个胶囊
+                            // 审查 B1-a：状态胶囊与搜索框不再常驻。标题行只留「搜索 / 排序」两个图标，
+                            // 平台分段与「筛选」并成一行，状态条件收进底部弹层——主控件区从 ~260dp 降到 ~100dp。
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 verticalAlignment = Alignment.CenterVertically,
@@ -366,11 +388,18 @@ private fun HomeLibrary(
                                     color = scheme.onSurfaceVariant,
                                     modifier = Modifier.weight(1f),
                                 )
+                                FinchIconButton(
+                                    icon = Icons.Filled.Search,
+                                    contentDescription = if (searchOpen) "收起搜索" else "搜索游戏",
+                                    onClick = { onSearchOpen(!searchOpen) },
+                                    ghost = true,
+                                )
                                 Box {
                                     FinchIconButton(
                                         icon = Icons.Filled.SwapVert,
                                         contentDescription = "排序：${sortMode.full}",
                                         onClick = { onSortMenuOpen(true) },
+                                        ghost = true,
                                     )
                                     FinchDropdownMenu(expanded = sortMenuOpen, onDismissRequest = { onSortMenuOpen(false) }) {
                                         HomeSort.entries.forEach { mode ->
@@ -382,31 +411,8 @@ private fun HomeLibrary(
                                     }
                                 }
                             }
-                            FinchSegmented(
-                                options = listOf(
-                                    null,
-                                    dev.cao.finch.data.Platform.PC,
-                                    dev.cao.finch.data.Platform.SWITCH,
-                                    dev.cao.finch.data.Platform.PS,
-                                ),
-                                selected = platformFilter,
-                                onSelect = onPlatformFilter,
-                                label = { p -> if (p == null) "全平台" else platformLabel(p) },
-                            )
-                            androidx.compose.foundation.layout.FlowRow(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(FinchSpace.sm),
-                                verticalArrangement = Arrangement.spacedBy(FinchSpace.sm),
-                            ) {
-                                FinchChip("全部", statusFilter == null, { onStatusFilter(null) })
-                                dev.cao.finch.data.GameStatus.values().forEach { s ->
-                                    FinchChip(s.label, statusFilter == s, {
-                                        onStatusFilter(if (statusFilter == s) null else s)
-                                    })
-                                }
-                                FinchChip("★ 收藏", favOnly, { onFavOnly(!favOnly) })
-                            }
-                            if (query.isNotBlank() || games.size > 8) {
+                            // 搜索按需展开：有搜索词时强制显示，免得清空后条件还在却看不到输入框
+                            if (searchOpen || query.isNotBlank()) {
                                 FinchTextField(
                                     value = query,
                                     onValueChange = onQueryChange,
@@ -427,6 +433,52 @@ private fun HomeLibrary(
                                     } else null,
                                     modifier = Modifier.fillMaxWidth(),
                                 )
+                            }
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Box(Modifier.weight(1f)) {
+                                    FinchSegmented(
+                                        options = listOf(
+                                            null,
+                                            dev.cao.finch.data.Platform.PC,
+                                            dev.cao.finch.data.Platform.SWITCH,
+                                            dev.cao.finch.data.Platform.PS,
+                                        ),
+                                        selected = platformFilter,
+                                        onSelect = onPlatformFilter,
+                                        label = { p -> if (p == null) "全平台" else platformLabel(p) },
+                                    )
+                                }
+                                Spacer(Modifier.width(FinchSpace.sm))
+                                val activeFilters = (if (statusFilter != null) 1 else 0) + (if (favOnly) 1 else 0)
+                                Box {
+                                    FinchIconButton(
+                                        icon = Icons.Filled.Tune,
+                                        contentDescription = "筛选" + if (activeFilters > 0) "（已启用 $activeFilters 项）" else "",
+                                        onClick = { onFilterSheetOpen(true) },
+                                        tint = if (activeFilters > 0) scheme.primary else scheme.onSurface,
+                                    )
+                                    if (activeFilters > 0) {
+                                        // 角标只提示「有筛选生效」，不做点击目标，所以不受 40dp 命中区限制
+                                        Box(
+                                            modifier = Modifier
+                                                .align(Alignment.TopEnd)
+                                                .padding(top = 2.dp, end = 2.dp)
+                                                .size(15.dp)
+                                                .clip(CircleShape)
+                                                .background(scheme.primary),
+                                            contentAlignment = Alignment.Center,
+                                        ) {
+                                            Text(
+                                                "$activeFilters",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = scheme.onPrimary,
+                                            )
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -471,9 +523,61 @@ private fun HomeLibrary(
                 onClick = onAdd,
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
-                    .padding(end = FinchSpace.screen, bottom = 108.dp),
+                    .padding(end = FinchSpace.screen, bottom = FinchSpace.fabOffset),
             )
         }
         snackbar()
+    }
+
+    // 筛选弹层：状态条件 + 收藏，只在需要时升起，不占列表高度
+    if (filterSheetOpen) {
+        HomeFilterSheet(
+            statusFilter = statusFilter,
+            onStatusFilter = onStatusFilter,
+            favOnly = favOnly,
+            onFavOnly = onFavOnly,
+            onDismiss = { onFilterSheetOpen(false) },
+        )
+    }
+}
+
+/**
+ * 主页筛选弹层（审查 B1-a）：状态胶囊从常驻 FlowRow 收进来。
+ * 「全部」不写成胶囊——清空选择就是全部，少一个需要被理解的按钮。
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun HomeFilterSheet(
+    statusFilter: dev.cao.finch.data.GameStatus?,
+    onStatusFilter: (dev.cao.finch.data.GameStatus?) -> Unit,
+    favOnly: Boolean,
+    onFavOnly: (Boolean) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    FinchSheet(title = "筛选", subtitle = "选中的条件会立刻生效。", onDismiss = onDismiss) {
+        FlowRow(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(FinchSpace.sm),
+            verticalArrangement = Arrangement.spacedBy(FinchSpace.sm),
+        ) {
+            dev.cao.finch.data.GameStatus.values().forEach { s ->
+                FinchChip(s.label, statusFilter == s, {
+                    onStatusFilter(if (statusFilter == s) null else s)
+                })
+            }
+            FinchChip("★ 收藏", favOnly, { onFavOnly(!favOnly) })
+        }
+        Spacer(Modifier.height(FinchSpace.xl))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.End,
+        ) {
+            FinchButton(text = "重置", variant = FinchButtonVariant.Ghost, onClick = {
+                onStatusFilter(null)
+                onFavOnly(false)
+            })
+            Spacer(Modifier.width(FinchSpace.sm))
+            FinchButton(text = "完成", onClick = onDismiss)
+        }
     }
 }

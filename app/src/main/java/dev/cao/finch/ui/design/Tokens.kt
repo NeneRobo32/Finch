@@ -37,6 +37,15 @@ object FinchSpace {
 
     /** 悬浮底栏 + 导航栏占位：所有可滚动页面底部统一让位，最后一张卡不会被压住 */
     val bottomBarClearance = 132.dp
+
+    /** FAB 距底距离：压在底栏上方一指，跟 [bottomBarClearance] 同一个基准，别再写 108.dp */
+    val fabOffset = bottomBarClearance - 24.dp
+
+    /** Snackbar 距底距离：底栏之上再让出一条，免得被 FAB 和底栏夹住 */
+    val snackbarClearance = bottomBarClearance + 40.dp
+
+    /** 悬浮按钮直径：列表底部要给 FAB 留出的额外高度 */
+    val fabSize = 56.dp
 }
 
 /**

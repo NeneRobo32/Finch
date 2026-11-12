@@ -14,7 +14,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.VideogameAsset
 import androidx.compose.material3.Icon
@@ -30,6 +30,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -38,11 +39,15 @@ import dev.cao.finch.data.Game
 import dev.cao.finch.data.GameRepository
 import dev.cao.finch.data.TopGameRow
 import dev.cao.finch.ui.design.FinchConfirmDialog
+import dev.cao.finch.ui.design.FinchDropdownItem
+import dev.cao.finch.ui.design.FinchDropdownMenu
+import dev.cao.finch.ui.design.FinchIconButton
 import dev.cao.finch.ui.design.FinchSpace
 import dev.cao.finch.ui.design.GlassStyle
 import dev.cao.finch.ui.design.GlassSurface
 import dev.cao.finch.ui.design.finchEnter
 import dev.cao.finch.ui.theme.FinchShapes
+import dev.cao.finch.ui.theme.finchBundle
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
@@ -70,10 +75,13 @@ internal fun homeSubtitle(gameCount: Int, monthMs: Long): String {
 @Composable
 internal fun MonthHeroCard(top: TopGameRow?, monthTotal: Long) {
     val scheme = MaterialTheme.colorScheme
+    // 审查 A1：原来定死 196dp，用户把系统字号调到 1.3x 时 49sp 的数字和 26sp 标题会被裁掉。
+    // 这里跟着字号放大（1.0x 时仍是 196dp，上限 1.45x 保证封面不变形）。
+    val height = 196.dp * LocalDensity.current.fontScale.coerceIn(1f, 1.45f)
     GlassSurface(
         modifier = Modifier
             .fillMaxWidth()
-            .height(196.dp)
+            .height(height)
             .finchEnter(),
         style = GlassStyle.Hero,
         shape = FinchShapes.hero,
@@ -195,7 +203,11 @@ internal fun MonthHeroCard(top: TopGameRow?, monthTotal: Long) {
     }
 }
 
-/** 游戏横卡：封面缩略 + 名称/元信息 + 右侧时长与开始箭头；长按删除 */
+/**
+ * 游戏横卡：封面缩略 + 名称/元信息 + 右侧评分与更多菜单；长按删除。
+ * 审查 D2：原来的箭头圆钮不带任何说明、也不响应长按（长按被整卡吃掉），
+ * 改成「更多」按钮 → 菜单（详情/删除），点按和长按都能走到删除确认。
+ */
 @Composable
 internal fun GameRowCard(
     game: Game,
@@ -207,6 +219,7 @@ internal fun GameRowCard(
     onDelete: () -> Unit,
 ) {
     var confirmDelete by remember { mutableStateOf(false) }
+    var menuOpen by remember { mutableStateOf(false) }
     val scheme = MaterialTheme.colorScheme
     GlassSurface(
         // 滚动时新滑进视野的卡片同样播一次浮现（order=0 不叠延迟：
@@ -291,7 +304,8 @@ internal fun GameRowCard(
                         Text(
                             " · 已通关",
                             style = MaterialTheme.typography.labelSmall,
-                            color = scheme.primary,
+                            // 审查 A2：11sp 小字用 primary 在浅色下对比度不足，改用 accentText
+                            color = finchBundle().accentText,
                         )
                     }
                 }
@@ -307,7 +321,8 @@ internal fun GameRowCard(
                     metaLine,
                     style = MaterialTheme.typography.labelSmall,
                     color = if (lastPlayedAt != null && System.currentTimeMillis() - lastPlayedAt < 7L * 24 * 3600 * 1000) {
-                        scheme.primary
+                        // 审查 A2：7 天内的强调色同样换 accentText
+                        finchBundle().accentText
                     } else {
                         scheme.onSurfaceVariant
                     },
@@ -323,14 +338,24 @@ internal fun GameRowCard(
                         Text(" $it", style = MaterialTheme.typography.labelSmall, color = scheme.onSurfaceVariant)
                     }
                 }
-                Box(
-                    Modifier
-                        .size(34.dp)
-                        .clip(FinchShapes.pill)
-                        .background(scheme.primary.copy(alpha = 0.12f)),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(Icons.Filled.PlayArrow, contentDescription = null, tint = scheme.primary, modifier = Modifier.size(20.dp))
+                Box {
+                    // 审查 D2：34dp 的箭头圆钮既无说明也不可长按（长按被整卡吃掉），换成显式的「更多」菜单
+                    FinchIconButton(
+                        icon = Icons.Filled.MoreVert,
+                        contentDescription = "更多操作",
+                        onClick = { menuOpen = true },
+                        ghost = true,
+                    )
+                    FinchDropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                        FinchDropdownItem(text = "查看详情", onClick = {
+                            menuOpen = false
+                            onClick()
+                        })
+                        FinchDropdownItem(text = "删除", onClick = {
+                            menuOpen = false
+                            confirmDelete = true
+                        })
+                    }
                 }
             }
         }

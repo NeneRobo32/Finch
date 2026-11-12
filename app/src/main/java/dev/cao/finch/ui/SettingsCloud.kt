@@ -99,8 +99,10 @@ internal fun CloudBackupCard(importViewModel: ImportViewModel) {
                 loading = busy,
                 enabled = !busy,
                 onClick = {
-                    importViewModel.saveWebDavConfig(urlField, userField, passField)
-                    importViewModel.testWebDav()
+                    // 审查 S1：地址被拒（公网 http）时不再继续发请求，错误已由 ViewModel 写进 SyncNote
+                    if (importViewModel.saveWebDavConfig(urlField, userField, passField)) {
+                        importViewModel.testWebDav()
+                    }
                 },
             )
             FinchButton(
@@ -108,8 +110,9 @@ internal fun CloudBackupCard(importViewModel: ImportViewModel) {
                 variant = FinchButtonVariant.Glass,
                 enabled = !busy && configured,
                 onClick = {
-                    importViewModel.saveWebDavConfig(urlField, userField, passField)
-                    importViewModel.uploadCloudBackup()
+                    if (importViewModel.saveWebDavConfig(urlField, userField, passField)) {
+                        importViewModel.uploadCloudBackup()
+                    }
                 },
             )
         }

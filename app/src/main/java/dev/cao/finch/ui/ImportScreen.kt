@@ -226,8 +226,10 @@ fun ImportScreen(
                         text = if (steamState is ImportViewModel.SyncState.Running) "同步中…" else "同步",
                         loading = steamState is ImportViewModel.SyncState.Running,
                         onClick = {
-                            importViewModel.saveSteamConfig(keyField, idField, baseField)
-                            importViewModel.syncSteam(keyField, idField, baseField)
+                            // 审查 S2：地址被驳回时（非 https）不继续拉取，错误已写进 SyncNote
+                            if (importViewModel.saveSteamConfig(keyField, idField, baseField)) {
+                                importViewModel.syncSteam(keyField, idField, baseField)
+                            }
                         },
                     )
                     FinchButton(

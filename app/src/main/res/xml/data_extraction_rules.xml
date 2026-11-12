@@ -4,6 +4,8 @@
     <cloud-backup>
         <!-- Steam Key / Switch/PSN token 等敏感信息，禁止进云备份 -->
         <exclude domain="sharedpref" path="finch_settings.xml" />
+        <!-- 审查 S4：自动备份 zip 是全量游玩历史，同样不进屋备份 -->
+        <exclude domain="file" path="auto_backups/" />
     </cloud-backup>
     <device-transfer>
         <!-- 换机迁移同样不带密钥 -->

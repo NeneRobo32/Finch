@@ -19,7 +19,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
  *
  * 认证只支持 HTTP Basic（Nextcloud / 群晖 / Box /坚果云都接受应用密码），
  * 因此**必须走 https**：明文 Basic 走 http 等于把密码写在信封上。
- * 这里不强制拦截 http，只在 UI 层提示，避免用户用局域网自签端口时被自己拦住。
+ * v0.29.4（审查 S1）：改为私网 http 放行、公网 http 拒绝，见 [normalizeBase]。
  */
 internal object WebDavClient {
 
@@ -34,7 +34,11 @@ internal object WebDavClient {
 
     /**
      * 归一化目录地址（纯函数，单测直接调用）：
-     * 去空白 → 补协议（缺省 https://）→ 确保以单个 `/` 结尾。
+     * 去空白 → 补协议（缺省 https://）→ 确保以单个 `/` 结尾 → 校验 scheme。
+     *
+     * 审查 S1：https 直接放行；http 只在 localhost / 私网段允许（局域网自签端口是常见用法），
+     * 公网 http 直接拒绝 —— Basic 认证在 http 下等于把密码抄在信封上，
+     * 而出网的内容是整个游玩历史数据库。
      */
     fun normalizeBase(raw: String): String {
         val trimmed = raw.trim()
@@ -44,7 +48,27 @@ internal object WebDavClient {
             trimmed.startsWith("http://", ignoreCase = true) -> trimmed
             else -> "https://$trimmed"
         }
-        return withScheme.trimEnd('/') + "/"
+        val normalized = withScheme.trimEnd('/') + "/"
+        require(isTransportSafe(normalized)) {
+            "公网地址必须用 https（Basic 认证在 http 下是明文），请改填 https:// 开头的地址"
+        }
+        return normalized
+    }
+
+    /** http 只允许 localhost / 私网段（RFC1918 + 链路本地），其余 scheme 一律放行 */
+    internal fun isTransportSafe(url: String): Boolean {
+        if (!url.startsWith("http://", ignoreCase = true)) return true
+        val host = runCatching {
+            java.net.URI(url).host?.lowercase().orEmpty()
+        }.getOrDefault("")
+        if (host.isEmpty()) return false
+        if (host == "localhost" || host == "127.0.0.1" || host == "::1") return true
+        if (host.startsWith("192.168.") || host.startsWith("10.") || host.startsWith("169.254.")) return true
+        if (host.startsWith("172.")) {
+            val second = host.split('.').getOrNull(1)?.toIntOrNull() ?: return false
+            return second in 16..31
+        }
+        return false
     }
 
     /** Basic 认证头（纯函数，单测直接调用；委托给 OkHttp 的实现避免自己拼错 base64 口径） */
@@ -135,7 +159,13 @@ internal object WebDavClient {
             .filter { it.name.isNotEmpty() && isBackupName(it.name) }
     }
 
-    /** 下载指定文件；不存在抛异常由调用方给文案 */
+    /** 云端单份备份的下载上限，与 BackupManager 的解压上限同口径。审查 S3 */
+    private const val MAX_DOWNLOAD_BYTES = 200L * 1024 * 1024
+
+    /**
+     * 下载指定文件；不存在抛异常由调用方给文案。
+     * 审查 S3：改成边读边累计并封顶，满额即中止，避免云端被替换成超大文件时整包躺进堆里。
+     */
     suspend fun download(config: Config, name: String): ByteArray = runInterruptible(Dispatchers.IO) {
         val request = Request.Builder()
             .url(fileUrl(config.baseUrl, name))
@@ -150,7 +180,24 @@ internal object WebDavClient {
                     else -> "下载失败：服务器返回 ${resp.code}"
                 })
             }
-            resp.body?.bytes() ?: throw IOException("云端返回空文件")
+            val body = resp.body ?: throw IOException("云端返回空文件")
+            // 先用 Content-Length 挡一次，省得白读 200MB
+            if (body.contentLength() > MAX_DOWNLOAD_BYTES) {
+                throw IOException("云端文件异常（超过 200MB），已中止")
+            }
+            val sink = java.io.ByteArrayOutputStream()
+            body.byteStream().use { input ->
+                val buf = ByteArray(64 * 1024)
+                var total = 0L
+                while (true) {
+                    val n = input.read(buf)
+                    if (n < 0) break
+                    total += n
+                    if (total > MAX_DOWNLOAD_BYTES) throw IOException("云端文件异常（超过 200MB），已中止")
+                    sink.write(buf, 0, n)
+                }
+            }
+            sink.toByteArray()
         }
     }
 

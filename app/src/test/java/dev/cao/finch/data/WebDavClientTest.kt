@@ -35,6 +35,35 @@ class WebDavClientTest {
         assertEquals("", WebDavClient.normalizeBase("   "))
     }
 
+    // 审查 S1：http 只放行本机与私网，公网 http 必须拒绝
+
+    @Test
+    fun `私网http放行`() {
+        assertEquals("http://192.168.1.5/dav/", WebDavClient.normalizeBase("http://192.168.1.5/dav"))
+        assertEquals("http://10.0.0.2/", WebDavClient.normalizeBase("http://10.0.0.2/"))
+        assertEquals("http://172.16.3.4/dav/", WebDavClient.normalizeBase("http://172.16.3.4/dav"))
+        // 没写协议的地址一律补 https（与既有口径一致），私网 http 必须显式写出 http://
+        assertEquals("https://localhost:5005/dav/", WebDavClient.normalizeBase("localhost:5005/dav"))
+        assertTrue(WebDavClient.isTransportSafe("http://127.0.0.1:5005/"))
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun `公网http被拒绝`() {
+        WebDavClient.normalizeBase("http://dav.example.com/finch")
+    }
+
+    @Test
+    fun `公网https放行`() {
+        assertEquals("https://dav.example.com/", WebDavClient.normalizeBase("https://dav.example.com/"))
+        assertTrue(WebDavClient.isTransportSafe("https://dav.example.com/"))
+    }
+
+    @Test
+    fun `非私网的172段也拒绝`() {
+        assertFalse(WebDavClient.isTransportSafe("http://172.32.1.1/"))
+        assertFalse(WebDavClient.isTransportSafe("http://172.15.1.1/"))
+    }
+
     // ---------- isBackupName ----------
 
     @Test
