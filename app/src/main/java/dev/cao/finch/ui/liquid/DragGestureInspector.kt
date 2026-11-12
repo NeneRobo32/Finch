@@ -8,7 +8,6 @@ import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerId
 import androidx.compose.ui.input.pointer.PointerInputChange
 import androidx.compose.ui.input.pointer.PointerInputScope
-import androidx.compose.ui.input.pointer.changedToUpIgnoreConsumed
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.util.fastFirstOrNull
 
@@ -50,11 +49,13 @@ private suspend inline fun AwaitPointerEventScope.drag(
     var pointer = pointerId
     while (true) {
         val change = awaitDragOrUp(pointer) ?: return null
+        // 抬起事件可能先被同链的 clickable 消费（changedToUpIgnoreConsumed 变 false），
+        // 结束判定只认 pressed：否则点击永远走不到 onDragEnd，按压高光会卡住或不出现。
+        if (!change.pressed) {
+            return change
+        }
         if (change.isConsumed) {
             return null
-        }
-        if (change.changedToUpIgnoreConsumed()) {
-            return change
         }
         onDrag(change)
         pointer = change.id
@@ -68,7 +69,8 @@ private suspend inline fun AwaitPointerEventScope.awaitDragOrUp(
     while (true) {
         val event = awaitPointerEvent()
         val dragEvent = event.changes.fastFirstOrNull { it.id == pointer } ?: return null
-        if (dragEvent.changedToUpIgnoreConsumed()) {
+        // 同上：被消费的 up 也要能结束等待，不能依赖 changedToUpIgnoreConsumed。
+        if (!dragEvent.pressed) {
             val otherDown = event.changes.fastFirstOrNull { it.pressed }
             if (otherDown == null) {
                 return dragEvent

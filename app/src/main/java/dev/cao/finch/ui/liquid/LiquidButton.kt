@@ -1,6 +1,7 @@
 /*
  * 移植自 Kyant0/AndroidLiquidGlass（Apache-2.0）catalog/components/LiquidButton.kt。
- * 玻璃配方与按下形变逻辑保持上游；仅补 enabled/高度/内边距参数，颜色改由 Finch 主题传入。
+ * 玻璃配方与按下形变逻辑保持上游；仅补 enabled/高度/内边距参数，颜色改由 Finch 主题传入，
+ * 另加按下提亮：pressProgress 驱动表面叠白，让短暂点击也和长按一样有可感知高光。
  */
 package dev.cao.finch.ui.liquid
 
@@ -41,7 +42,8 @@ import kotlin.math.tanh
  * vibrancy + blur(2dp) + lens(12dp,24dp)，按下时按指针位置做胶囊形变/位移，
  * 并叠 InteractiveHighlight 高光。
  *
- * 与上游的差异只有：多一个 enabled / 高度 / 横向内边距参数，tint 与 surfaceColor 由主题传入。
+ * 与上游的差异：enabled / 高度 / 横向内边距参数，tint 与 surfaceColor 由主题传入，
+ * 另加 pressProgress 驱动的按下提亮。
  */
 @Composable
 fun LiquidButton(
@@ -109,6 +111,12 @@ fun LiquidButton(
                     }
                     if (surfaceColor.isSpecified) {
                         drawRect(surfaceColor)
+                    }
+                    // 按下提亮：pressProgress 驱动表面叠白，点击（短暂按压）也要有可感知高光，
+                    // 强度随按深，松开随弹簧回弹淡出。
+                    val press = interactiveHighlight.pressProgress
+                    if (press > 0f) {
+                        drawRect(Color.White.copy(alpha = 0.14f * press))
                     }
                 },
             )
