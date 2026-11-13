@@ -20,6 +20,7 @@ import androidx.compose.material.icons.filled.VideogameAsset
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -55,12 +56,17 @@ internal fun GameCover(
         placeholder()
         if (url != null) {
             val context = LocalContext.current
-            AsyncImage(
-                model = if (requestSize != null) {
+            // ImageRequest 每次重组新建，AsyncImage 会当成换了一次请求重新解析尺寸、
+            // 重新查缓存；按 (url, requestSize, context) 记住即可。
+            val model = remember(url, requestSize, context) {
+                if (requestSize != null) {
                     ImageRequest.Builder(context).data(url).size(requestSize).build()
                 } else {
                     url
-                },
+                }
+            }
+            AsyncImage(
+                model = model,
                 contentDescription = contentDescription,
                 modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Crop,

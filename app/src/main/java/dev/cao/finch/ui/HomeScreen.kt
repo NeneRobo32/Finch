@@ -163,7 +163,9 @@ fun HomeScreen(
         }
     }
     val listState = androidx.compose.foundation.lazy.rememberLazyListState()
-    LaunchedEffect(statusFilter, favOnly, platformFilter, sortMode, query) {
+    // query 不进 key：搜索是在已加载的列表里本地过滤（见下方 filtered），
+    // 打字时把列表拉回顶部，会甩掉用户刚滚到的结果。
+    LaunchedEffect(statusFilter, favOnly, platformFilter, sortMode) {
         listState.scrollToItem(0)
     }
 

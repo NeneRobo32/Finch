@@ -225,7 +225,9 @@ internal fun GameRowCard(
         // 滚动时新滑进视野的卡片同样播一次浮现（order=0 不叠延迟：
         // 它们本来就是依次出现的，再加错开反而像卡顿）
         modifier = Modifier.fillMaxWidth().finchEnter(),
-        style = GlassStyle.Card,
+        // 列表行（内容全是 Text）用 Tile 档：Card 会为每行多录一张离屏层，
+        // 而这一行里没有任何需要折射的控件。圆角保持 card(24) 不动，三档归位留到后续。
+        style = GlassStyle.Tile,
         shape = FinchShapes.card,
         onClick = onClick,
         onLongClick = { confirmDelete = true },

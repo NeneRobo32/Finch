@@ -31,6 +31,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -112,6 +113,9 @@ fun FinchAppScaffold(
                     .fillMaxSize()
                     .layerBackdrop(contentBackdrop),
             ) {
+                // 每个 Tab 一棵独立的保存树：切走再切回来，列表滚动位置、展开状态、
+                // 搜索框内容都还在（原来每次切 Tab 都从零重建，等于把用户的位置丢了）。
+                val saveableStateHolder = rememberSaveableStateHolder()
                 AnimatedContent(
                     targetState = tab,
                     transitionSpec = {
@@ -126,19 +130,21 @@ fun FinchAppScaffold(
                     },
                     label = "tabContent",
                 ) { t ->
-                    Box(Modifier.fillMaxSize()) {
-                        when (t) {
-                            Tab.Home -> HomeScreen(viewModel, addViewModel, initialGameId)
-                            Tab.Upcoming -> UpcomingScreen()
-                            Tab.History -> HistoryScreen(viewModel)
-                            Tab.Stats -> StatsScreen(viewModel)
-                            Tab.Import -> ImportScreen(
-                                viewModel = viewModel,
-                                themeState = themeState,
-                                finchThemeState = finchThemeState,
-                                glassState = glassState,
-                                backgroundState = backgroundState,
-                            )
+                    saveableStateHolder.SaveableStateProvider(t.name) {
+                        Box(Modifier.fillMaxSize()) {
+                            when (t) {
+                                Tab.Home -> HomeScreen(viewModel, addViewModel, initialGameId)
+                                Tab.Upcoming -> UpcomingScreen()
+                                Tab.History -> HistoryScreen(viewModel)
+                                Tab.Stats -> StatsScreen(viewModel)
+                                Tab.Import -> ImportScreen(
+                                    viewModel = viewModel,
+                                    themeState = themeState,
+                                    finchThemeState = finchThemeState,
+                                    glassState = glassState,
+                                    backgroundState = backgroundState,
+                                )
+                            }
                         }
                     }
                 }

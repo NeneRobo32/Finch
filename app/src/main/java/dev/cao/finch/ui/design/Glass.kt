@@ -200,8 +200,11 @@ fun GlassSurface(
         )
     }
 
+    // clip 必须排在 glassModifier 之后：ShadowElement 在 drawContent() 之前把阴影
+    // 画进自己的层并向外扩 radius*2，外层若先 clip，这块阴影每帧照算 BlurMaskFilter
+    // 却一点看不见。放到 glassModifier 之后，它只裁内容（涟漪、封面），阴影就出来了。
+    // 顺序参考 Containers.kt 的 FinchDialog：阴影在外、裁剪在内。
     val boxModifier = modifier
-        .clip(shape)
         .then(
             if (onClick != null) {
                 Modifier.finchClickable(
@@ -215,6 +218,7 @@ fun GlassSurface(
             }
         )
         .then(glassModifier)
+        .clip(shape)
         .border(border, shape)
 
     if (exportLayer != null) {

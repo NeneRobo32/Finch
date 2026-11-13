@@ -60,11 +60,15 @@
 
 **建议**：`dampingRatio` 只允许上表五档；新增档位先加进 `FinchMotion` 再引用。
 
-**按压反馈三要素**（2026-11-12 修复「点击无高光」后固化为规范，先例见 `ui/liquid/LiquidButton.kt`）：
+**按压反馈三要素**（2026-11-13 第二次修订，先例见 `ui/liquid/LiquidButton.kt`）：
 - **提亮**：按下时玻璃表面随 pressProgress 提亮（表面叠白 ~0.14α）。短暂点击也必须可感知——「只有长按才有反馈」一律视为缺陷。
 - **形变**：Liquid 组件按指针位置做胶囊形变/位移（保持上游配方，不额外加缩放）。
-- **回弹**：松开时 pressProgress 与位置以 spring(0.5, 300) 回弹。回弹是反馈的一部分，只亮不回弹同样算残缺。
-- **实现红线**：手势「结束」判定用 `!pressed`，**不得依赖 `changedToUpIgnoreConsumed()`**——同链 `clickable` 会先消费 up，依赖消费状态会让点击永远收不到 onDragEnd（`ui/liquid/DragGestureInspector.kt` 注释有详述）。新增自绘手势组件照此办理。
+- **回弹**：松开时按下进度与位置以弹簧回弹。回弹是反馈的一部分，只亮不回弹同样算残缺。
+- **实现红线（已两次踩坑，务必照做）**：
+  1. **按下进度必须由 `interactionSource` 驱动**（`collectIsPressedAsState` → `animateFloatAsState`），把同一个 source 传给 `clickable`。按下=Press、抬手=Release、滑出=Cancel 全由 Clickable 的交互状态机保证，**不依赖任何指针事件是否被消费**。
+  2. **禁止用自绘手势推断「按下/松开」**。`inspectDragGestures` 一类自绘循环在同链存在 `clickable` 时，结束判定会被消费状态影响：判「未消费的 up」→ 点击收不到 onDragEnd（无高光）；只判 `!pressed` → 抬起与取消又分不清，按下态会卡在屏幕上（「按下去就僵住」）。两次故障同源。
+  3. 指针位移可以继续在 `PointerEventPass.Initial` 阶段**只读**跟踪（只喂液形拉伸，不参与结束判定）。
+- **手感**：按下起亮要快（刚度 ≥900，约 60ms 到位），回落略带回弹（dampingRatio 0.7 左右）。用慢弹簧做按下，短按会「看起来没反应」。
 
 > ⚠️ **死代码提醒**：`ui/Motion.kt`（包名 `ui.theme`）的 `springEnterSpec / springPageSpec / springPressSpec / pressScale / emphasizedTween` 已无任何调用方，且阻尼口径（MediumBouncy 等）与 `FinchMotion` 不一致。可整文件删除，勿再引用。
 
@@ -206,7 +210,7 @@ M3 全档位微调：display 57/45/38sp（负字距）、headline 32/27/23、tit
 | 10 | 危险操作一键直达（无确认） | `FinchConfirmDialog` |
 | 11 | 返回键与标题同 Row | 返回键独立一行（`WishlistPane` 模式） |
 | 12 | 引用 `ui/Motion.kt` 的 legacy spring API | `FinchMotion.*`（该文件待删） |
-| 13 | 按下反馈只有长按才可见；手势结束依赖事件消费状态 | 提亮随 pressProgress；结束判定用 `!pressed`（§2.2 按压三要素） |
+| 13 | 按下反馈只有长按才可见／按下去僵住不回来 | 按下进度由 `interactionSource` 驱动，不自行推断手势结束（§2.2 按压三要素红线） |
 
 ---
 

@@ -51,6 +51,8 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.Saver
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -102,8 +104,16 @@ private data class Quint<A, B, C, D, E>(val first: A, val second: B, val third: 
  */
 @Composable
 fun StatsScreen(viewModel: FinchViewModel) {
-    var mode by remember { mutableStateOf(StatsMode.MONTH) }
-    var anchorMonth by remember { mutableStateOf(YearMonth.now()) }
+    // 切 Tab / 旋转 / 进程被回收后回来，视图还停在原来看的月份与月/年模式
+    var mode by rememberSaveable { mutableStateOf(StatsMode.MONTH) }
+    var anchorMonth by rememberSaveable(
+        stateSaver = remember {
+            Saver<YearMonth, String>(
+                save = { it.toString() },
+                restore = { YearMonth.parse(it) },
+            )
+        },
+    ) { mutableStateOf(YearMonth.now()) }
     // v0.24：年度报告是独立的一整页（纵向叙事），从总结页进入，返回时回到原来的月/年视图
     var showYearReport by remember { mutableStateOf(false) }
     // 审查 B4：期数选择弹层（点标题打开），替代原来那条一直占着三行高的滑杆
@@ -152,7 +162,15 @@ fun StatsScreen(viewModel: FinchViewModel) {
     // 本周五还没到，柱子上却已经有时间了，读起来是错的。这里只取选中的那一周。
     val today = remember { LocalDate.now() }
     val thisWeekStart = remember(today) { weekStartOf(today) }
-    var weekStart by remember { mutableStateOf(thisWeekStart) }
+    // 同样是「用户选的位置」，重建后要还在
+    var weekStart by rememberSaveable(
+        stateSaver = remember {
+            Saver<LocalDate, String>(
+                save = { it.toString() },
+                restore = { LocalDate.parse(it) },
+            )
+        },
+    ) { mutableStateOf(thisWeekStart) }
     val rhythmFrom = remember(weekStart, zone) {
         weekStart.atStartOfDay(zone).toInstant().toEpochMilli()
     }

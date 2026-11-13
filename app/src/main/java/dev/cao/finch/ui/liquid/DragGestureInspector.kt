@@ -11,6 +11,14 @@ import androidx.compose.ui.input.pointer.PointerInputScope
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.util.fastFirstOrNull
 
+/**
+ * 自绘拖拽识别（滑杆 / 开关 / 底栏拖选这类可拖控件用）。
+ *
+ * ⚠️ 不要用它给「按钮」做按下反馈：按钮同链上有 `clickable`，up 事件会被先消费，
+ * 这里的结束判定要么收不到（无高光）、要么分不清抬手与取消（按下态僵住）。
+ * 按钮请把 interactionSource 交给 clickable，用 collectIsPressedAsState 驱动，
+ * 见 ui/liquid/LiquidButton.kt 与 UI_DESIGN_GUIDE §2.2。
+ */
 suspend fun PointerInputScope.inspectDragGestures(
     onDragStart: (down: PointerInputChange) -> Unit = {},
     onDragEnd: (change: PointerInputChange) -> Unit = {},

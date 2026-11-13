@@ -45,6 +45,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -65,6 +66,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import dev.cao.finch.ui.theme.FinchShapes
+import dev.cao.finch.ui.theme.LocalGlassEnabled
 import dev.cao.finch.ui.theme.finchBundle
 import dev.cao.finch.ui.theme.glassPalette
 
@@ -400,42 +402,49 @@ fun FinchDialog(
                     .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {}
                     .padding(FinchSpace.xxl),
             ) {
-                Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                if (subtitle != null) {
-                    Spacer(Modifier.height(FinchSpace.xs))
-                    Text(
-                        subtitle,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                Spacer(Modifier.height(FinchSpace.lg))
-                if (scrollable) {
-                    // 内容区滚动，标题与底部按钮固定（搜索结果多、键盘弹起时仍能点到「添加」）
-                    Box(
-                        Modifier
-                            .weight(1f, fill = false)
-                            .verticalScroll(rememberScrollState()),
-                    ) {
-                        Column { content() }
-                    }
-                } else {
-                    content()
-                }
-                if (confirmLabel != null) {
-                    Spacer(Modifier.height(FinchSpace.xl))
-                    Row(
-                        Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(FinchSpace.sm, Alignment.End),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        FinchButton(text = dismissLabel, onClick = onDismiss, variant = FinchButtonVariant.Ghost)
-                        FinchButton(
-                            text = confirmLabel,
-                            onClick = { onConfirm?.invoke() },
-                            variant = if (destructive) FinchButtonVariant.Danger else FinchButtonVariant.Primary,
-                            enabled = confirmEnabled,
+                // 弹层是独立窗口，采不到、也不该采主界面的背景层：
+                // 置空 backdrop + 关玻璃，里面的 chip / 按钮直接走实底（UI_DESIGN_GUIDE §3.1）。
+                CompositionLocalProvider(
+                    LocalFinchBackdrop provides null,
+                    LocalGlassEnabled provides false,
+                ) {
+                    Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                    if (subtitle != null) {
+                        Spacer(Modifier.height(FinchSpace.xs))
+                        Text(
+                            subtitle,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
+                    }
+                    Spacer(Modifier.height(FinchSpace.lg))
+                    if (scrollable) {
+                        // 内容区滚动，标题与底部按钮固定（搜索结果多、键盘弹起时仍能点到「添加」）
+                        Box(
+                            Modifier
+                                .weight(1f, fill = false)
+                                .verticalScroll(rememberScrollState()),
+                        ) {
+                            Column { content() }
+                        }
+                    } else {
+                        content()
+                    }
+                    if (confirmLabel != null) {
+                        Spacer(Modifier.height(FinchSpace.xl))
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(FinchSpace.sm, Alignment.End),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            FinchButton(text = dismissLabel, onClick = onDismiss, variant = FinchButtonVariant.Ghost)
+                            FinchButton(
+                                text = confirmLabel,
+                                onClick = { onConfirm?.invoke() },
+                                variant = if (destructive) FinchButtonVariant.Danger else FinchButtonVariant.Primary,
+                                enabled = confirmEnabled,
+                            )
+                        }
                     }
                 }
             }
@@ -497,26 +506,32 @@ fun FinchSheet(
                 .border(1.dp, glass.edge.copy(alpha = 0.4f), FinchShapes.sheet)
                 .padding(horizontal = FinchSpace.xxl, vertical = FinchSpace.lg),
         ) {
-            Box(
-                Modifier
-                    .align(Alignment.CenterHorizontally)
-                    .width(40.dp)
-                    .height(4.dp)
-                    .clip(FinchShapes.pill)
-                    .background(glass.edge.copy(alpha = 0.6f)),
-            )
-            Spacer(Modifier.height(FinchSpace.xl))
-            Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-            if (subtitle != null) {
-                Spacer(Modifier.height(FinchSpace.xs))
-                Text(
-                    subtitle,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+            // 同 FinchDialog：底部弹层也是独立窗口，不继承主界面的采样层。
+            CompositionLocalProvider(
+                LocalFinchBackdrop provides null,
+                LocalGlassEnabled provides false,
+            ) {
+                Box(
+                    Modifier
+                        .align(Alignment.CenterHorizontally)
+                        .width(40.dp)
+                        .height(4.dp)
+                        .clip(FinchShapes.pill)
+                        .background(glass.edge.copy(alpha = 0.6f)),
                 )
+                Spacer(Modifier.height(FinchSpace.xl))
+                Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                if (subtitle != null) {
+                    Spacer(Modifier.height(FinchSpace.xs))
+                    Text(
+                        subtitle,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Spacer(Modifier.height(FinchSpace.lg))
+                content()
             }
-            Spacer(Modifier.height(FinchSpace.lg))
-            content()
         }
     }
 }

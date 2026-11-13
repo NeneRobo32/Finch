@@ -180,6 +180,10 @@ class UpcomingViewModel(app: Application) : AndroidViewModel(app) {
         val seq = ++refreshSeq
         refreshJob = viewModelScope.launch {
             try {
+                // 审查 P0-A：这里原来把异常吞成 emptyList()，界面上于是只说
+                // 「没有返回数据（网络或源问题）」——真实原因（超时 / DNS / SSL）丢了，
+                // 用户也没法据此去做任何事。失败原因带出来，跟「源真的没内容」分开。
+                var failReason: String? = null
                 val r = withContext(Dispatchers.IO) {
                     try {
                         when (sel) {
@@ -189,6 +193,7 @@ class UpcomingViewModel(app: Application) : AndroidViewModel(app) {
                         }
                     } catch (e: Exception) {
                         if (e is CancellationException) throw e // 取消不是失败
+                        failReason = friendMsg(e)
                         Log.w("Upcoming", "${sel.label} ✗ ${friendMsg(e)}")
                         emptyList()
                     }
@@ -201,11 +206,16 @@ class UpcomingViewModel(app: Application) : AndroidViewModel(app) {
                         withContext(Dispatchers.IO) { syncFollowPrices(r) }
                     }
                     mergeAndPublish(r)
-                } else {
+                } else if (failReason != null) {
                     _state.value = LoadState.Failed(
-                        "${sel.label} 没有返回数据（网络或源问题）",
+                        "${sel.label} 加载失败：$failReason",
                         cacheSp.contains("psn_json"),
                     )
+                } else {
+                    // 源正常返回了空列表：这是空态，不是失败。
+                    // 报成「网络或源问题」会让人一直点重试，而其实重试也没用。
+                    loaded = emptyList()
+                    _state.value = LoadState.Ready(emptyList(), emptyList())
                 }
             } finally {
                 // 被取消的旧请求也会走到这里，只有最新一次才把转圈标记关掉

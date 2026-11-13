@@ -38,6 +38,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -471,18 +472,22 @@ internal fun HeatmapCard(
             ) {
                 (1..12).forEach { m ->
                     val ym = YearMonth.of(anchorMonth.year, m)
+                    // 一整年 365 格、每格一次 String.format，原本随每次重组重算。
+                    // 数据只在 byDay 换月份/换年份时变，按 (ym, byDay) 记住即可。
+                    val cells = remember(ym, byDay) {
+                        val first = ym.atDay(1)
+                        val lead = (first.dayOfWeek.value - 1).coerceIn(0, 6)
+                        List(lead) { null } + (1..ym.lengthOfMonth()).map { d ->
+                            val key = "%04d-%02d-%02d".format(ym.year, m, d)
+                            byDay[key] ?: 0L
+                        }
+                    }
                     Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
                         Text(
                             "${m}月",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
-                        val first = ym.atDay(1)
-                        val lead = (first.dayOfWeek.value - 1).coerceIn(0, 6)
-                        val cells = List(lead) { null } + (1..ym.lengthOfMonth()).map { d ->
-                            val key = "%04d-%02d-%02d".format(ym.year, m, d)
-                            byDay[key] ?: 0L
-                        }
                         cells.chunked(7).forEach { week ->
                             Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
                                 week.forEach { ms ->
