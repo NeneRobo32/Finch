@@ -39,6 +39,11 @@ class UpcomingViewModel(app: Application) : AndroidViewModel(app) {
     private val followDao = db.releaseFollowDao()
     private val cacheSp = app.getSharedPreferences("finch_upcoming", android.content.Context.MODE_PRIVATE)
 
+    companion object {
+        /** 港服缓存快照的落盘时刻（epoch millis）；缓存内容本身是 psn_json */
+        private const val KEY_PSN_CACHE_AT = "psn_json_at"
+    }
+
     /** 已关注的 key 集合（日程行显示 ★ 状态用） */
     val followKeys: StateFlow<Set<String>> = followDao.observeKeys()
         .map { it.toSet() }
@@ -94,6 +99,12 @@ class UpcomingViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /**
+     * 一次取数的结果：条目 + 这份数据的来历。
+     * [staleAt] 非空表示数据来自本地缓存快照（联网失败回落），界面必须把它标出来。
+     */
+    private data class Fetched(val entries: List<UpcomingEntry>, val staleAt: Long?)
+
     data class UpcomingEntry(
         val name: String,
         val nameCn: String?,
@@ -124,6 +135,12 @@ class UpcomingViewModel(app: Application) : AndroidViewModel(app) {
         data class Ready(
             val entries: List<UpcomingEntry>,   // 展示用（已按"大作"过滤）
             val allEntries: List<UpcomingEntry>, // 全量（搜索用，不过滤）
+            /**
+             * 这份数据是本地缓存的快照时刻（epoch millis）；null = 本次是联网现拉的。
+             * 港服取数失败回落缓存时非空，界面必须标出这个时间 ——
+             * 「离线时的价」和「现在的价」是两件事，不标时间就是在说假话。
+             */
+            val staleAt: Long? = null,
         ) : LoadState()
         data class Failed(val message: String, val hadCache: Boolean) : LoadState()
     }
@@ -188,24 +205,26 @@ class UpcomingViewModel(app: Application) : AndroidViewModel(app) {
                     try {
                         when (sel) {
                             Source.PSN -> fetchPsnEntries()
-                            Source.GAMERSKY -> fromGamersky(GamerskyClient.fetchRestOfYear())
-                            Source.ESHOP -> fromEshop(EshopClient.fetchRecent())
+                            Source.GAMERSKY ->
+                                Fetched(fromGamersky(GamerskyClient.fetchRestOfYear()), staleAt = null)
+                            Source.ESHOP ->
+                                Fetched(fromEshop(EshopClient.fetchRecent()), staleAt = null)
                         }
                     } catch (e: Exception) {
                         if (e is CancellationException) throw e // 取消不是失败
                         failReason = friendMsg(e)
                         Log.w("Upcoming", "${sel.label} ✗ ${friendMsg(e)}")
-                        emptyList()
+                        Fetched(emptyList(), staleAt = null)
                     }
                 }
                 // 期间已经切到别的源，就丢弃这份结果
                 if (_source.value != sel) return@launch
-                if (r.isNotEmpty()) {
+                if (r.entries.isNotEmpty()) {
                     // 港服数据到手就顺手刷新愿望单里的价格快照
-                    if (sel == Source.PSN) {
-                        withContext(Dispatchers.IO) { syncFollowPrices(r) }
+                    if (sel == Source.PSN && r.staleAt == null) {
+                        withContext(Dispatchers.IO) { syncFollowPrices(r.entries) }
                     }
-                    mergeAndPublish(r)
+                    mergeAndPublish(r.entries, r.staleAt)
                 } else if (failReason != null) {
                     _state.value = LoadState.Failed(
                         "${sel.label} 加载失败：$failReason",
@@ -240,8 +259,8 @@ class UpcomingViewModel(app: Application) : AndroidViewModel(app) {
                 val entries = withContext(Dispatchers.IO) {
                     runCatching { fetchPsnEntries() }.getOrNull()
                 }
-                if (entries != null) {
-                    withContext(Dispatchers.IO) { syncFollowPrices(entries) }
+                if (entries != null && entries.staleAt == null) {
+                    withContext(Dispatchers.IO) { syncFollowPrices(entries.entries) }
                 }
             } finally {
                 _wishlistRefreshing.value = false
@@ -250,17 +269,23 @@ class UpcomingViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** 港服取数：成功后写缓存；失败回落上次缓存（离线也能看上次的价），都没有则抛给上层 */
-    private suspend fun fetchPsnEntries(): List<UpcomingEntry> {
+    private suspend fun fetchPsnEntries(): Fetched {
         return try {
             val feed = PsnStoreClient.fetchFeed()
-            cacheSp.edit().putString("psn_json", PsnStoreClient.toJson(feed)).apply()
-            fromPsn(feed)
+            val now = System.currentTimeMillis()
+            cacheSp.edit()
+                .putString("psn_json", PsnStoreClient.toJson(feed))
+                .putLong(KEY_PSN_CACHE_AT, now)
+                .apply()
+            Fetched(fromPsn(feed), staleAt = null)
         } catch (e: Exception) {
             if (e is CancellationException) throw e
             val cached = cacheSp.getString("psn_json", null)?.let { PsnStoreClient.fromJson(it) }
             if (cached != null && !cached.isEmpty) {
                 Log.w("Upcoming", "PSN 港服取数失败，用缓存（${friendMsg(e)}）")
-                fromPsn(cached)
+                // 快照时间必须有：没记录过的老缓存回落到 0（界面只显示「离线 · 上次同步的快照」），
+                // 绝不假装是刚拉到的新价。
+                Fetched(fromPsn(cached), staleAt = cacheSp.getLong(KEY_PSN_CACHE_AT, 0L))
             } else {
                 throw e
             }
@@ -300,9 +325,9 @@ class UpcomingViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** 全量结果发布（去重 + 排序后展示） */
-    private suspend fun mergeAndPublish(all: List<UpcomingEntry>) {
+    private suspend fun mergeAndPublish(all: List<UpcomingEntry>, staleAt: Long?) {
         if (all.isEmpty()) return
-        publish(rankEntries(all.distinctBy { it.name.lowercase().replace(" ", "") }))
+        publish(rankEntries(all.distinctBy { it.name.lowercase().replace(" ", "") }), staleAt)
     }
 
     /** 切换数据源：立即拉取该源（不再共用旧数据） */
@@ -458,7 +483,7 @@ class UpcomingViewModel(app: Application) : AndroidViewModel(app) {
         return pre + deal
     }
 
-    private suspend fun publish(entries: List<UpcomingEntry>) {
+    private suspend fun publish(entries: List<UpcomingEntry>, staleAt: Long?) {
         // 标记哪些已入库：优先按平台 ID，港服条目没有 ID 就按名字（与 upsertGame 的合并口径一致）
         val marked = withContext(Dispatchers.IO) {
             // 审查 P1：几百条日程逐条 allByName 会全表扫几百遍，先读一次全表建内存名字索引
@@ -472,18 +497,18 @@ class UpcomingViewModel(app: Application) : AndroidViewModel(app) {
                 e.copy(added = added)
             }
         }
-        refreshDisplay(marked)
+        refreshDisplay(marked, staleAt)
     }
 
     /** 按当前选中的源生成展示列表（全量保留在 allEntries；展示=该源+大作过滤，过滤后空则给该源全量） */
-    private fun refreshDisplay(all: List<UpcomingEntry>) {
+    private fun refreshDisplay(all: List<UpcomingEntry>, staleAt: Long?) {
         val sel = _source.value
         val bySource = all.filter { it.source == sel.name.lowercase() }
         val display = bySource.filter(::isKeep).ifEmpty { bySource }
         loaded = display
         // 上限 300 条（全年展示足够，渲染不卡；排序后取前 N）
         val capped = if (display.size > 300) display.take(300) else display
-        _state.value = LoadState.Ready(capped, all)
+        _state.value = LoadState.Ready(capped, all, staleAt)
     }
 
     /** 一键入库 */
@@ -503,7 +528,9 @@ class UpcomingViewModel(app: Application) : AndroidViewModel(app) {
             }
             val game = gameDao.byId(id) ?: Game(id = id, name = entry.name, platform = GameRepository.mainPlatform(plats, Platform.PC))
             onDone(game)
-            publish(loaded)
+            // 入库后重发一次只为刷新「已入库」标记，数据来历不变：
+            // 原来这份是缓存就还是缓存，别在这一步把 staleAt 洗成 null。
+            publish(loaded, (_state.value as? LoadState.Ready)?.staleAt)
         }
     }
 }

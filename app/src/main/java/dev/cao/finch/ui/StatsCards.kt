@@ -73,6 +73,16 @@ private val RankSilver = Color(0xFFA8B0BD)
 private val RankBronze = Color(0xFFC08A5E)
 private val RankNeutral = Color(0xFFD7DCE2)
 
+/**
+ * 前三名徽章的文字色。
+ *
+ * 原来三档统一用 `Color.White`，在金属底上对比度只有
+ * 1.80 / 2.19 / 2.98 : 1（WCAG AA 要求 4.5:1，小字号 12sp 属正文级）。
+ * 金属底本身要「亮」才像金/银/铜，压深底会毁掉辨识度，
+ * 所以改压文字：深棕 `#241A05` 在三档上分别是 9.6 / 7.9 / 5.8 : 1，全部过 AA。
+ */
+private val RankOnMetal = Color(0xFF241A05)
+
 private fun rankColor(i: Int) = when (i) {
     0 -> RankGold
     1 -> RankSilver
@@ -348,7 +358,7 @@ internal fun TopGamesCard(topGames: List<TopGameRow>) {
                         "${i + 1}",
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold,
-                        color = if (i < 3) Color.White else MaterialTheme.colorScheme.onSurface,
+                        color = if (i < 3) RankOnMetal else MaterialTheme.colorScheme.onSurface,
                     )
                 }
                 Spacer(Modifier.width(FinchSpace.md))

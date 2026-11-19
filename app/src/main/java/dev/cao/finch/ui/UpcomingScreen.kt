@@ -239,6 +239,13 @@ fun UpcomingScreen(upcomingViewModel: UpcomingViewModel = viewModel()) {
                             bottom = FinchSpace.bottomBarClearance,
                         ),
                     ) {
+                        // 审查 P0-A：缓存回落的价必须带上「这是哪天的价」。
+                        // 原来失败就静默用缓存、界面上没有任何时间戳，等于把几周前的价说成现价。
+                        if (s.staleAt != null) {
+                            item(key = "stale_snapshot") {
+                                StaleSnapshotNote(staleAt = s.staleAt)
+                            }
+                        }
                         if (filtered.isEmpty() && q.isNotEmpty()) {
                             item(key = "no_match") {
                                 FinchEmptyState(
@@ -656,4 +663,51 @@ internal fun saleEndText(end: LocalDate): String {
         days == 1L -> "优惠明天结束（$dateText）"
         else -> "优惠至$dateText（还剩${days}天）"
     }
+}
+
+/**
+ * 缓存快照提示条：联网失败、价格来自本地缓存时挂在列表顶部。
+ *
+ * 为什么必须存在：港服取数失败会静默回落上次缓存（`UpcomingViewModel.fetchPsnEntries`），
+ * 而价格是会变的——不标时间就等于把几周前的价当现价展示。
+ * 「离线 · 数据为 11月2日 21:30 的快照」是这条链路唯一诚实的说法。
+ */
+@Composable
+private fun StaleSnapshotNote(staleAt: Long) {
+    val scheme = MaterialTheme.colorScheme
+    val label = remember(staleAt) { staleSnapshotLabel(staleAt, System.currentTimeMillis()) }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(FinchShapes.field)
+            .background(scheme.surfaceVariant.copy(alpha = 0.5f))
+            .padding(horizontal = FinchSpace.md, vertical = FinchSpace.sm),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            imageVector = Icons.Filled.Refresh,
+            contentDescription = null,
+            tint = scheme.onSurfaceVariant,
+            modifier = Modifier.size(16.dp),
+        )
+        Spacer(Modifier.width(FinchSpace.sm))
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelMedium,
+            color = scheme.onSurfaceVariant,
+        )
+    }
+}
+
+/**
+ * 快照时间文案（纯函数，可单测）：
+ * 有记录时间 → 「离线 · 数据为 M月d日 HH:mm 的快照」；
+ * `staleAt <= 0`（老版本缓存没记时间）→ 只说「上次同步的快照」，绝不编一个时间出来。
+ */
+internal fun staleSnapshotLabel(staleAt: Long, nowMillis: Long): String {
+    if (staleAt <= 0L) return "离线 · 价格来自上次同步的快照"
+    val whenText = java.time.Instant.ofEpochMilli(staleAt)
+        .atZone(java.time.ZoneId.systemDefault())
+        .format(dev.cao.finch.TimeFormatter.DATE_MD_HM)
+    return "离线 · 数据为 $whenText 的快照"
 }

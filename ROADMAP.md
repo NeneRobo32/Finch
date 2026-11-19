@@ -1,6 +1,6 @@
 # Finch 路线图
 
-基线：`v0.28.0`（DB v22，versionCode 97）。
+基线：`v0.29.7`（DB v23，versionCode 105）。
 IGDB 已整体移除（国内直连不通）；HLTB 改走 Crashdummy 中转 API（Steam 直查+Nlib 英文名+按名搜，默认开、可一键关）；非英文库名走英文名解析链换英文线索再搜（Steam 中文反查/Bangumi 原名/eShop 英文段/游民星空/机翻已移除，v0.15.15–0.15.18）。
 下阶段主题：**待定**。v0.26 系列只做减法与纠错、不加功能——v0.26 修总结页三处显示口径（作息／高峰时段改看最近 90 天并按时长摊分、删与热力图重复的「活动」卡、总时长 hero 改玻璃），v0.26.1 把标签功能整体删掉（连同 `play_sessions.tag` 列，DB 21→22）。v0.27 修掉「90 天窗口把上周末算进本周」的读法问题（作息改按自然周独立、可翻页），并把通关进度写出超出／剩余、PSN 拿到白金时弹手绘庆祝。v0.28 给日程页新增第五个源「PSN 港服」：预购新作 + 正在打折，行内出原价划线／折扣角标／截止日。到此已经没有待办的技术债。
 
@@ -52,6 +52,14 @@ IGDB 已整体移除（国内直连不通）；HLTB 改走 Crashdummy 中转 API
 | v0.26.1 ✅已交付 | 删标签功能 | 会话标签整个拆掉：记录页胶囊筛选、编辑弹窗打标、总结页「标签分布」卡、战报「主打标签」格全部移除；`play_sessions.tag` 列真删（重建表）；备注功能保留 | 21→22 | 无 |
 | v0.27.0 ✅已交付 | 作息按周＋通关超出＋白金庆祝 | 作息改按自然周独立（`weekStartOf`，卡片内可翻周，右箭头卡在本周不越未来）；高峰时段跟着这一周；年度报告的作息改看整年。通关进度写出「已超出主线参考 X」／「还差 X」，超出时补一句离支线／全收集还差多少（`mainOverrunMin` / `mainRemainingMin`）。PSN 同步首次拿到白金弹全屏手绘奖杯动画（`PlatinumWatch` 比对 0→≥1，每游戏只播一次，实验性开关） | 22（不变） | 无 |
 | v0.28.0 ✅已交付 | PSN 港服日程 | 日程页新增第五个源「PSN 港服」：预购新作按发售日、正在打折按力度；行内现价＋原价划线＋折扣角标＋截止日。`data/PsnStoreClient.kt` 直接打商店 GraphQL 持久化查询（照抄 mrt1m 的 3 个 sha256，无依赖、无 token，`x-psn-store-locale-override: zh-hans-hk` 锁港服）；四条线并发 9 秒，成功写 JSON 缓存、失败回落 | 22（不变） | 无 |
+| v0.29.0 ✅已交付 | 源收敛＋愿望单 | 日程源收敛到三源：删掉 Steam「即将推出」与 Bangumi 日历（客户端保留，HltbFetch / GameSearchClient / SwitchTitleClient 还在用），PSN 港服提首位并成默认。新增「愿望单」：`release_follows` 加 5 列（priceText / basePriceText / discountText / saleEndIso / productId），点 ☆ 时把当前价格一起写进去，每次拉到港服数据由 `syncFollowPrices` 回写；顶部三格汇总＋全部/打折中/待打折三段筛选；离线可看上次同步到的价。`play_sessions` 的 `note` 字段删除、`calendar_json` 缓存删除 | 22→23 | 无 |
+| v0.29.1 ✅已交付 | 愿望单收回日程页 | 愿望单入口从列表第 0 项挪到页头（是入口不是内容，不该跟着列表滚走），星标＋计数角标（>9 显示 `9+`，0 时空心灰星）；商店卡片重新排版 | 23（不变） | 无 |
+| v0.29.2 ✅已交付 | 价格独立成列 | 卡片按港服商店条目卡重排：左封面 88×118、中间标题/别名/倒计时徽章/平台、右列一整列价格（折扣角标在上、现价 22sp 最大、划线原价垫底、全部右对齐）；价格列宽 56–96dp，长价格用 `TextAutoSize.StepBased(13..22sp)` 自适应。日程页与愿望单共用 `StoreEntryCard` | 23（不变） | 无 |
+| v0.29.3 ✅已交付 | 日程卡片压缩 | 卡高 186→~120dp：封面 88×118 缩到 62×82、中间列去掉 `.height(118.dp)` 改 `weight(1f)` 由内容决定高度、右价格列与操作合并、折扣截止日降到元信息下一行小字。标题 `bodyLarge`→`titleMedium`（16sp SemiBold，行高 22 比 24 紧）；入库/商店按钮去掉图标只留文字。游民星空条目不再把发行商填进 `nameCn` | 23（不变） | 无 |
+| v0.29.4 ✅已交付 | UI/代码审查落地 | 主页控件区从 552dp 收到约 300dp：状态胶囊收进「筛选」底部弹层（带计数角标）、平台分段与「筛选」并成一行、搜索框改成点放大镜才展开、172/108/56 等底栏偏移字面量收进 `FinchSpace` token。日程页愿望单收回页头、下拉刷新接上、换源不再先清空列表再转整页圈。统计页期数卡删掉滑杆与提示、标题改可点开选年/月胶囊。新增 `accentText` token（浅色下主色混 28% 文字色，11sp 小字对比度 3.4→~8:1）；所有图标按钮外挂 48dp 最小命中区、胶囊垂直内边距 8→12dp；hero/统计大卡高度跟随字号缩放（封顶 1.45×）。新增内存名字索引 `GameNameIndex`（原 `allByName` 是零索引全表扫，一次 Steam 同步扫几百遍）；ticker 改算到下一个整分再醒；`TimerService.onDestroy` 重置 `TimerServiceBridge` | 23（不变） | 无 |
+| v0.29.5 ✅已交付 | 按钮按压反馈修复 | 按钮点击无按压反馈：`DragGestureInspector` 用 `changedToUpIgnoreConsumed()` 判结束，但同链 `clickable` 会先消费 up，判定永远 false。改判 `pressed`，加 `pressProgress` 驱动的表面叠白提亮。新增 `docs/UI_DESIGN_GUIDE.md`（238 行）、`docs/CODE_REVIEW_2026-11-12.md`（693 行）、`docs/UI_REVIEW_2026-11-12.md`（320 行） | 23（不变） | 无 |
+| v0.29.6 ✅已交付 | 按下僵住修复＋审查第 0 轮 | 按下进度改由 clickable 的 `interactionSource.collectIsPressedAsState()` 驱动，抬手必归零、滑出收到 Cancel 也会放回；位移另用 `Initial` 阶段只读跟踪仅做液形拉伸。`DragGestureInspector` 加警告注释「别拿它给按钮做按下反馈」。UI 审查第 0 轮九条：`Glass.kt` clip 挪到 glassModifier 之后（原顺序让每帧 `BlurMaskFilter` 白跑）、`HomeCards` 列表行 `Card`→`Tile`、`FinchSheet`/`FinchDialog` 置空 backdrop＋关玻璃、`HeatmapCard` 年视图 365 格加 `remember`、`rememberSaveableStateHolder` 给每个 Tab 独立保存树（`StatsScreen` 的 mode/anchorMonth/weekStart 改 `rememberSaveable`）、`GameCover` 的 `ImageRequest` 加 `remember`、`HomeScreen` 把 `query` 移出 `LaunchedEffect` key、删 `ui/Motion.kt`、P0-A 分流（`catch` 保留 `failReason`，界面报具体原因；源真空走空态而非失败）。新增 `docs/UI_REVIEW_2026-11-13.md` 与三份子报告 | 23（不变） | 无 |
+| v0.29.7 ✅已交付 | 对比度＋快照时刻＋预览画廊 | 排行榜金银铜徽章白字对比度仅 1.80/2.19/2.98:1，字改深棕 `RankOnMetal = #241A05` 后 9.6/7.9/5.8:1 全过 AA。日程页离线回落缓存时不再假装数据是刚拉的：`fetchPsnEntries()` 返回 `Fetched(entries, staleAt)`，`LoadState.Ready` 加 `staleAt`，顶部插快照条（文案抽成纯函数 `staleSnapshotLabel` 并配 4 个单测）；缓存价不再写回关注表。新增 App 内预览画廊（设置→关于），渲染真实 composable（本机无 Android Studio，`@Preview` 的 layoutlib 跑不起来）。`app/build.gradle.kts` 加 Robolectric 离线罐查找，本机 220 个单测从 65 红转全绿 | 23（不变） | 无 |
 | 远期 / 明确不做 | — | 前台自动识别、账号云同步、国际化明确不做 | — | — |
 
 ```mermaid
@@ -507,6 +515,7 @@ gantt
 | 20 | v0.19.0（已交付） | `play_sessions.tag TEXT`（`MIGRATION_19_20`，无 DEFAULT；null = 未分类）；会话标签 + 记录页筛选 + 总结页标签分布；时长目标走 SettingsStore 不动 DB |
 | 21 | v0.19.1（已交付） | `play_sessions.note TEXT`（`MIGRATION_20_21`，无 DEFAULT；null = 没写）；单条记录备注，记录页/详情页可写可看，不进统计口径 |
 | 22 | v0.26.1（已交付） | 重建 `play_sessions` 去掉 `tag` 列（`MIGRATION_21_22`，保留 `note`）；标签功能整体删除，标签相关 DAO/ViewModel/卡片/筛选与海报格全部移除 |
+| 23 | v0.29.0（已交付） | `release_follows` 加 5 列（`priceText` / `basePriceText` / `discountText` / `saleEndIso` / `productId`，`MIGRATION_22_23` 是 5 条 `ALTER TABLE`）；愿望单价格快照 |
 
 备份恢复逻辑（`BackupManager.validate()`）按 `FINCH_DB_VERSION` 校验，跨版恢复走 Room 自动迁移，老备份可读。
 
@@ -537,3 +546,28 @@ gantt
 15. **v0.26.1 ✅**：删标签功能——会话标签、记录页筛选、总结页标签分布、战报主打标签全部移除，`tag` 列真删（DB 21→22）。减法版，备注功能保留。
 16. **v0.27.0 ✅**：作息按自然周独立（可翻页）＋ 通关进度写出超出/剩余 ＋ 白金奖杯手绘庆祝。修读法问题 + 两处手感，DB 不变。
 17. **v0.28.0 ✅**：日程页第五个源「PSN 港服」——预购新作 + 正在打折，行内出原价划线／折扣角标／截止日；照抄商店 persisted query，无依赖无 token，9 秒出结果并落本地缓存。
+18. **v0.29.x ✅**：**还债轮**——照 `docs/CODE_REVIEW_2026-11-12.md` 与 `docs/UI_REVIEW_2026-11-13.md` 逐条过。0.29.0 把日程源收敛到三源 + 加愿望单（DB 22→23）；0.29.1–0.29.3 日程卡片三次重排（入口回页头 → 价格独立成列 → 卡高 186→120dp）；0.29.4 主页控件区砍掉一半高度 + 新增 `accentText` token + 48dp 命中区 + `GameNameIndex`；0.29.5–0.29.6 按钮按压反馈两次修复（手绘判定 → interactionSource）；0.29.6 顺带把 UI 审查第 0 轮九条纯 bug 全落（clip 顺序、Tile 降档、弹层置空 backdrop、热力图 remember、每个 Tab 独立保存树、ImageRequest remember、搜索不拉回顶部、删 Motion.kt、错误原因分流）；0.29.7 补上审查点名但前几个版本漏掉的两条（徽章对比度、快照时刻），并把预览画廊与 Robolectric 离线化补进来。
+
+### 下一步候选（v0.30 起，均未拍板）
+
+按 `docs/UI_REVIEW_2026-11-13.md` 的分批路线，剩下的活按「要不要产品决策」分开：
+
+**不需要决策、可直接做**
+
+- 对比度剩下的三处（详情页悬浮顶栏 ≈2.0:1、「计时中」红徽章 3.91:1、选中态实底白字 3.70:1 → 需先定 `onPrimaryStrong` 用哪个值，只建一个 token）
+- 视觉方向 B「数据与交互分色」（`dataScale` / `PlatformPalette` / `MedalPalette`）——纯 token，零风险
+- 视觉方向 C「`FinchNumber` 数字系统」（`tnum` + 单位降档，解决计时器/价格抖动）
+- `finchClickable` 的无条件 `graphicsLayer`（`Tokens.kt:101-104`，两行改动可在稳态省掉全部 RenderNode）
+- 卡片三档归位：现在 `StoreEntryCard` 是 `Tile+card(24)`、`HistoryScreen` 是 `Tile+tile(18)`、`GameRowCard` 是 `Card+card(24)`，三种组合
+- `StatsCards.kt` 744 行拆 4 个文件（纯搬运，单独 commit）
+
+**需要先拍板**
+
+- **降价提醒**：愿望单现在只承诺「攒价格」，`ReleaseCheckWorker.kt:51-52` 的唯一判据是 `days in 0..notifyDays`，价格变化永不触发；`syncFollowPrices` 同步了价却不比较不通知。要么补（`ReleaseFollow` 加 `prevPriceText`/`lastNotifiedAt` + 新 channel），要么把文案从「降价会提醒你」改成「收藏到愿望单」——**不能继续挂着假承诺**
+- 取消关注单击即删、无确认无撤销（`WishlistPane.kt:162`）
+- 日程页三分段（时间轴 / 折扣 / 愿望单）+ tab 改名「发现」
+- 方向 A「中景补位」（需单独视觉评审，别与 Tile 降档同批）
+
+**基建**
+
+- `:benchmark` 模块 + 10 个 `testTag`（预览画廊已解决「不用真机也能看」，还没解决「自动化测」）

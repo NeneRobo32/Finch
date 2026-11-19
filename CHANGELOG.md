@@ -1,5 +1,145 @@
 # Changelog
 
+## 0.29.7 (2026-11-19)
+
+照 `docs/UI_REVIEW_2026-11-13.md` 的分批路线，把第 1 轮里不依赖产品决策的两条先做掉，
+再补上审查里点名「可测试性 2.0 分」的那件结构性欠账。
+
+### 排行榜徽章：白字压在金属底上看不见
+
+金银铜三块徽章底是 `#E8B63C` / `#A8B0BD` / `#C08A5E`，上面压的是 `Color.White`。
+实测算下来对比度只有 **1.80 / 2.19 / 2.98:1**，而徽章里的名次是 12sp，属于正文级字号，
+WCAG AA 要 4.5:1——三档全不达标，第一名那个几乎读不出来。
+
+改法按审查给的方向：**金属底保持明亮**（压深就不像金了），把字换成深棕 `RankOnMetal = #241A05`。
+改完是 9.6 / 7.9 / 5.8:1，三档都过 AA。第四名往后的 `RankNeutral` 本来就是浅灰底 + `onSurface`，
+没动。
+
+### 离线时不再假装价格是刚拉的
+
+日程页在联网失败时会静默回落到本地 `psn_json` 缓存，但界面上完全看不出来——
+页头副标题恒为「PSN 港服价格 / 游民星空 / eShop 三源聚合」，用户没法判断这个价格是今天的还是上周的。
+审查 P0-A 的验收标准写得明白：离线时必须出现「离线 · 数据为 11月2日 21:30 的快照」。
+
+- `UpcomingViewModel` 的 `fetchPsnEntries()` 返回值从 `List<UpcomingEntry>` 换成 `Fetched(entries, staleAt)`，
+  成功拉取时顺手把时刻写进 `psn_json_at`，失败回落时把这个时刻带出来
+- `LoadState.Ready` 加第三个字段 `staleAt: Long?`：`null` = 本次联网现拉，非空 = 本地快照时刻
+- 老缓存没有时间记录时给 `0L`，界面**不编造时间**，只说「价格来自上次同步的快照」
+- 日程页列表顶部插一条 `StaleSnapshotNote` 提示条（刷新图标 + 一句小字）
+- 缓存回落时不再把缓存价写回关注表（`syncFollowPrices` 只在 `staleAt == null` 时跑）——
+  缓存价可能已经过期，写回去会让愿望单里的价格看起来「刚刚更新过」
+
+文案渲染抽成纯函数 `staleSnapshotLabel(staleAt, nowMillis)`，配了 4 个单测
+（有时刻 / 无时刻 / 负数 / 前缀）。`addToLibrary` 里那次重发特意保留了原 `staleAt`，
+否则入库一下就把「离线」洗成「在线」，又回到骗人的状态。
+
+### 预览画廊：改 UI 不用每次都装到手机上
+
+审查里「可测试性 2.0」的原因很直白：全仓库 0 个 `@Preview`、0 个 `androidTest`、0 个 `testTag`，
+每次改个间距都得真机跑一遍。而本机没装 Android Studio，`@Preview` 靠 layoutlib 渲染，也跑不起来。
+
+所以做的是**App 内的预览画廊**（`ui/preview/PreviewGallery.kt`），设置 → 关于 → 「预览画廊」打开。
+它渲染的是真实 composable，不是抽出来的副本，一屏能看到：
+
+- 12 个语义色（primary / secondary / tertiary / surface / outline / accentText / 三档 glow / glassEdge）
+- 七档字号，外加一行 `12:34 · 123.5 小时`——用来肉眼判断数字会不会随数值变化抖动
+- 控件全集（按钮四态 / chip / 分段 / 输入框 / 开关 / 滑杆 / 勾选 / 进度 / 徽章 / 星星 / 空态 / 折叠组）
+- 四档玻璃各渲一片，标注模糊与折射参数；带一个玻璃开关，同一屏能对比开与关
+- 统计页的真实卡片（hero / 本期报告 / 平台 / 排行 / 热力图 / 作息）喂假数据渲染，
+  假数据刻意覆盖金/银/铜/中性四档排名
+
+画廊自己搭背景层并下发 `LocalFinchBackdrop`，所以玻璃在里面是真实采样，不是降级实底。
+入口没用 `FinchDialog`/`FinchSheet`——它们内部强制置空 backdrop 并关玻璃（弹层是独立窗口，
+采不到主界面），拿来做画廊只能看到实色，看不到真实观感。
+
+### 顺带：单测能在本机跑完了
+
+本机 `C:\Users\Administrator` 对 JDK 进程不可写，Robolectric 建不了下载锁文件
+（`Couldn't create lock file ...\.robolectric-download-lock`），65 个用例一直失败。
+`app/build.gradle.kts` 的 `testOptions` 加了一段：找到本地 `tools/robolectric-jars` 就设
+`robolectric.offline` + `robolectric.dependency.dir` 走离线 jar，找不到（比如 CI）自动回落到联网。
+
+### 合计
+
+测试 **220 全过**（216 + 新增 4 个快照文案用例），`:app:compileDebugKotlin` 零 warning。
+versionCode 105、versionName 0.29.7；DB 仍 23，无迁移。
+
+## 0.29.6 (2026-11-13)
+
+0.29.5 把按钮的按压反馈修回来了，但它是让自绘手势自己去猜「up 有没有被消费」——
+同一条 modifier 链上有 `clickable` 时，这个猜测迟早猜错，表现就是**按下之后高光僵住不放**。
+这版把按下进度交给 `interactionSource`，顺手把 UI 审查第 0 轮那九条纯 bug 全落了。
+
+### 按下进度改由 interactionSource 驱动
+
+`LiquidButton` 的按下进度现在是 clickable 的 `interactionSource.collectIsPressedAsState()`：
+按下开始、抬手必归零。手指按住后滑出按钮时，`interactionSource` 收到的是 **Cancel**，
+同样会把进度放回去，不会卡在按下态。手指位移另用 `Initial` 阶段「只读」跟踪，
+只为液形拉伸，不参与任何结束判定。
+
+`DragGestureInspector` 头部加了警告注释：**不要拿它给按钮做按下反馈**，
+按钮请把 interactionSource 交给 clickable。滑杆 / 开关 / 底栏拖选继续用它。
+
+### UI 审查第 0 轮九条
+
+- **`Glass.kt` clip 顺序**：`.clip(shape)` 原来排在 glassModifier 之前，18dp 阴影画在裁剪之后
+  被自己裁掉，但**每帧的 `BlurMaskFilter` 照跑**——纯白烧。挪到 glassModifier 之后，
+  它只裁内容（涟漪、封面），阴影就出来了
+- **`HomeCards` 列表行 `Card` → `Tile`**：那一行内容全是 `Text`，没有任何控件采样导出的层，
+  用 Card 档等于每行白录一张离屏层
+- **`FinchSheet` / `FinchDialog` 置空 backdrop + 关玻璃**：弹层是独立窗口，采不到也不该采主界面背景层，
+  原来 32 个 chip 跨窗口采样，与 `UI_DESIGN_GUIDE §3.1` 的禁令相反
+- **`HeatmapCard` 年视图加 `remember`**：365 格、每格一次 `String.format`，原来随每次重组重算，
+  现在按 `(ym, byDay)` 记住
+- **每个 Tab 一棵独立的保存树**：`rememberSaveableStateHolder()` +
+  `SaveableStateProvider(t.name)`，切走再切回来，滚动位置、展开状态、搜索框内容都还在；
+  `StatsScreen` 的 `mode`/`anchorMonth`/`weekStart` 同步改 `rememberSaveable`
+  （`YearMonth` / `LocalDate` 用 `Saver` 存 `toString()`）
+- **`GameCover` 的 `ImageRequest` 加 `remember`**：原来每次重组新建，AsyncImage 会当成换了一次请求，
+  重新解析尺寸、重新查缓存
+- **`HomeScreen` 把 `query` 从 `LaunchedEffect` key 里删掉**：搜索是在已加载列表里本地过滤，
+  打字时把列表拉回顶部，会甩掉用户刚滚到的结果
+- **删 `ui/Motion.kt`**：文件外零引用
+- **P0-A 分流**：`catch` 不再把异常吞成 `emptyList()`，`failReason = friendMsg(e)` 带出真实原因
+  （超时 / DNS / SSL），界面报「XX 加载失败：具体原因」；源真的返回空列表时走空态，
+  不再误报「网络或源问题」让人一直点重试
+
+### 文档
+
+新增 `docs/UI_REVIEW_2026-11-13.md`（三路交叉审查的收敛结果）与三份子报告
+（`docs/_ui_review_2026-11-13/impl.md`、`ux.md`、`visual.md`）。
+
+### 合计
+
+测试 216 通过，编译 0 warning。versionCode 104，versionName 0.29.6。DB 仍 23，无迁移。
+
+## 0.29.5 (2026-11-12)
+
+按钮点下去没有任何反馈——不是动画太轻，是**点到为止的短按永远走不到结束回调**，
+高光根本没机会出现。这版修掉它，并把积攒的两份审查报告与设计指导一起入库。
+
+### 点击为什么没有按压反馈
+
+`LiquidButton` 的按下形变原本用自绘的 `DragGestureInspector` 判定结束，而它认的是
+`changedToUpIgnoreConsumed()`——**但同一条 modifier 链上还有 `clickable`，up 事件会被它先消费**，
+这个判定于是永远为 false，`onDragEnd` 收不到，按压高光就卡住或干脆不出现。
+
+改法：结束判定只认 `pressed`，被消费的 up 也要能结束等待。另加按下提亮——
+`pressProgress` 驱动表面叠一层 `Color.White.copy(alpha = 0.14f * press)`，
+强度随按深、松开随弹簧回弹淡出，短暂点击也能看到可感知的高光。
+
+> 事后看，这个修法还没修到根上（仍在让自绘手势猜 up 有没有被消费），0.29.6 换成了 interactionSource。
+
+### 文档
+
+新增 `docs/UI_DESIGN_GUIDE.md`（238 行：组件分层、弹层禁止采样、玻璃层级、命中区与对比度要求）、
+`docs/CODE_REVIEW_2026-11-12.md`（693 行：安全 / 性能 / 正确性）、
+`docs/UI_REVIEW_2026-11-12.md`（320 行）。
+
+### 合计
+
+测试 216 通过，编译 0 warning。versionCode 103，versionName 0.29.5。DB 仍 23，无迁移。
+
 ## 0.29.4 (2026-11-12)
 
 这一版是照 UI / 代码两份审查报告逐条过了一遍，挑出值得做的合入。核心是三件事：

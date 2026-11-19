@@ -39,8 +39,8 @@ android {
         applicationId = "dev.cao.finch"
         minSdk = 26
         targetSdk = 36
-        versionCode = 104
-        versionName = "0.29.6"
+        versionCode = 105
+        versionName = "0.29.7"
     }
 
     signingConfigs {
@@ -89,6 +89,22 @@ android {
     testOptions {
         // Robolectric 需要真实资源表（迁移测试用 application context 挂 Room）
         unitTests.isIncludeAndroidResources = true
+        // 本机 `C:\Users\<user>` 不可写：Robolectric 默认要在那里建 `.robolectric-download-lock`
+        // 并联网拉 android-all，于是所有 @Config(sdk=[34/35]) 的用例集体报
+        // `IllegalStateException: Couldn't create lock file`。
+        // 仓库外备了一份 jar（tools/robolectric-jars，路径可用 FINCH_ROBOLECTRIC_DIR 覆盖），
+        // 存在就直接离线读；CI 上该目录不存在，仍走默认联网逻辑。
+        val robolectricJarsDir: File? = listOfNotNull(
+            System.getenv("FINCH_ROBOLECTRIC_DIR")?.let { file(it) },
+            file("$rootDir/tools/robolectric-jars"),
+            file("$rootDir/../tools/robolectric-jars"),
+        ).firstOrNull { it.isDirectory }
+        if (robolectricJarsDir != null) {
+            unitTests.all {
+                it.systemProperty("robolectric.offline", "true")
+                it.systemProperty("robolectric.dependency.dir", robolectricJarsDir.absolutePath)
+            }
+        }
     }
 }
 
