@@ -1,6 +1,6 @@
 # Changelog
 
-## 未发布（0.29.12 待发）
+## 0.29.12 (2026-11-20)
 
 ### 其余卡片的同一处隐患：换期时先归零再填回
 
@@ -27,7 +27,7 @@
   新页面先空再填是正常表现，不属于「同屏刷新」。
 - 其余 40 余处都是 ViewModel 的固定 StateFlow（`games` / `state` / `syncing` 之类），换窗口不会先吐空值。
 
-测试 220 全过，`lintDebug` 无 error。versionCode / versionName 未动（仍 109 / 0.29.11）。
+测试 220 全过，`lintDebug` 无 error。versionCode 110 / versionName 0.29.12，DB 仍 v23 无迁移。
 
 ## 0.29.11 (2026-11-20)
 
