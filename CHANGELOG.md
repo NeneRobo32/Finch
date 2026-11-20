@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.29.9 (2026-11-20)
+
+### 排行切周/切月不再抽搐
+
+0.29.8 的排行卡是整块替换：点「周」或「月」，列表瞬间换掉，行数一变卡片高度立刻跳，
+没有任何过渡。两处根因：
+
+1. 列表直接 `forEachIndexed` 渲染，`scope` / `weekStart` 一变就是另一批行。
+2. 换周时 `remember(rhythmFrom, rhythmTo) { viewModel.topGamesWithCover(...) }` 会建一个新 Flow，
+   `collectAsState(initial = emptyList())` 先吐**空列表**——界面先空一帧再填满，看着就是抽一下。
+
+改法：
+
+- 列表走 `AnimatedContent`，`targetState` 是 `RankContent(scope, weekStart, games)` 这个 data class。
+  结构相等就不重播，只有真的换周换月才动：淡入 200ms + 上浮 1/16 高度 260ms，旧内容淡出 120ms，
+  高度用 `SizeTransform(clip = true)` 跟着补间，不再一步跳到新高度。
+- 周切换条从 `if` 改成 `AnimatedVisibility`（`expandVertically` + 淡入），
+  展开收起时不再把下面的行整体挤一下。
+- 新增 `StatsScreen.collectRetaining(initial)` 替代 `collectAsState(initial)`：
+  换源时**留住上一份数据**，等新查询回来才覆盖。换周不再闪过「这一周还没有记录」。
+- 标题副标题两种情况都给文字（「按周 · 与作息卡同一周」/「按整月 · 与上方区间一致」），
+  只在一侧留字会让标题行高度跟着切。
+- 每行**拿掉**了 `finchEnter` 错峰入场：外层已经在做整块过渡，十行再各自错峰上浮就是满屏乱窜——
+  动效只留一层，往上叠只会互相打架。
+
 ## 0.29.8 (2026-11-20)
 
 ### 游戏排行可以按周看了

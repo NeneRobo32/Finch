@@ -1,12 +1,18 @@
 package dev.cao.finch.ui
 
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
@@ -57,6 +63,7 @@ import dev.cao.finch.data.TopGameRow
 import dev.cao.finch.ui.design.FinchCard
 import dev.cao.finch.ui.design.FinchIconButton
 import dev.cao.finch.ui.design.FinchInsetDivider
+import dev.cao.finch.ui.design.FinchMotion
 import dev.cao.finch.ui.design.FinchSegmented
 import dev.cao.finch.ui.design.FinchSpace
 import dev.cao.finch.ui.design.GlassStyle
@@ -341,12 +348,29 @@ internal fun PlatformCard(platforms: List<PlatformTotal>, totalMs: Long) {
 internal enum class RankScope { WEEK, MONTH }
 
 /**
+ * 排行卡当前要显示的内容。
+ *
+ * 包成 data class 是为了能当 [AnimatedContent] 的 targetState：
+ * 结构相等 → 数据没变就不会重播动画，换周/换月才播。
+ */
+private data class RankContent(
+    val scope: RankScope?,
+    val weekStart: LocalDate?,
+    val games: List<TopGameRow>,
+)
+
+/**
  * 游戏排行：封面 + 排名徽章 + 名字 + 时长（前 3 金银铜）。
  *
  * v0.29.8：月视图下可以在「周 / 月」之间切。周口径**复用作息卡那一个 weekStart**，
  * 两张卡任一处翻周另一处跟着走，读起来永远是同一周的数据；
  * 原来排行固定按整月算，和作息卡按周算摆在一起，两处数字对不上。
  * `scope == null` 时不显示切换（年视图、年度报告、预览画廊）。
+ *
+ * v0.29.9：切周/切月不再整块闪现。此前列表是直接替换的，界面「抽搐」两下就换完了：
+ * 行数一变卡片高度立刻跳，周切换条凭空出现/消失。现在
+ * · 列表走 [AnimatedContent]，交叉淡入 + 轻微上浮，高度用 [SizeTransform] 补间；
+ * · 周切换条走 [AnimatedVisibility] 展开/收起，不再挤压下面的行。
  */
 @Composable
 internal fun TopGamesCard(
@@ -360,7 +384,12 @@ internal fun TopGamesCard(
     val byWeek = scope == RankScope.WEEK
     FinchCard(
         title = "游戏排行",
-        subtitle = if (byWeek) "按周 · 与作息卡同一周" else null,
+        // 两种情况都带副标题：只在一侧留文字会让标题行高度跟着切换跳
+        subtitle = when (scope) {
+            null -> null
+            RankScope.WEEK -> "按周 · 与作息卡同一周"
+            RankScope.MONTH -> "按整月 · 与上方区间一致"
+        },
         icon = Icons.Filled.Leaderboard,
     ) {
         if (scope != null && onScopeChange != null) {
@@ -372,98 +401,139 @@ internal fun TopGamesCard(
             )
             Spacer(Modifier.height(FinchSpace.sm))
         }
-        if (byWeek && weekStart != null && thisWeekStart != null && onWeekChange != null) {
-            WeekSwitcher(
-                weekStart = weekStart,
-                thisWeekStart = thisWeekStart,
-                onWeekChange = onWeekChange,
-            )
-            Spacer(Modifier.height(FinchSpace.sm))
-        }
-        if (topGames.isEmpty()) {
-            Text(
-                if (byWeek) "这一周还没有记录" else "这段时间还没有记录",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            return@FinchCard
-        }
-        val shown = topGames.take(10)
-        shown.forEachIndexed { i, g ->
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = FinchSpace.sm),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Box(
-                    Modifier
-                        .size(28.dp)
-                        .clip(CircleShape)
-                        .background(rankColor(i)),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(
-                        "${i + 1}",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = if (i < 3) RankOnMetal else MaterialTheme.colorScheme.onSurface,
+        // 周切换条按需展开/收起：直接 if 会让下面的行整体弹一下
+        AnimatedVisibility(
+            visible = byWeek && weekStart != null && thisWeekStart != null && onWeekChange != null,
+            enter = expandVertically(
+                animationSpec = FinchMotion.settle(),
+                expandFrom = Alignment.Top,
+            ) + fadeIn(animationSpec = tween(180)),
+            exit = shrinkVertically(
+                animationSpec = FinchMotion.settle(),
+                shrinkTowards = Alignment.Top,
+            ) + fadeOut(animationSpec = tween(120)),
+            label = "rankWeekSwitcher",
+        ) {
+            Column {
+                if (weekStart != null && thisWeekStart != null && onWeekChange != null) {
+                    WeekSwitcher(
+                        weekStart = weekStart,
+                        thisWeekStart = thisWeekStart,
+                        onWeekChange = onWeekChange,
                     )
                 }
-                Spacer(Modifier.width(FinchSpace.md))
-                Box(
-                    Modifier
-                        .size(46.dp)
-                        .clip(FinchShapes.thumb)
-                        .background(platformColor(g.platform)),
-                ) {
-                    GameCover(
-                        url = g.coverUrl,
-                        contentDescription = null,
-                        modifier = Modifier.fillMaxSize(),
-                        requestSize = 92,
-                    )
-                }
-                Spacer(Modifier.width(FinchSpace.md))
-                Column(
-                    modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(3.dp),
-                ) {
+                Spacer(Modifier.height(FinchSpace.sm))
+            }
+        }
+        AnimatedContent(
+            targetState = RankContent(scope, weekStart, topGames),
+            transitionSpec = {
+                (fadeIn(animationSpec = tween(200)) +
+                    slideInVertically(animationSpec = tween(260, easing = FastOutSlowInEasing)) { h -> h / 16 })
+                    .togetherWith(fadeOut(animationSpec = tween(120)))
+                    .using(SizeTransform(clip = true) { _, _ -> FinchMotion.settle() })
+            },
+            label = "rankContent",
+        ) { content ->
+            Column {
+                if (content.games.isEmpty()) {
                     Text(
-                        g.name,
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.Medium,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    Text(
-                        platformLabel(g.platform) + " · ${g.sessionCount} 次",
-                        style = MaterialTheme.typography.labelSmall,
+                        if (content.scope == RankScope.WEEK) "这一周还没有记录" else "这段时间还没有记录",
+                        style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                }
-                Spacer(Modifier.width(FinchSpace.sm))
-                Column(
-                    horizontalAlignment = Alignment.End,
-                    verticalArrangement = Arrangement.spacedBy(3.dp),
-                ) {
-                    Text(
-                        TimeFormatter.hoursMinutes(Duration.ofMillis(g.totalMs)),
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                    if (g.steamPlaytimeMin != null && g.steamPlaytimeMin > 0) {
-                        Text(
-                            "Steam ${TimeFormatter.hoursMinutes(Duration.ofMinutes(g.steamPlaytimeMin))}",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
+                } else {
+                    val shown = content.games.take(10)
+                    shown.forEachIndexed { i, g ->
+                        TopGameRowItem(i, g, last = i == shown.lastIndex)
                     }
                 }
             }
-            if (i != shown.lastIndex) FinchInsetDivider(startIndent = 40.dp)
         }
     }
+}
+
+/**
+ * 排行里的一行：名次徽章 + 封面 + 名字/次数 + 时长。
+ *
+ * 刻意**不加** [finchEnter]：外层已经是 `AnimatedContent`，换周换月时整块做
+ * 淡入 + 上浮；行再各自来一遍错峰入场，十行叠起来就是满屏乱窜，
+ * 正是用户说的「抽搐」。动效只留一层，往上叠只会互相打架。
+ */
+@Composable
+private fun TopGameRowItem(index: Int, row: TopGameRow, last: Boolean) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = FinchSpace.sm),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            Modifier
+                .size(28.dp)
+                .clip(CircleShape)
+                .background(rankColor(index)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                "${index + 1}",
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
+                color = if (index < 3) RankOnMetal else MaterialTheme.colorScheme.onSurface,
+            )
+        }
+        Spacer(Modifier.width(FinchSpace.md))
+        Box(
+            Modifier
+                .size(46.dp)
+                .clip(FinchShapes.thumb)
+                .background(platformColor(row.platform)),
+        ) {
+            GameCover(
+                url = row.coverUrl,
+                contentDescription = null,
+                modifier = Modifier.fillMaxSize(),
+                requestSize = 92,
+            )
+        }
+        Spacer(Modifier.width(FinchSpace.md))
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(3.dp),
+        ) {
+            Text(
+                row.name,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                platformLabel(row.platform) + " · ${row.sessionCount} 次",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Spacer(Modifier.width(FinchSpace.sm))
+        Column(
+            horizontalAlignment = Alignment.End,
+            verticalArrangement = Arrangement.spacedBy(3.dp),
+        ) {
+            Text(
+                TimeFormatter.hoursMinutes(Duration.ofMillis(row.totalMs)),
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+            if (row.steamPlaytimeMin != null && row.steamPlaytimeMin > 0) {
+                Text(
+                    "Steam ${TimeFormatter.hoursMinutes(Duration.ofMinutes(row.steamPlaytimeMin))}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+    if (!last) FinchInsetDivider(startIndent = 40.dp)
 }
 
 /** 热力图：月=当月每天一格，年=每月一列；峰值高亮 */

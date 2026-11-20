@@ -1,6 +1,6 @@
 # Finch 路线图
 
-基线：`v0.29.8`（DB v23，versionCode 106）。
+基线：`v0.29.9`（DB v23，versionCode 107）。
 IGDB 已整体移除（国内直连不通）；HLTB 改走 Crashdummy 中转 API（Steam 直查+Nlib 英文名+按名搜，默认开、可一键关）；非英文库名走英文名解析链换英文线索再搜（Steam 中文反查/Bangumi 原名/eShop 英文段/游民星空/机翻已移除，v0.15.15–0.15.18）。
 下阶段主题：**待定**。v0.26 系列只做减法与纠错、不加功能——v0.26 修总结页三处显示口径（作息／高峰时段改看最近 90 天并按时长摊分、删与热力图重复的「活动」卡、总时长 hero 改玻璃），v0.26.1 把标签功能整体删掉（连同 `play_sessions.tag` 列，DB 21→22）。v0.27 修掉「90 天窗口把上周末算进本周」的读法问题（作息改按自然周独立、可翻页），并把通关进度写出超出／剩余、PSN 拿到白金时弹手绘庆祝。v0.28 给日程页新增第五个源「PSN 港服」：预购新作 + 正在打折，行内出原价划线／折扣角标／截止日。到此已经没有待办的技术债。
 
@@ -61,6 +61,7 @@ IGDB 已整体移除（国内直连不通）；HLTB 改走 Crashdummy 中转 API
 | v0.29.6 ✅已交付 | 按下僵住修复＋审查第 0 轮 | 按下进度改由 clickable 的 `interactionSource.collectIsPressedAsState()` 驱动，抬手必归零、滑出收到 Cancel 也会放回；位移另用 `Initial` 阶段只读跟踪仅做液形拉伸。`DragGestureInspector` 加警告注释「别拿它给按钮做按下反馈」。UI 审查第 0 轮九条：`Glass.kt` clip 挪到 glassModifier 之后（原顺序让每帧 `BlurMaskFilter` 白跑）、`HomeCards` 列表行 `Card`→`Tile`、`FinchSheet`/`FinchDialog` 置空 backdrop＋关玻璃、`HeatmapCard` 年视图 365 格加 `remember`、`rememberSaveableStateHolder` 给每个 Tab 独立保存树（`StatsScreen` 的 mode/anchorMonth/weekStart 改 `rememberSaveable`）、`GameCover` 的 `ImageRequest` 加 `remember`、`HomeScreen` 把 `query` 移出 `LaunchedEffect` key、删 `ui/Motion.kt`、P0-A 分流（`catch` 保留 `failReason`，界面报具体原因；源真空走空态而非失败）。新增 `docs/UI_REVIEW_2026-11-13.md` 与三份子报告 | 23（不变） | 无 |
 | v0.29.7 ✅已交付 | 对比度＋快照时刻＋预览画廊 | 排行榜金银铜徽章白字对比度仅 1.80/2.19/2.98:1，字改深棕 `RankOnMetal = #241A05` 后 9.6/7.9/5.8:1 全过 AA。日程页离线回落缓存时不再假装数据是刚拉的：`fetchPsnEntries()` 返回 `Fetched(entries, staleAt)`，`LoadState.Ready` 加 `staleAt`，顶部插快照条（文案抽成纯函数 `staleSnapshotLabel` 并配 4 个单测）；缓存价不再写回关注表。新增 App 内预览画廊（设置→关于），渲染真实 composable（本机无 Android Studio，`@Preview` 的 layoutlib 跑不起来）。`app/build.gradle.kts` 加 Robolectric 离线罐查找，本机 220 个单测从 65 红转全绿 | 23（不变） | 无 |
 | v0.29.8 ✅已交付 | 排行周/月切换 | 总结页排行原来固定按「当期」算（月视图=整月），与上方按单独一周看的作息卡口径对不上。排行卡加「周 / 月」切换，周口径复用作息卡那一个 `weekStart`，两卡翻周联动；年视图自动隐藏切换并强制按月；空周给「这一周还没有记录」而不是吞掉整卡；新增 `RankScope` 枚举与 `TopGamesCard` 的 5 个可选参数（默认行为不变，年度报告传 null 即不显示切换；预览画廊接上了切换便于自查）。数据层零改动，只是换了 `topGamesWithCover(from, to)` 的窗口 | 23（不变） | 无 |
+| v0.29.9 ✅已交付 | 排行切周/切月过渡 | 0.29.8 切口径是整块替换，没有过渡：列表直接 `forEachIndexed`，换周换月就是另一批行；`collectAsState(initial = emptyList())` 在换源时先吐空列表，界面空一帧再填满。改法：列表走 `AnimatedContent`（`targetState` 为 `RankContent` data class，结构相等不重播）+ 淡入上浮、旧内容淡出、高度 `SizeTransform` 补间；周切换条改 `AnimatedVisibility` 展开收起；新增 `StatsScreen.collectRetaining()` 换源保留上一份数据；副标题两侧都给文字避免高度跳；每行拿掉 `finchEnter` 避免与整块过渡叠加乱窜 | 23（不变） | 无 |
 | 远期 / 明确不做 | — | 前台自动识别、账号云同步、国际化明确不做 | — | — |
 
 ```mermaid

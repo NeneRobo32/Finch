@@ -47,6 +47,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -87,6 +88,7 @@ import dev.cao.finch.ui.share.PosterShare
 import dev.cao.finch.ui.share.ReportPoster
 import dev.cao.finch.ui.share.posterPalette
 import dev.cao.finch.ui.theme.FinchShapes
+import kotlinx.coroutines.flow.Flow
 import java.time.Duration
 import java.time.LocalDate
 import java.time.YearMonth
@@ -94,6 +96,22 @@ import java.time.ZoneId
 import kotlin.math.max
 enum class StatsMode { MONTH, YEAR }
 private data class Quint<A, B, C, D, E>(val first: A, val second: B, val third: C, val fourth: D, val fifth: E)
+
+/**
+ * 像 [collectAsState] 一样收 Flow，但**换源时保留上一份数据**，等新查询回来再替换。
+ *
+ * 为什么不直接用 `collectAsState(initial = emptyList())`：换周/换月时会
+ * `remember(...)` 建一个新 Flow，新 Flow 的第一发还没回来，界面先拿到的是
+ * `initial`（空列表）——排行卡于是「空一帧再填满」，看着就是抽一下。
+ * 这里把上一次的值留住，新值到了才覆盖；只有真的没有数据时才显示空态。
+ */
+@Composable
+private fun <T> Flow<T>.collectRetaining(initial: T): State<T> {
+    // 注意 state 不能 remember(this)：换 Flow 就重建的话又回到 initial 了
+    val state = remember { mutableStateOf(initial) }
+    LaunchedEffect(this) { collect { state.value = it } }
+    return state
+}
 
 /**
  * 总结页（2026-10 UI 重构）：
@@ -152,7 +170,7 @@ fun StatsScreen(viewModel: FinchViewModel) {
     val platforms by remember(fromMillis, toMillis) { viewModel.platformTotals(fromMillis, toMillis) }
         .collectAsState(initial = emptyList())
     val topGames by remember(fromMillis, toMillis) { viewModel.topGamesWithCover(fromMillis, toMillis) }
-        .collectAsState(initial = emptyList())
+        .collectRetaining(emptyList())
     // v0.29.8：排行可以在「周 / 月」之间切。周口径复用作息卡那一个 weekStart，
     // 两张卡翻周到同一处，避免「作息按周、排行按整月」两个口径摆一起对不上数。
     // 默认给「周」：作息卡本来就是按周看的，进来先看到同一周的两个视角。
@@ -190,7 +208,7 @@ fun StatsScreen(viewModel: FinchViewModel) {
     val hours = rhythm.hours
     // 周口径的排行：窗口与作息卡同一周，用同一组 rhythmFrom/rhythmTo，不另算
     val weekTopGames by remember(rhythmFrom, rhythmTo) { viewModel.topGamesWithCover(rhythmFrom, rhythmTo) }
-        .collectAsState(initial = emptyList())
+        .collectRetaining(emptyList())
     val shownTopGames = if (effectiveRankScope == RankScope.WEEK) weekTopGames else topGames
     val months by remember(fromMillis, toMillis) { viewModel.monthTotals(fromMillis, toMillis) }
         .collectAsState(initial = emptyList())
