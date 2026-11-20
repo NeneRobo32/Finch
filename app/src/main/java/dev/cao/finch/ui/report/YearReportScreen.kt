@@ -46,6 +46,7 @@ import dev.cao.finch.R
 import dev.cao.finch.TimeFormatter
 import dev.cao.finch.data.Game
 import dev.cao.finch.ui.FinchViewModel
+import dev.cao.finch.ui.collectRetaining
 import dev.cao.finch.ui.HeatmapCard
 import dev.cao.finch.ui.HeroTotalCard
 import dev.cao.finch.ui.PlatformCard
@@ -97,14 +98,16 @@ fun YearReportScreen(
         LocalDate.of(year - 1, 1, 1).atStartOfDay(zone).toInstant().toEpochMilli()
     }
 
+    // 换年时窗口变、Flow 重建：保留上一份数据，等新查询回来再整体替换，
+    // 免得 HeroTotalCard 的大数字先跳 0、热力图先全空一帧。
     val total by remember(fromMillis, toMillis) { viewModel.totalBetween(fromMillis, toMillis) }
-        .collectAsState(0L)
+        .collectRetaining(0L)
     val prevTotal by remember(prevFromMillis, fromMillis) { viewModel.totalBetween(prevFromMillis, fromMillis) }
-        .collectAsState(0L)
+        .collectRetaining(0L)
     val daily by remember(fromMillis, toMillis) { viewModel.dailyTotals(fromMillis, toMillis) }
-        .collectAsState(emptyList())
+        .collectRetaining(emptyList())
     val months by remember(fromMillis, toMillis) { viewModel.monthTotals(fromMillis, toMillis) }
-        .collectAsState(emptyList())
+        .collectRetaining(emptyList())
     // v0.27：年度报告里的作息就该是「这一年」，不再借用最近的滚动窗口
     val spans by remember(fromMillis, toMillis) { viewModel.sessionSpans(fromMillis, toMillis) }
         .collectAsState(emptyList())
@@ -112,11 +115,11 @@ fun YearReportScreen(
     val weekday = rhythm.weekday
     val hours = rhythm.hours
     val platforms by remember(fromMillis, toMillis) { viewModel.platformTotals(fromMillis, toMillis) }
-        .collectAsState(emptyList())
+        .collectRetaining(emptyList())
     val topGames by remember(fromMillis, toMillis) { viewModel.topGamesWithCover(fromMillis, toMillis) }
-        .collectAsState(emptyList())
+        .collectRetaining(emptyList())
     val distinctGames by remember(fromMillis, toMillis) { viewModel.distinctGamesInRange(fromMillis, toMillis) }
-        .collectAsState(0)
+        .collectRetaining(0)
     val totalsMap by viewModel.totalsMap.collectAsState()
     val steamMin by remember { viewModel.steamTotalMinutes() }.collectAsState(0L)
 

@@ -1,5 +1,34 @@
 # Changelog
 
+## 未发布（0.29.12 待发）
+
+### 其余卡片的同一处隐患：换期时先归零再填回
+
+0.29.11 只修了作息卡。收尾时按同一模式把全工程 `collectAsState` 过了一遍
+（102 个文件 / 62 处），确认「随窗口重建的 Flow + `initial` 空值」这个组合还有几处，
+一起改成保留上一份：
+
+- `StatsScreen.kt`：`total` / `prevTotal` / `daily` / `platforms` / `distinctGames` / `months`
+  六条从 `collectAsState(initial = ...)` 改为 `collectRetaining(...)`。
+  它们分别是 `HeroTotalCard` / `MonthReportCard` / `HeatmapCard` / `PlatformCard` /
+  `RhythmCard(months)` 的数据源，换月换年时原本会先跳 0、先全空一帧、先消失再长回来。
+  其中 `MonthReportCard`、`HeatmapCard`、`PlatformCard` 都用 `isNotEmpty()` 当显示条件，
+  空那一帧会让整张卡先消失再出现，高度一跳比数字跳更显眼。
+- `YearReportScreen.kt`：`total` / `prevTotal` / `daily` / `months` / `platforms` / `topGames` /
+  `distinctGames` 同样处理。这一屏的 `year` 在进入时固定，属防御性改动，不是可观测的 bug。
+- 把 `collectRetaining` 从 `StatsScreen.kt` 的 private 扩展函数提到新文件
+  `ui/FlowState.kt`（`internal`），年度报告页才能复用；`RhythmWindow` 一并挪过去。
+  语义没变，仍是「换源时保留上一份，新值到了才覆盖」。
+
+没有改的：
+
+- `HomeScreen.kt:179-184` 的 `thisMonthTotal` / `topMonth`：`remember {}` 不带 key，窗口本身不会变。
+- `GameDetailScreen.kt:104-106`：`remember(game.id)` 确实随游戏变，但换游戏是整页导航，
+  新页面先空再填是正常表现，不属于「同屏刷新」。
+- 其余 40 余处都是 ViewModel 的固定 StateFlow（`games` / `state` / `syncing` 之类），换窗口不会先吐空值。
+
+测试 220 全过，`lintDebug` 无 error。versionCode / versionName 未动（仍 109 / 0.29.11）。
+
 ## 0.29.11 (2026-11-20)
 
 ### 换周抽动的真正来源：作息卡的柱子先塌再长
