@@ -47,9 +47,11 @@ import dev.cao.finch.ui.HeatmapCard
 import dev.cao.finch.ui.HeroTotalCard
 import dev.cao.finch.ui.MonthReportCard
 import dev.cao.finch.ui.PlatformCard
+import dev.cao.finch.ui.RankScope
 import dev.cao.finch.ui.RhythmCard
 import dev.cao.finch.ui.StatsMode
 import dev.cao.finch.ui.TopGamesCard
+import dev.cao.finch.ui.weekStartOf
 import dev.cao.finch.ui.design.FinchBackdrop
 import dev.cao.finch.ui.design.FinchBadge
 import dev.cao.finch.ui.design.FinchButton
@@ -83,6 +85,7 @@ import dev.cao.finch.ui.theme.BackgroundStyle
 import dev.cao.finch.ui.theme.FinchShapes
 import dev.cao.finch.ui.theme.LocalGlassEnabled
 import dev.cao.finch.ui.theme.finchBundle
+import java.time.LocalDate
 import java.time.YearMonth
 
 /**
@@ -107,6 +110,9 @@ fun PreviewGallery(onClose: () -> Unit) {
     var showSheet by remember { mutableStateOf(false) }
     var chip by remember { mutableStateOf(1) }
     var mode by remember { mutableStateOf(StatsMode.MONTH) }
+    var rankScope by remember { mutableStateOf(RankScope.WEEK) }
+    val thisWeekStart = remember { weekStartOf(LocalDate.now()) }
+    var weekStart by remember { mutableStateOf(thisWeekStart) }
     var text by remember { mutableStateOf("") }
     var toggle by remember { mutableStateOf(true) }
     var check by remember { mutableStateOf(true) }
@@ -286,7 +292,14 @@ fun PreviewGallery(onClose: () -> Unit) {
                 Spacer(Modifier.height(FinchSpace.md))
                 PlatformCard(platforms = Demo.platforms, totalMs = Demo.totalMs)
                 Spacer(Modifier.height(FinchSpace.md))
-                TopGamesCard(topGames = Demo.top)
+                TopGamesCard(
+                    topGames = Demo.top,
+                    scope = rankScope,
+                    onScopeChange = { rankScope = it },
+                    weekStart = weekStart,
+                    thisWeekStart = thisWeekStart,
+                    onWeekChange = { weekStart = it },
+                )
                 Spacer(Modifier.height(FinchSpace.md))
                 HeatmapCard(daily = Demo.daily, mode = mode, anchorMonth = YearMonth.now())
                 Spacer(Modifier.height(FinchSpace.md))

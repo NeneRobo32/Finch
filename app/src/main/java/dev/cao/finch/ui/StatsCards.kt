@@ -57,6 +57,7 @@ import dev.cao.finch.data.TopGameRow
 import dev.cao.finch.ui.design.FinchCard
 import dev.cao.finch.ui.design.FinchIconButton
 import dev.cao.finch.ui.design.FinchInsetDivider
+import dev.cao.finch.ui.design.FinchSegmented
 import dev.cao.finch.ui.design.FinchSpace
 import dev.cao.finch.ui.design.GlassStyle
 import dev.cao.finch.ui.design.GlassSurface
@@ -336,11 +337,59 @@ internal fun PlatformCard(platforms: List<PlatformTotal>, totalMs: Long) {
     }
 }
 
-/** 游戏排行：封面 + 排名徽章 + 名字 + 时长（前 3 金银铜） */
+/** 排行口径：周（与作息卡共用同一周）/ 期（跟随上方的月或年切换） */
+internal enum class RankScope { WEEK, MONTH }
+
+/**
+ * 游戏排行：封面 + 排名徽章 + 名字 + 时长（前 3 金银铜）。
+ *
+ * v0.29.8：月视图下可以在「周 / 月」之间切。周口径**复用作息卡那一个 weekStart**，
+ * 两张卡任一处翻周另一处跟着走，读起来永远是同一周的数据；
+ * 原来排行固定按整月算，和作息卡按周算摆在一起，两处数字对不上。
+ * `scope == null` 时不显示切换（年视图、年度报告、预览画廊）。
+ */
 @Composable
-internal fun TopGamesCard(topGames: List<TopGameRow>) {
-    FinchCard(title = "游戏排行", icon = Icons.Filled.Leaderboard) {
-        topGames.take(10).forEachIndexed { i, g ->
+internal fun TopGamesCard(
+    topGames: List<TopGameRow>,
+    scope: RankScope? = null,
+    onScopeChange: ((RankScope) -> Unit)? = null,
+    weekStart: LocalDate? = null,
+    thisWeekStart: LocalDate? = null,
+    onWeekChange: ((LocalDate) -> Unit)? = null,
+) {
+    val byWeek = scope == RankScope.WEEK
+    FinchCard(
+        title = "游戏排行",
+        subtitle = if (byWeek) "按周 · 与作息卡同一周" else null,
+        icon = Icons.Filled.Leaderboard,
+    ) {
+        if (scope != null && onScopeChange != null) {
+            FinchSegmented(
+                options = RankScope.entries,
+                selected = scope,
+                onSelect = onScopeChange,
+                label = { if (it == RankScope.WEEK) "周" else "月" },
+            )
+            Spacer(Modifier.height(FinchSpace.sm))
+        }
+        if (byWeek && weekStart != null && thisWeekStart != null && onWeekChange != null) {
+            WeekSwitcher(
+                weekStart = weekStart,
+                thisWeekStart = thisWeekStart,
+                onWeekChange = onWeekChange,
+            )
+            Spacer(Modifier.height(FinchSpace.sm))
+        }
+        if (topGames.isEmpty()) {
+            Text(
+                if (byWeek) "这一周还没有记录" else "这段时间还没有记录",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            return@FinchCard
+        }
+        val shown = topGames.take(10)
+        shown.forEachIndexed { i, g ->
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -412,7 +461,7 @@ internal fun TopGamesCard(topGames: List<TopGameRow>) {
                     }
                 }
             }
-            if (i != topGames.take(10).lastIndex) FinchInsetDivider(startIndent = 40.dp)
+            if (i != shown.lastIndex) FinchInsetDivider(startIndent = 40.dp)
         }
     }
 }

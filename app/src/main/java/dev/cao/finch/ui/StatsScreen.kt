@@ -153,6 +153,12 @@ fun StatsScreen(viewModel: FinchViewModel) {
         .collectAsState(initial = emptyList())
     val topGames by remember(fromMillis, toMillis) { viewModel.topGamesWithCover(fromMillis, toMillis) }
         .collectAsState(initial = emptyList())
+    // v0.29.8：排行可以在「周 / 月」之间切。周口径复用作息卡那一个 weekStart，
+    // 两张卡翻周到同一处，避免「作息按周、排行按整月」两个口径摆一起对不上数。
+    // 默认给「周」：作息卡本来就是按周看的，进来先看到同一周的两个视角。
+    var rankScope by rememberSaveable { mutableStateOf(RankScope.WEEK) }
+    // 年视图没有周的概念，有效口径强制回月；不写回 state，免得在组合期改状态
+    val effectiveRankScope = if (mode == StatsMode.MONTH) rankScope else RankScope.MONTH
     val steamMin by remember { viewModel.steamTotalMinutes() }.collectAsState(initial = 0L)
     val distinctGames by remember(fromMillis, toMillis) { viewModel.distinctGamesInRange(fromMillis, toMillis) }
         .collectAsState(initial = 0)
@@ -182,6 +188,10 @@ fun StatsScreen(viewModel: FinchViewModel) {
     val rhythm = remember(spans, rhythmFrom, rhythmTo) { partitionRhythm(spans, rhythmFrom, rhythmTo, zone) }
     val weekday = rhythm.weekday
     val hours = rhythm.hours
+    // 周口径的排行：窗口与作息卡同一周，用同一组 rhythmFrom/rhythmTo，不另算
+    val weekTopGames by remember(rhythmFrom, rhythmTo) { viewModel.topGamesWithCover(rhythmFrom, rhythmTo) }
+        .collectAsState(initial = emptyList())
+    val shownTopGames = if (effectiveRankScope == RankScope.WEEK) weekTopGames else topGames
     val months by remember(fromMillis, toMillis) { viewModel.monthTotals(fromMillis, toMillis) }
         .collectAsState(initial = emptyList())
     // 时长目标（纯配置，导入页设置）
@@ -306,7 +316,19 @@ fun StatsScreen(viewModel: FinchViewModel) {
                 )
             }
         }
-        if (topGames.isNotEmpty()) item { TopGamesCard(topGames) }
+        // 排行：月视图给「周 / 月」切换；周口径与上方作息卡同步翻周
+        if (topGames.isNotEmpty() || weekTopGames.isNotEmpty()) {
+            item {
+                TopGamesCard(
+                    topGames = shownTopGames,
+                    scope = if (mode == StatsMode.MONTH) effectiveRankScope else null,
+                    onScopeChange = { rankScope = it },
+                    weekStart = weekStart,
+                    thisWeekStart = thisWeekStart,
+                    onWeekChange = { weekStart = it },
+                )
+            }
+        }
     }
 
     // 审查 B4：点标题打开的期数选择；选完立即生效并关闭

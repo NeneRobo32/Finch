@@ -1,6 +1,6 @@
 # Finch 路线图
 
-基线：`v0.29.7`（DB v23，versionCode 105）。
+基线：`v0.29.8`（DB v23，versionCode 106）。
 IGDB 已整体移除（国内直连不通）；HLTB 改走 Crashdummy 中转 API（Steam 直查+Nlib 英文名+按名搜，默认开、可一键关）；非英文库名走英文名解析链换英文线索再搜（Steam 中文反查/Bangumi 原名/eShop 英文段/游民星空/机翻已移除，v0.15.15–0.15.18）。
 下阶段主题：**待定**。v0.26 系列只做减法与纠错、不加功能——v0.26 修总结页三处显示口径（作息／高峰时段改看最近 90 天并按时长摊分、删与热力图重复的「活动」卡、总时长 hero 改玻璃），v0.26.1 把标签功能整体删掉（连同 `play_sessions.tag` 列，DB 21→22）。v0.27 修掉「90 天窗口把上周末算进本周」的读法问题（作息改按自然周独立、可翻页），并把通关进度写出超出／剩余、PSN 拿到白金时弹手绘庆祝。v0.28 给日程页新增第五个源「PSN 港服」：预购新作 + 正在打折，行内出原价划线／折扣角标／截止日。到此已经没有待办的技术债。
 
@@ -60,6 +60,7 @@ IGDB 已整体移除（国内直连不通）；HLTB 改走 Crashdummy 中转 API
 | v0.29.5 ✅已交付 | 按钮按压反馈修复 | 按钮点击无按压反馈：`DragGestureInspector` 用 `changedToUpIgnoreConsumed()` 判结束，但同链 `clickable` 会先消费 up，判定永远 false。改判 `pressed`，加 `pressProgress` 驱动的表面叠白提亮。新增 `docs/UI_DESIGN_GUIDE.md`（238 行）、`docs/CODE_REVIEW_2026-11-12.md`（693 行）、`docs/UI_REVIEW_2026-11-12.md`（320 行） | 23（不变） | 无 |
 | v0.29.6 ✅已交付 | 按下僵住修复＋审查第 0 轮 | 按下进度改由 clickable 的 `interactionSource.collectIsPressedAsState()` 驱动，抬手必归零、滑出收到 Cancel 也会放回；位移另用 `Initial` 阶段只读跟踪仅做液形拉伸。`DragGestureInspector` 加警告注释「别拿它给按钮做按下反馈」。UI 审查第 0 轮九条：`Glass.kt` clip 挪到 glassModifier 之后（原顺序让每帧 `BlurMaskFilter` 白跑）、`HomeCards` 列表行 `Card`→`Tile`、`FinchSheet`/`FinchDialog` 置空 backdrop＋关玻璃、`HeatmapCard` 年视图 365 格加 `remember`、`rememberSaveableStateHolder` 给每个 Tab 独立保存树（`StatsScreen` 的 mode/anchorMonth/weekStart 改 `rememberSaveable`）、`GameCover` 的 `ImageRequest` 加 `remember`、`HomeScreen` 把 `query` 移出 `LaunchedEffect` key、删 `ui/Motion.kt`、P0-A 分流（`catch` 保留 `failReason`，界面报具体原因；源真空走空态而非失败）。新增 `docs/UI_REVIEW_2026-11-13.md` 与三份子报告 | 23（不变） | 无 |
 | v0.29.7 ✅已交付 | 对比度＋快照时刻＋预览画廊 | 排行榜金银铜徽章白字对比度仅 1.80/2.19/2.98:1，字改深棕 `RankOnMetal = #241A05` 后 9.6/7.9/5.8:1 全过 AA。日程页离线回落缓存时不再假装数据是刚拉的：`fetchPsnEntries()` 返回 `Fetched(entries, staleAt)`，`LoadState.Ready` 加 `staleAt`，顶部插快照条（文案抽成纯函数 `staleSnapshotLabel` 并配 4 个单测）；缓存价不再写回关注表。新增 App 内预览画廊（设置→关于），渲染真实 composable（本机无 Android Studio，`@Preview` 的 layoutlib 跑不起来）。`app/build.gradle.kts` 加 Robolectric 离线罐查找，本机 220 个单测从 65 红转全绿 | 23（不变） | 无 |
+| v0.29.8 ✅已交付 | 排行周/月切换 | 总结页排行原来固定按「当期」算（月视图=整月），与上方按单独一周看的作息卡口径对不上。排行卡加「周 / 月」切换，周口径复用作息卡那一个 `weekStart`，两卡翻周联动；年视图自动隐藏切换并强制按月；空周给「这一周还没有记录」而不是吞掉整卡；新增 `RankScope` 枚举与 `TopGamesCard` 的 5 个可选参数（默认行为不变，年度报告传 null 即不显示切换；预览画廊接上了切换便于自查）。数据层零改动，只是换了 `topGamesWithCover(from, to)` 的窗口 | 23（不变） | 无 |
 | 远期 / 明确不做 | — | 前台自动识别、账号云同步、国际化明确不做 | — | — |
 
 ```mermaid
@@ -546,7 +547,7 @@ gantt
 15. **v0.26.1 ✅**：删标签功能——会话标签、记录页筛选、总结页标签分布、战报主打标签全部移除，`tag` 列真删（DB 21→22）。减法版，备注功能保留。
 16. **v0.27.0 ✅**：作息按自然周独立（可翻页）＋ 通关进度写出超出/剩余 ＋ 白金奖杯手绘庆祝。修读法问题 + 两处手感，DB 不变。
 17. **v0.28.0 ✅**：日程页第五个源「PSN 港服」——预购新作 + 正在打折，行内出原价划线／折扣角标／截止日；照抄商店 persisted query，无依赖无 token，9 秒出结果并落本地缓存。
-18. **v0.29.x ✅**：**还债轮**——照 `docs/CODE_REVIEW_2026-11-12.md` 与 `docs/UI_REVIEW_2026-11-13.md` 逐条过。0.29.0 把日程源收敛到三源 + 加愿望单（DB 22→23）；0.29.1–0.29.3 日程卡片三次重排（入口回页头 → 价格独立成列 → 卡高 186→120dp）；0.29.4 主页控件区砍掉一半高度 + 新增 `accentText` token + 48dp 命中区 + `GameNameIndex`；0.29.5–0.29.6 按钮按压反馈两次修复（手绘判定 → interactionSource）；0.29.6 顺带把 UI 审查第 0 轮九条纯 bug 全落（clip 顺序、Tile 降档、弹层置空 backdrop、热力图 remember、每个 Tab 独立保存树、ImageRequest remember、搜索不拉回顶部、删 Motion.kt、错误原因分流）；0.29.7 补上审查点名但前几个版本漏掉的两条（徽章对比度、快照时刻），并把预览画廊与 Robolectric 离线化补进来。
+18. **v0.29.x ✅**：**还债轮**——照 `docs/CODE_REVIEW_2026-11-12.md` 与 `docs/UI_REVIEW_2026-11-13.md` 逐条过。0.29.0 把日程源收敛到三源 + 加愿望单（DB 22→23）；0.29.1–0.29.3 日程卡片三次重排（入口回页头 → 价格独立成列 → 卡高 186→120dp）；0.29.4 主页控件区砍掉一半高度 + 新增 `accentText` token + 48dp 命中区 + `GameNameIndex`；0.29.5–0.29.6 按钮按压反馈两次修复（手绘判定 → interactionSource）；0.29.6 顺带把 UI 审查第 0 轮九条纯 bug 全落（clip 顺序、Tile 降档、弹层置空 backdrop、热力图 remember、每个 Tab 独立保存树、ImageRequest remember、搜索不拉回顶部、删 Motion.kt、错误原因分流）；0.29.7 补上审查点名但前几个版本漏掉的两条（徽章对比度、快照时刻），并把预览画廊与 Robolectric 离线化补进来；0.29.8 把排行口径与作息对齐（周/月切换，两卡共用 `weekStart`）。
 
 ### 下一步候选（v0.30 起，均未拍板）
 
