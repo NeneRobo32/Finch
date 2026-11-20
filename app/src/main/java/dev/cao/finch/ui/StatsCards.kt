@@ -3,9 +3,9 @@ package dev.cao.finch.ui
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.SizeTransform
-import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
@@ -351,21 +351,15 @@ internal enum class RankScope { WEEK, MONTH }
 /**
  * 排行卡当前要显示的内容。
  *
- * 包成 data class 是为了能当 [AnimatedContent] 的 targetState：
- * 结构相等 → 数据没变就不会重播动画，换周/换月才播。
+ * 刻意**不含** `weekStart`：换周时那一周的列表要等查询回来才到，
+ * 若把「周」也算进 targetState，点箭头的瞬间就会先播一次（用旧列表），
+ * 数据到了再播一次，两段动画叠起来就是抽动。这里只让列表本身驱动过渡——
+ * 换周 → 数据到 → 播一次，正好。
  */
 private data class RankContent(
     val scope: RankScope?,
-    val weekStart: LocalDate?,
     val games: List<TopGameRow>,
 )
-
-/**
- * 排行的「口径坐标」：只看用户选了什么，不看数据。
- *
- * 当 [AnimatedContent] 的 `contentKey` 用：同一周里数据分几拍到齐都不重播过渡。
- */
-private data class RankPhase(val scope: RankScope?, val weekStart: LocalDate?)
 
 /**
  * 游戏排行：封面 + 排名徽章 + 名字 + 时长（前 3 金银铜）。
@@ -434,13 +428,9 @@ internal fun TopGamesCard(
             }
         }
         AnimatedContent(
-            targetState = RankContent(scope, weekStart, topGames),
-            // 关键：动画只认「用户换了口径/换了周」，不认数据本身。
-            // 数据是分两拍到的——换周瞬间先拿到保留下来的旧列表，几十毫秒后
-            // 查询结果才把行数换掉。若把 games 也算进 key，第二拍会打断第一拍
-            // 正在播的过渡，重新起一遍，看起来就是抽搐（行数差得越多越明显）。
-            // 这里让同一周内的数据变化原地更新，高度交给 animateContentSize 补间。
-            contentKey = { RankPhase(it.scope, it.weekStart) },
+            targetState = RankContent(scope, topGames),
+            // 只让「列表内容 + 口径」驱动过渡：换周时那一周的数据要等查询回来才到，
+            // 过渡正好落在数据到达那一刻，只播一次。
             transitionSpec = {
                 (fadeIn(animationSpec = tween(200)) +
                     slideInVertically(animationSpec = tween(260, easing = FastOutSlowInEasing)) { h -> h / 16 })
@@ -449,7 +439,9 @@ internal fun TopGamesCard(
             },
             label = "rankContent",
         ) { content ->
-            Column(Modifier.animateContentSize(animationSpec = tween(240, easing = FastOutSlowInEasing))) {
+            // 这里**不要**再加 animateContentSize：外层 SizeTransform 已经在补间高度，
+            // 两层同时动会互相打架，看着比不动还抖。
+            Column {
                 if (content.games.isEmpty()) {
                     Text(
                         if (content.scope == RankScope.WEEK) "这一周还没有记录" else "这段时间还没有记录",
@@ -708,8 +700,14 @@ internal fun RhythmCard(
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 order.forEachIndexed { i, b ->
                     val ms = byBucket[b] ?: 0L
-                    val frac = ms.toFloat() / maxMs
                     val peak = ms >= maxMs && ms > 0
+                    // 换周时最大柱会变，所有柱的比例都要重算；直接换值就是七根柱一起瞬移。
+                    // 这里让每根柱自己补间过去，七根同时滑到新位置，像一次重排而不是抽搐。
+                    val frac by animateFloatAsState(
+                        targetValue = ms.toFloat() / maxMs,
+                        animationSpec = FinchMotion.settle(),
+                        label = "weekdayBar$i",
+                    )
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
                             labels[i],
@@ -749,7 +747,10 @@ internal fun RhythmCard(
                 }
             }
         }
-        if (hours.isNotEmpty()) {
+        // 高峰时段这一段**恒常占位**：原先写成 `if (hours.isNotEmpty())`，
+        // 换到没有记录的那一周时整段会先消失、数据回来又长出来，
+        // 卡片高度来回跳一次，看着就是抽动。柱子留空比整段闪现好读。
+        run {
             val byHour = hours.associate { it.bucket to (it.totalMs ?: 0L) }
             val maxMs = max(1L, byHour.values.maxOrNull() ?: 1L)
             Spacer(Modifier.height(FinchSpace.md))
@@ -768,8 +769,13 @@ internal fun RhythmCard(
             ) {
                 (0..23).forEach { h ->
                     val ms = byHour[h] ?: 0L
-                    val frac = ms.toFloat() / maxMs
                     val peak = ms >= maxMs && ms > 0
+                    // 与上面周几的柱子同理：换周后 24 根柱的相对高度全变，补间过去。
+                    val frac by animateFloatAsState(
+                        targetValue = ms.toFloat() / maxMs,
+                        animationSpec = FinchMotion.settle(),
+                        label = "hourBar$h",
+                    )
                     Box(
                         Modifier
                             .weight(1f)

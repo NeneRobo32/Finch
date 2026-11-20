@@ -89,6 +89,7 @@ import dev.cao.finch.ui.share.ReportPoster
 import dev.cao.finch.ui.share.posterPalette
 import dev.cao.finch.ui.theme.FinchShapes
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
 import java.time.Duration
 import java.time.LocalDate
 import java.time.YearMonth
@@ -96,6 +97,19 @@ import java.time.ZoneId
 import kotlin.math.max
 enum class StatsMode { MONTH, YEAR }
 private data class Quint<A, B, C, D, E>(val first: A, val second: B, val third: C, val fourth: D, val fifth: E)
+
+/**
+ * 一「份」作息数据：窗口与那一窗的会话绑在一起。
+ *
+ * 光保留会话不够——换周后窗口立刻变成新的一周，旧的会话全部落在窗口外，
+ * [partitionRhythm] 会把它们裁光，柱状图先塌成空白再长回来。
+ * 窗口跟着会话一起换，界面才是一整份地替换。
+ */
+private data class RhythmWindow(
+    val from: Long,
+    val to: Long,
+    val spans: List<dev.cao.finch.data.SessionSpan>,
+)
 
 /**
  * 像 [collectAsState] 一样收 Flow，但**换源时保留上一份数据**，等新查询回来再替换。
@@ -201,9 +215,17 @@ fun StatsScreen(viewModel: FinchViewModel) {
     val rhythmTo = remember(weekStart, zone) {
         weekStart.plusWeeks(1).atStartOfDay(zone).toInstant().toEpochMilli()
     }
-    val spans by remember(rhythmFrom, rhythmTo) { viewModel.sessionSpans(rhythmFrom, rhythmTo) }
-        .collectAsState(initial = emptyList())
-    val rhythm = remember(spans, rhythmFrom, rhythmTo) { partitionRhythm(spans, rhythmFrom, rhythmTo, zone) }
+    // 换周时若只保留 spans、却拿新窗口去摊分，旧会话全落在窗口外，
+    // 柱状图会先塌成一片空白再长回来——又多一次抽动。
+    // 所以把「窗口 + 那时的会话」当成一个整体一起保留：数据没回来之前，
+    // 界面显示的仍是上一周算好的那一份，新数据到了才整体换掉。
+    val rhythmWindow by remember(rhythmFrom, rhythmTo) {
+        viewModel.sessionSpans(rhythmFrom, rhythmTo)
+            .map { RhythmWindow(rhythmFrom, rhythmTo, it) }
+    }.collectRetaining(RhythmWindow(rhythmFrom, rhythmTo, emptyList()))
+    val rhythm = remember(rhythmWindow, zone) {
+        partitionRhythm(rhythmWindow.spans, rhythmWindow.from, rhythmWindow.to, zone)
+    }
     val weekday = rhythm.weekday
     val hours = rhythm.hours
     // 周口径的排行：窗口与作息卡同一周，用同一组 rhythmFrom/rhythmTo，不另算
