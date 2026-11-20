@@ -3,6 +3,7 @@ package dev.cao.finch.ui
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
@@ -360,6 +361,13 @@ private data class RankContent(
 )
 
 /**
+ * 排行的「口径坐标」：只看用户选了什么，不看数据。
+ *
+ * 当 [AnimatedContent] 的 `contentKey` 用：同一周里数据分几拍到齐都不重播过渡。
+ */
+private data class RankPhase(val scope: RankScope?, val weekStart: LocalDate?)
+
+/**
  * 游戏排行：封面 + 排名徽章 + 名字 + 时长（前 3 金银铜）。
  *
  * v0.29.8：月视图下可以在「周 / 月」之间切。周口径**复用作息卡那一个 weekStart**，
@@ -427,15 +435,21 @@ internal fun TopGamesCard(
         }
         AnimatedContent(
             targetState = RankContent(scope, weekStart, topGames),
+            // 关键：动画只认「用户换了口径/换了周」，不认数据本身。
+            // 数据是分两拍到的——换周瞬间先拿到保留下来的旧列表，几十毫秒后
+            // 查询结果才把行数换掉。若把 games 也算进 key，第二拍会打断第一拍
+            // 正在播的过渡，重新起一遍，看起来就是抽搐（行数差得越多越明显）。
+            // 这里让同一周内的数据变化原地更新，高度交给 animateContentSize 补间。
+            contentKey = { RankPhase(it.scope, it.weekStart) },
             transitionSpec = {
                 (fadeIn(animationSpec = tween(200)) +
                     slideInVertically(animationSpec = tween(260, easing = FastOutSlowInEasing)) { h -> h / 16 })
                     .togetherWith(fadeOut(animationSpec = tween(120)))
-                    .using(SizeTransform(clip = true) { _, _ -> FinchMotion.settle() })
+                    .using(SizeTransform(clip = false) { _, _ -> FinchMotion.settle() })
             },
             label = "rankContent",
         ) { content ->
-            Column {
+            Column(Modifier.animateContentSize(animationSpec = tween(240, easing = FastOutSlowInEasing))) {
                 if (content.games.isEmpty()) {
                     Text(
                         if (content.scope == RankScope.WEEK) "这一周还没有记录" else "这段时间还没有记录",
