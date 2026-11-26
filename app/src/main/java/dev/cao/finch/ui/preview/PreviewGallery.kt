@@ -306,7 +306,6 @@ fun PreviewGallery(onClose: () -> Unit) {
                 RhythmCard(
                     weekday = Demo.weekday,
                     months = Demo.months,
-                    hours = Demo.hours,
                     mode = mode,
                 )
 
@@ -552,7 +551,4 @@ private object Demo {
     val weekday: List<BucketTotal> = (0..6).map { BucketTotal(it, h(it % 3 + 1)) }
 
     val months: List<BucketTotal> = (1..12).map { BucketTotal(it, h(it % 5 * 2)) }
-
-    val hours: List<BucketTotal> = (0..23).map { BucketTotal(it, if (it in 20..23) h(2) else h(0, 40)) }
-
 }

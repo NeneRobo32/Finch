@@ -47,7 +47,7 @@ class FinchViewModel(app: Application) : AndroidViewModel(app) {
     fun monthTotals(fromMillis: Long, toMillis: Long) = sessionDao.observeMonthTotals(fromMillis, toMillis)
 
     /**
-     * 区间内的会话原始区间（v0.26）。周几/高峰时段不再是 SQL 一条一桶，
+     * 区间内的会话原始区间（v0.26）。周几不再是 SQL 一条一桶，
      * 由 [partitionRhythm] 在 Kotlin 里按时长摊分。
      */
     fun sessionSpans(fromMillis: Long, toMillis: Long) = sessionDao.observeSessionSpans(fromMillis, toMillis)

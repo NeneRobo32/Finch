@@ -8,10 +8,9 @@ import java.time.temporal.ChronoUnit
 import kotlin.math.max
 import kotlin.math.min
 
-/** 作息口径的聚合结果：周几 0=周日..6=周六（与 SQLite %w 一致），小时 0..23；只保留有数据且 >0 的桶 */
+/** 作息口径的聚合结果：周几 0=周日..6=周六（与 SQLite %w 一致）；只保留有数据且 >0 的桶 */
 internal data class RhythmBuckets(
     val weekday: List<BucketTotal>,
-    val hours: List<BucketTotal>,
 )
 
 private const val HOUR_MS = 3_600_000L
@@ -27,11 +26,11 @@ internal fun weekStartOf(date: java.time.LocalDate): java.time.LocalDate =
     date.minusDays((date.dayOfWeek.value - 1).toLong())
 
 /**
- * 把会话区间摊到「周几」与「小时」两个桶里（v0.26）。
+ * 把会话区间摊到「周几」桶里（v0.26；v0.29.13 删掉高峰时段后不再算小时桶）。
  *
  * 旧口径是 DAO 里 `strftime('%w'/'%H', startTime)` 分组：整条会话全记在开始时间那一格。
  * 于是 20:00 玩到 02:00 等于「20 点玩了 6 小时」，跨零点的会话也整条算在开始那天，
- * 「高峰时段」和「作息」都会被单条长会话带偏。这里改成按时长占比摊分：
+ * 「作息」会被单条长会话带偏。这里改成按时长占比摊分：
  * 每一格拿到「这段会话真正落在该格里的墙钟时间」× 有效时长占比
  * （effectiveMs / 墙钟时长）。
  *
@@ -47,7 +46,6 @@ internal fun partitionRhythm(
     zone: ZoneId = ZoneId.systemDefault(),
 ): RhythmBuckets {
     val weekday = DoubleArray(7)
-    val hour = DoubleArray(24)
     for (span in spans) {
         val wall = (span.endMillis - span.startMillis).toDouble()
         // wall <= 0 的脏数据（人为编辑成同一时刻）没有可摊的区间，整条记到开始那一格。
@@ -56,7 +54,6 @@ internal fun partitionRhythm(
             if (span.startMillis >= fromMillis && span.startMillis < toMillis) {
                 val zdt = Instant.ofEpochMilli(span.startMillis).atZone(zone)
                 weekday[zdt.dayOfWeek.value % 7] += span.effectiveMs.toDouble()
-                hour[zdt.hour] += span.effectiveMs.toDouble()
             }
             continue
         }
@@ -71,16 +68,12 @@ internal fun partitionRhythm(
             val segEnd = min(end, hourStart + HOUR_MS)
             val slice = (segEnd - cursor).toDouble() * share
             if (slice > 0.0) {
-                hour[zdt.hour] += slice
                 weekday[zdt.dayOfWeek.value % 7] += slice
             }
             cursor = segEnd
         }
     }
-    return RhythmBuckets(
-        weekday = weekday.toBuckets(),
-        hours = hour.toBuckets(),
-    )
+    return RhythmBuckets(weekday = weekday.toBuckets())
 }
 
 private fun DoubleArray.toBuckets(): List<BucketTotal> =

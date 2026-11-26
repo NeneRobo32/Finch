@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.29.13 (2026-11-26)
+
+### 删掉作息里的「高峰时段」
+
+作息卡原本并排放两组柱子：左边周几（周一到周日），右边「高峰时段」（0 点到 23 点）。
+第二组其实没有提供新信息——它和第一组是同一批会话的两种切法，横轴一密反而看不出规律，
+而这一段的柱子高度还带着「跨零点会话摊到哪一小时」这种没人关心的口径细节。既然数据本身
+也是按时长比例摊出来的（暂停段只能在库里按比例摊，没有起止时刻），不如直接删掉，
+只留周几这一组。
+
+- `StatsCards.kt`：`RhythmCard` 去掉 `hours` 形参，`750-804` 那段 24 根小时的柱子整段删除；
+  年视图副标题改成「按月 · 1…12 月」，不再提高峰时段。
+- `StatsRhythm.kt`：`RhythmBuckets` 只留 `weekday`，`partitionRhythm` 不再维护 `DoubleArray(24)`，
+  `return` 里也没有 `hours` 字段了。**逐小时切段保留**——跨零点的会话要按天切开才能落到各自的周几桶，
+  `HOUR_MS` 与 `ChronoUnit.HOURS` 仍然在用。
+- `StatsScreen.kt` / `YearReportScreen.kt` / `PreviewGallery.kt`：去掉 `hours` 的取值与实参，
+  显示条件只剩 `weekday.isNotEmpty()`。
+- `StatsRhythmTest.kt`：删掉所有 `r.hours.ms(...)` 断言，只断言周几桶。摊分口径本身没变。
+
+### 设置页「外观」分组默认收起
+
+设置页六个折叠分组里，只有「外观」是 `initiallyExpanded = true`，进设置页先看到一片开着的
+配色与玻璃开关，其余分组都收着，打开的顺序也不对。改成默认收起，各分组行为一致。
+
+- `ImportScreen.kt`：`FinchCollapsibleGroup(initiallyExpanded = false, enterOrder = 0)`。
+
+没有改的：`CHANGELOG` / `ROADMAP` 里的历史条目保留原文（v0.14 起「高峰时段」这个说法出现过多次，
+那些是当时的记录，不随这次改动回改）。README 的总结页一段改成只描述周几。
+
+versionCode 111 / versionName 0.29.13，DB 仍 v23 无迁移。
 ## 0.29.12 (2026-11-20)
 
 ### 其余卡片的同一处隐患：换期时先归零再填回

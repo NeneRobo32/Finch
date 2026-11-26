@@ -113,7 +113,6 @@ fun YearReportScreen(
         .collectAsState(emptyList())
     val rhythm = remember(spans, fromMillis, toMillis) { partitionRhythm(spans, fromMillis, toMillis, zone) }
     val weekday = rhythm.weekday
-    val hours = rhythm.hours
     val platforms by remember(fromMillis, toMillis) { viewModel.platformTotals(fromMillis, toMillis) }
         .collectRetaining(emptyList())
     val topGames by remember(fromMillis, toMillis) { viewModel.topGamesWithCover(fromMillis, toMillis) }
@@ -309,8 +308,8 @@ fun YearReportScreen(
         if (daily.isNotEmpty()) {
             item { HeatmapCard(daily = daily, mode = StatsMode.YEAR, anchorMonth = anchorMonth) }
         }
-        if (months.isNotEmpty() || hours.isNotEmpty()) {
-            item { RhythmCard(weekday = weekday, months = months, hours = hours, mode = StatsMode.YEAR) }
+        if (months.isNotEmpty()) {
+            item { RhythmCard(weekday = weekday, months = months, mode = StatsMode.YEAR) }
         }
         if (platforms.isNotEmpty()) item { PlatformCard(platforms, total) }
         if (topGames.isNotEmpty()) item { TopGamesCard(topGames) }

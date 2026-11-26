@@ -50,14 +50,14 @@ data class GameTotalMini(
     val totalMs: Long?,
 )
 
-/** 时段分布聚合桶（bucket=周几0-6 / 小时0-23） */
+/** 聚合桶（bucket 的含义由 DAO 决定：按月 1-12 / 按周几 0-6） */
 data class BucketTotal(
     val bucket: Int,
     val totalMs: Long?,
 )
 
 /**
- * 会话的原始区间（v0.26 高峰时段摊分用）。
+ * 会话的原始区间（v0.26 作息摊分用）。
  * [effectiveMs] 已扣暂停；[endMillis] 一定非空（只取已完成会话）。
  */
 data class SessionSpan(

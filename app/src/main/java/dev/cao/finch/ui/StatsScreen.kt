@@ -101,7 +101,8 @@ private data class Quint<A, B, C, D, E>(val first: A, val second: B, val third: 
  * 总结页（2026-10 UI 重构）：
  * 页头 +「月/年 + 期数切换」控制卡 → 玻璃大数字 hero → 本期报告 / 奖杯 / 热力 /
  * 平台 / 作息 / 排行，全部落在同一套 FinchCard 与图表配色里。
- * v0.26：「活动」卡被热力图完全覆盖，已删除；作息与高峰时段改看最近 90 天。
+ * v0.26：「活动」卡被热力图完全覆盖，已删除；作息改看最近 90 天。
+ * v0.29.13：作息卡删掉「高峰时段」（24 小时柱），只留周几。
  * 数据查询与分享逻辑不变。
  */
 @Composable
@@ -167,7 +168,7 @@ fun StatsScreen(viewModel: FinchViewModel) {
     val distinctGames by remember(fromMillis, toMillis) { viewModel.distinctGamesInRange(fromMillis, toMillis) }
         .collectRetaining(0)
     // v0.19.2：月视图按周几看作息，年视图按月看（一年里周几分布没有意义）
-    // v0.26：周几/高峰时段不再跟「当期」走，统一看最近 90 天。
+    // v0.26：周几不再跟「当期」走，统一看最近 90 天。
     // v0.27：改成「单独一周」——90 天滚动窗口会把过去几周的五六日也累加进来，
     // 本周五还没到，柱子上却已经有时间了，读起来是错的。这里只取选中的那一周。
     val today = remember { LocalDate.now() }
@@ -199,7 +200,6 @@ fun StatsScreen(viewModel: FinchViewModel) {
         partitionRhythm(rhythmWindow.spans, rhythmWindow.from, rhythmWindow.to, zone)
     }
     val weekday = rhythm.weekday
-    val hours = rhythm.hours
     // 周口径的排行：窗口与作息卡同一周，用同一组 rhythmFrom/rhythmTo，不另算
     val weekTopGames by remember(rhythmFrom, rhythmTo) { viewModel.topGamesWithCover(rhythmFrom, rhythmTo) }
         .collectRetaining(emptyList())
@@ -315,12 +315,11 @@ fun StatsScreen(viewModel: FinchViewModel) {
         }
         if (platforms.isNotEmpty()) item { PlatformCard(platforms, total) }
         // 月视图恒显示：这一周没记录时也要能翻回上一周，否则卡片整个消失就再也进不去
-        if (mode == StatsMode.MONTH || weekday.isNotEmpty() || months.isNotEmpty() || hours.isNotEmpty()) {
+        if (mode == StatsMode.MONTH || weekday.isNotEmpty() || months.isNotEmpty()) {
             item {
                 RhythmCard(
                     weekday = weekday,
                     months = months,
-                    hours = hours,
                     mode = mode,
                     weekStart = weekStart,
                     thisWeekStart = thisWeekStart,

@@ -8,9 +8,9 @@ import java.time.LocalDateTime
 import java.time.ZoneId
 
 /**
- * 作息/高峰时段摊分口径单测（v0.26）。
+ * 作息摊分口径单测（v0.26；v0.29.13 删高峰时段后只测周几桶）。
  *
- * 旧口径把整条会话全记在开始时间那一格，20:00 玩到 02:00 会被算成「20 点玩了 6 小时」。
+ * 旧口径把整条会话全记在开始那一天，20:00 玩到 02:00 会被整条算在周三。
  * 这里改成按时长占比摊到每一格，覆盖：整小时对齐、跨零点换天、暂停按比例摊、
  * 窗口裁剪、零长度脏数据、周几桶 0=周日。
  */
@@ -36,9 +36,6 @@ class StatsRhythmTest {
         val start = at("2026-11-04", 20)
         val end = at("2026-11-04", 22)
         val r = partitionRhythm(listOf(span(start, end, 2 * 3_600_000L)), window.first, window.second, zone)
-        assertEquals(3_600_000L, r.hours.ms(20))
-        assertEquals(3_600_000L, r.hours.ms(21))
-        assertEquals(0L, r.hours.ms(22))
         // 周三 = DayOfWeek 3 → 桶 3
         assertEquals(2 * 3_600_000L, r.weekday.ms(3))
     }
@@ -49,10 +46,7 @@ class StatsRhythmTest {
         val start = at("2026-11-04", 22)
         val end = at("2026-11-05", 2)
         val r = partitionRhythm(listOf(span(start, end, 4 * 3_600_000L)), window.first, window.second, zone)
-        assertEquals(3_600_000L, r.hours.ms(22))
-        assertEquals(3_600_000L, r.hours.ms(23))
-        assertEquals(3_600_000L, r.hours.ms(0))
-        assertEquals(3_600_000L, r.hours.ms(1))
+        // 跨零点要按各小时切段，2h 落到周三、2h 落到周四
         assertEquals(2 * 3_600_000L, r.weekday.ms(3)) // 周三
         assertEquals(2 * 3_600_000L, r.weekday.ms(4)) // 周四
     }
@@ -63,8 +57,7 @@ class StatsRhythmTest {
         val start = at("2026-11-04", 20)
         val end = at("2026-11-04", 22)
         val r = partitionRhythm(listOf(span(start, end, 1 * 3_600_000L)), window.first, window.second, zone)
-        assertEquals(1_800_000L, r.hours.ms(20))
-        assertEquals(1_800_000L, r.hours.ms(21))
+        assertEquals(1 * 3_600_000L, r.weekday.ms(3))
     }
 
     @Test
@@ -73,15 +66,14 @@ class StatsRhythmTest {
         val start = at("2026-11-04", 19)
         val end = at("2026-11-04", 23)
         val r = partitionRhythm(listOf(span(start, end, 4 * 3_600_000L)), at("2026-11-04", 20), at("2026-11-04", 23), zone)
-        assertEquals(0L, r.hours.ms(19))
-        assertEquals(3 * 3_600_000L, listOf(20, 21, 22).sumOf { r.hours.ms(it) })
+        // 窗口外那 1h 被裁掉，只剩 3h 参与摊分
+        assertEquals(3 * 3_600_000L, r.weekday.ms(3))
     }
 
     @Test
     fun `零长度脏数据_整条记到开始那格且不崩`() {
         val start = at("2026-11-04", 20)
         val r = partitionRhythm(listOf(span(start, start, 600_000L)), window.first, window.second, zone)
-        assertEquals(600_000L, r.hours.ms(20))
         assertEquals(600_000L, r.weekday.ms(3))
     }
 
@@ -92,14 +84,12 @@ class StatsRhythmTest {
         val end = at("2026-11-01", 11)
         val r = partitionRhythm(listOf(span(start, end, 3_600_000L)), window.first, window.second, zone)
         assertEquals(3_600_000L, r.weekday.ms(0))
-        assertEquals(3_600_000L, r.hours.ms(10))
     }
 
     @Test
     fun `空输入_返回空桶`() {
         val r = partitionRhythm(emptyList(), window.first, window.second, zone)
         assertEquals(emptyList<dev.cao.finch.data.BucketTotal>(), r.weekday)
-        assertEquals(emptyList<dev.cao.finch.data.BucketTotal>(), r.hours)
     }
 
     // ---- 每周独立视图的边界（v0.27） ----

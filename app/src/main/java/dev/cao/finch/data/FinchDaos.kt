@@ -223,7 +223,7 @@ interface SessionDao {
     fun observeMonthTotals(fromMillis: Long, toMillis: Long): Flow<List<BucketTotal>>
 
     /**
-     * 区间内的会话原始区间（v0.26 高峰时段按小时摊分用）。
+     * 区间内的会话原始区间（v0.26 作息按时长摊分用）。
      *
      * 旧口径把整条会话按时长全算进 startTime 那个小时，一次 20:00 玩到 02:00 的记录
      * 会被记成 20 点玩了 6 小时，峰值时段直接失真。摊分只能在 Kotlin 里做

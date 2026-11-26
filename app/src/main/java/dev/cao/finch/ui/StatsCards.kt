@@ -660,8 +660,9 @@ private fun heatColor(frac: Float, blank: Boolean): Color {
  * 作息：
  * - 月视图 → 单独一周，周一…周日（可前后翻周）
  * - 年视图 → 按月（1…12）
- * - 两者都带「高峰时段」（按小时）
  *
+ * v0.29.13 删掉了「高峰时段」（24 小时柱）：它和上面周几的柱子表达同一件事，
+ * 却恒常占着一大块高度，没记录时是一排空柱。
  * v0.27 起月视图按周独立看：窗口就是选中的那一周（周一到周日），
  * 不再滚动聚合最近 90 天——那样本周五/六/日还没到，柱子上却已经有过去几周的时间了。
  * 时长按小时摊分，跨时段的会话不会整条算进开始那一格（口径见 [partitionRhythm]）。
@@ -670,7 +671,6 @@ private fun heatColor(frac: Float, blank: Boolean): Color {
 internal fun RhythmCard(
     weekday: List<dev.cao.finch.data.BucketTotal>,
     months: List<dev.cao.finch.data.BucketTotal>,
-    hours: List<dev.cao.finch.data.BucketTotal>,
     mode: StatsMode,
     weekStart: LocalDate? = null,
     thisWeekStart: LocalDate? = null,
@@ -679,7 +679,7 @@ internal fun RhythmCard(
     val byMonth = mode == StatsMode.YEAR
     FinchCard(
         title = if (byMonth) "每月分布" else "作息",
-        subtitle = if (byMonth) "按月 · 高峰时段按整年计" else "按周看 · 周一至周日",
+        subtitle = if (byMonth) "按月 · 1…12 月" else "按周看 · 周一至周日",
         icon = Icons.Filled.Schedule,
     ) {
         if (byMonth) {
@@ -744,61 +744,6 @@ internal fun RhythmCard(
                             textAlign = TextAlign.End,
                         )
                     }
-                }
-            }
-        }
-        // 高峰时段这一段**恒常占位**：原先写成 `if (hours.isNotEmpty())`，
-        // 换到没有记录的那一周时整段会先消失、数据回来又长出来，
-        // 卡片高度来回跳一次，看着就是抽动。柱子留空比整段闪现好读。
-        run {
-            val byHour = hours.associate { it.bucket to (it.totalMs ?: 0L) }
-            val maxMs = max(1L, byHour.values.maxOrNull() ?: 1L)
-            Spacer(Modifier.height(FinchSpace.md))
-            Text(
-                "高峰时段",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Spacer(Modifier.height(FinchSpace.xs))
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(58.dp),
-                verticalAlignment = Alignment.Bottom,
-                horizontalArrangement = Arrangement.spacedBy(2.dp),
-            ) {
-                (0..23).forEach { h ->
-                    val ms = byHour[h] ?: 0L
-                    val peak = ms >= maxMs && ms > 0
-                    // 与上面周几的柱子同理：换周后 24 根柱的相对高度全变，补间过去。
-                    val frac by animateFloatAsState(
-                        targetValue = ms.toFloat() / maxMs,
-                        animationSpec = FinchMotion.settle(),
-                        label = "hourBar$h",
-                    )
-                    Box(
-                        Modifier
-                            .weight(1f)
-                            .fillMaxHeight(),
-                        contentAlignment = Alignment.BottomCenter,
-                    ) {
-                        Box(
-                            Modifier
-                                .fillMaxWidth()
-                                .fillMaxHeight(frac.coerceIn(0.04f, 1f))
-                                .clip(RoundedCornerShape(2.dp))
-                                .background(
-                                    if (peak) MaterialTheme.colorScheme.tertiary
-                                    else MaterialTheme.colorScheme.primary.copy(alpha = 0.45f + 0.3f * frac)
-                                ),
-                        )
-                    }
-                }
-            }
-            Spacer(Modifier.height(FinchSpace.xs))
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                listOf("0", "6", "12", "18", "23").forEach {
-                    Text("${it}点", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         }

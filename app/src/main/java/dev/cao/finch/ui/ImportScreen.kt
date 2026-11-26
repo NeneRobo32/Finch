@@ -56,8 +56,8 @@ import dev.cao.finch.ui.theme.ThemeMode
 /**
  * 设置页（原「导入」页，2026-10 UI 重构；2026-11 改成分类折叠）：
  * 原来一长条卡片列表，现在按用途收成六个可折叠分组——外观 / 数据同步 / 时长目标 /
- * 数据安全 / 实验性功能 / 关于。默认只展开「外观」，其余收起后各占一行，
- * 长页面一眼能扫完；展开状态用 rememberSaveable 保存，切走再回来不会自己收起来。
+ * 数据安全 / 实验性功能 / 关于。v0.29.13 起默认**全部收起**（原先默认展开「外观」），
+ * 六组各占一行，长页面一眼能扫完；展开状态用 rememberSaveable 保存，切走再回来不会自己收起来。
  */
 @Composable
 fun ImportScreen(
@@ -112,7 +112,7 @@ fun ImportScreen(
                     subtitle = "亮暗模式与主题风格",
                     summary = finchThemeState?.theme?.label,
                     icon = Icons.Filled.Palette,
-                    initiallyExpanded = true,
+                    initiallyExpanded = false,
                     enterOrder = 0,
                 ) {
                     FinchCard {

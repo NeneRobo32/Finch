@@ -1,6 +1,6 @@
 # Finch 路线图
 
-基线：`v0.29.12`（DB v23，versionCode 110）。
+基线：`v0.29.13`（DB v23，versionCode 111）。
 IGDB 已整体移除（国内直连不通）；HLTB 改走 Crashdummy 中转 API（Steam 直查+Nlib 英文名+按名搜，默认开、可一键关）；非英文库名走英文名解析链换英文线索再搜（Steam 中文反查/Bangumi 原名/eShop 英文段/游民星空/机翻已移除，v0.15.15–0.15.18）。
 下阶段主题：**待定**。v0.26 系列只做减法与纠错、不加功能——v0.26 修总结页三处显示口径（作息／高峰时段改看最近 90 天并按时长摊分、删与热力图重复的「活动」卡、总时长 hero 改玻璃），v0.26.1 把标签功能整体删掉（连同 `play_sessions.tag` 列，DB 21→22）。v0.27 修掉「90 天窗口把上周末算进本周」的读法问题（作息改按自然周独立、可翻页），并把通关进度写出超出／剩余、PSN 拿到白金时弹手绘庆祝。v0.28 给日程页新增第五个源「PSN 港服」：预购新作 + 正在打折，行内出原价划线／折扣角标／截止日。到此已经没有待办的技术债。
 
@@ -65,6 +65,7 @@ IGDB 已整体移除（国内直连不通）；HLTB 改走 Crashdummy 中转 API
 | v0.29.10 ✅已交付 | 排行过渡补两拍问题（0.29.11 又修一轮） | 0.29.9 的 `AnimatedContent` 把 `games` 也算进 `targetState`，而换周时数据分两拍到（先保留旧列表、后到新查询），第二拍会打断第一拍正在播的过渡重起一遍，行数差越大越明显。改法：加 `contentKey = { RankPhase(scope, weekStart) }` 让过渡只认口径与周、不认数据；同周内数据变化原地更新，高度交给 `animateContentSize(tween(240))`；`SizeTransform(clip = false)` 避免动画期间裁切边缘。事后看这个做法把 `games` 当成了过渡的开关，0.29.11 改成只认「口径 + 周」 | 23（不变） | 无 |
 | v0.29.11 ✅已交付 | 换周抽动的真源在作息卡 | 0.29.10 之后切周/切月不抽了，但翻周仍抖，问题不在排行卡：`spans` 用 `collectAsState(initial=emptyList())` 收，新 Flow 第一发未到时柱状图先塌成 0；即便留住 spans，`rhythmFrom/rhythmTo` 已换新窗，旧会话全被裁光，柱子照样塌；每根柱 `ms/maxMs` 在换周后统一瞬移；`高峰时段` 整段包在 `if (hours.isNotEmpty())` 里会先消失再长出来。改法：新增 `RhythmWindow(from,to,spans)` 把窗口与会话绑成一份整体保留、`spans` 改走 `collectRetaining`、周几与小时柱都改 `animateFloatAsState(FinchMotion.settle())` 各自补间、`高峰时段` 段恒定占位 | 23（不变） | 无 |
 | v0.29.12 ✅已交付 | 其余卡片换期不再先归零 | 0.29.11 只修了作息卡。按同一模式把全工程 62 处 `collectAsState` 过了一遍，确认「随窗口重建的 Flow + initial 空值」还剩 `StatsScreen` 六条与 `YearReportScreen` 七条，统一改成 `collectRetaining`；`collectRetaining` 从 private 提到新文件 `ui/FlowState.kt`（internal），`RhythmWindow` 一并挪过去供年度报告复用。没改的三类理由写进 CHANGELOG：窗口不变 / 整页导航 / ViewModel 固定 StateFlow | 23（不变） | 无 |
+| v0.29.13 ✅已交付 | 删「高峰时段」＋外观分组默认收起 | 作息卡只留周几柱：「高峰时段」那 24 根小时柱跟周几柱表达同一件事，整段删掉（`RhythmCard` 去掉 `hours` 形参、`RhythmBuckets` 只留 `weekday`；`partitionRhythm` 的逐小时切段仍保留——跨零点摊到周几靠它）。设置页「外观」分组原 `initiallyExpanded = true` 默认展开，改成默认收起，与其余分组一致 | 23（不变） | 无 |
 | 远期 / 明确不做 | — | 前台自动识别、账号云同步、国际化明确不做 | — | — |
 
 ```mermaid
